@@ -59,7 +59,8 @@ class Palette:
     
 class Bot:
     CONF, DELAY, STEP = tuple(i for i in range(3))
-    PALETTE_PRESETS = {'1' : (('palette_mspaint.png', 10, 2), 'canvas_mspaint.png'), '2' : (('palette_skribbl.png', 11, 2), 'canvas_skribbl.png')}
+    PALETTE_PRESETS = {'1' : (('assets/palette_mspaint.png', 10, 2), 'assets/canvas_mspaint.png'), 
+        '2' : (('assets/palette_skribbl.png', 11, 2), 'assets/canvas_skribbl.png')}
 
     def __init__(self):
         self.terminate = False
@@ -185,7 +186,7 @@ class Window:
         
         # Work to do after the window is visible (necessary for certain widgets to have their widths and heights established
         self._tlabel['wraplength'] = self._tpanel.winfo_width() - 5 * 2
-        self._set_img('sample.png')
+        self._set_img('assets/sample.png')
         
         self._root.mainloop()
         
@@ -284,7 +285,7 @@ class Window:
         e.delete(0, END)
         e.insert(0, txt)
         
-    def _set_img(self, fname='result.png'):
+    def _set_img(self, fname='assets/result.png'):
         self._imname = fname
         img = Image.open(self._imname)
         self._ipanel.update()
@@ -297,8 +298,8 @@ class Window:
     
     def _on_search_img(self):
         try:
-            urllib.request.urlretrieve(self._ientry.get(), 'result.png')
-            self._set_img('result.png')
+            urllib.request.urlretrieve(self._ientry.get(), 'assets/result.png')
+            self._set_img('assets/result.png')
         except:
             self._tlabel['text'] = 'Invalid URL submitted'
     
