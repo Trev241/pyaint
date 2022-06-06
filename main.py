@@ -3,7 +3,8 @@ from pyaint import Window, Bot
 import keyboard
 
 def on_key(event):
-    bot.terminate = True
+    if event.name == 'esc':
+        bot.terminate = True
 
 bot = Bot()
 keyboard.on_press(on_key)
