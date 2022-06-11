@@ -1,185 +1,13 @@
-from math import sqrt
-import pyautogui
+import time
 import tkinter
 import urllib.request
-import time
+import utils
 
-from PIL import ImageTk, Image
-
+from bot import Bot
+from PIL import Image, ImageTk
 from tkinter import Canvas, Label, Scrollbar, Tk, Button, Radiobutton, messagebox, Checkbutton, DoubleVar, IntVar, StringVar, Entry, END
 from tkinter.ttk import LabelFrame, Frame, Scale
 
-def adjusted_img_size(img, ad):
-    '''
-    Recalculates the width and height of an image to fit within a given space (represented by ad)
-    If either dimension exceeds the available space, the image will be shrunk to fit accordingly
-    without affecting its aspect ratio. This will result in dead space which is commonly seen in the
-    form of black boxes on some applications.
-    '''
-    
-    aratio = img.size[0] / img.size[1]  
-    ew = aratio * ad[1]                # Estimated width if full available height is to be used
-    eh = (1 / aratio) * ad[0]          # Estimated height if full available width is to be used
-    ew = int(min(ew, ad[0]))
-    eh = int(min(eh, ad[1]))
-    
-    return ew, eh
-
-class Palette:
-    def __init__(self, box, c_in_row, rows):
-        self.box = box
-        self.c_in_row = c_in_row
-        self.rows = rows
-        self._c_size = int(box[2] // c_in_row)
-        
-        pix = pyautogui.screenshot(region=box).load()
-        x, y = self._c_size // 2, self._c_size // 2
-        end = c_in_row * self._c_size
-
-        # Obtain RGB values of palette colors along with their coordinates
-        # COLOR LAYOUT    :    ((r, g, b) : (x, y))
-        self.colors_pos = dict()
-        self.colors = set()
-        for i in range(c_in_row * 2):
-            col = (pix[x, y][:3])
-            self.colors_pos[col] = (box[0] + x, box[1] + y)
-            self.colors.add(col)
-
-            x = (x + self._c_size) % end
-            y = y + (self._c_size if i == c_in_row - 1 else 0)
-
-    def nearest_color(self, query):
-        return min(self.colors, key=lambda color: Palette.euclid_dist(color, query))
-
-    @staticmethod
-    def euclid_dist(colx, coly):
-        return sqrt(sum((s - q) ** 2 for s, q in zip(colx, coly)))
-    
-class Bot:
-    CONF, DELAY, STEP, ACCURACY = tuple(i for i in range(4))
-    PALETTE_PRESETS = {
-        '1' : (('assets/palette_mspaint.png', 10, 2), 'assets/canvas_mspaint.png', 'assets/custom_cols_mspaint.png'), 
-        '2' : (('assets/palette_skribbl.png', 11, 2), 'assets/canvas_skribbl.png')
-    }
-    
-    IGNORE_WHITE = 1
-    USE_CUSTOM_COLORS = 2
-
-    def __init__(self):
-        self.terminate = False
-        self.settings = [.75, .05, 5, .75]
-        self.ptype = '1'
-        self.options = Bot.IGNORE_WHITE
-        
-        pyautogui.PAUSE = 0.0
-    
-    def init_tools(self, grace_time):
-        time.sleep(grace_time)
-        
-        prst = Bot.PALETTE_PRESETS[self.ptype]
-        pbox = pyautogui.locateOnScreen(prst[0][0], confidence=self.settings[Bot.CONF])
-        self._canvas = pyautogui.locateOnScreen(prst[1], confidence=self.settings[Bot.CONF])
-        if self.ptype == '1':
-            self._custom_colors = pyautogui.locateOnScreen(prst[2], confidence=self.settings[Bot.CONF])
-
-        if pbox is None or self._canvas is None or (self._custom_colors is None and self.ptype == 1):
-            return False
-        self._palette = Palette(pbox, prst[0][1], prst[0][2])
-        
-        return True
-    
-    def test(self):
-        box = self._canvas
-        locs = [c[2] for c in self._palette.colors] + [(box[0], box[1]), (box[0] + box[2], box[1] + box[3])]
-        for l in locs:
-            pyautogui.moveTo(l)
-            time.sleep(.25)
-
-    def draw(self, file, flags):
-        '''
-        Draws the image while taking all settings into consideration.
-        The bot's drawing behaviour can be adjusted by modifying the values of
-        settings and the flags submitted during this function's call
-        '''
-
-        self.terminate = False
-        step = int(self.settings[Bot.STEP])
-        
-        img = Image.open(file).convert('RGBA')
-        x, y, cw, ch = self._canvas
-        tw, th = tuple(int(d // step) for d in adjusted_img_size(img, (cw, ch)))
-        xo = x = x + ((cw - tw * step) // 2)    # Center the drawing correctly
-        y += ((ch - th * step) // 2)
-    
-        img_small = img.resize((tw, th), resample=Image.NEAREST)
-        pix = img_small.load()
-        w, h = img_small.size
-        start = xo, y
-
-        cmap = dict()
-        nearest_colors = dict()
-        old_col = None
-    
-        for i in range(h):
-            for j in range(w): 
-                r, g, b = pix[j, i][:3]
-                
-                if flags & Bot.USE_CUSTOM_COLORS:
-                    col = near = (r, g, b)
-                    if len(cmap.keys()) > 0:
-                        near = min(cmap.keys(), key=lambda c : Palette.euclid_dist(c, col))
-                    # Find the euclidean distance of the furthest color
-                    max_dist = sqrt( sum( max( 255 - col[i], col[i] - 0) ** 2 for i in range(len(col)) ) )
-                    col = near if (max_dist - Palette.euclid_dist(near, col)) / max_dist >= self.settings[Bot.ACCURACY] else col
-                else:
-                    # Find nearest color. Avoid recomputing for colors encountered before.
-                    col = self._palette.nearest_color((r, g, b)) if (r, g, b) not in nearest_colors else nearest_colors[(r, g, b)]
-                    nearest_colors[(r, g, b)] = col
-
-                # End brush stroke when...
-                # - a new color is encountered 
-                # - the brush is at the end of the row
-                if j == w - 1 or (old_col != None and old_col != col):
-                    end = (x, y)
-                    if not ((flags & Bot.IGNORE_WHITE) and old_col == (255, 255, 255)):
-                        lines = cmap.get(old_col, [])
-                        lines.append( (start, end) )
-                        cmap[old_col] = lines 
-                    start = (xo, y + step) if j == w - 1 else (x + step, y)
-    
-                old_col = col
-                x += step
-            x = xo
-            y += step
-            
-        for c, lines in cmap.items():
-            if c in self._palette.colors:
-                pyautogui.click(self._palette.colors_pos[c], clicks=2, interval=.25)
-            else:
-                cc_box = self._custom_colors
-                pyautogui.PAUSE = .025
-                pyautogui.click( (cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2 ), clicks=2, interval=.25)
-                pyautogui.press('tab', presses=7, interval=.05)
-                for val in c:
-                    numbers = (d for d in str(val))
-                    for n in numbers:
-                        pyautogui.press(str(n))
-                    pyautogui.press('tab')
-                pyautogui.press('tab')
-                pyautogui.press('enter')
-                pyautogui.PAUSE = 0.0
-
-            for line in lines:
-                if self.terminate:
-                    pyautogui.mouseUp()
-                    return False
-                
-                time.sleep(self.settings[Bot.DELAY])
-                pyautogui.moveTo(line[0])
-                pyautogui.dragTo(line[1])
-                
-        return True       
-  
 class Window:
     _SLIDER_TOOLTIPS = ('The confidence factor affects the bot\'s accuracy to find its tools. ' + 
                         'Lower confidence allows more room for error but is just as likely to generate false positives. ' + 
@@ -334,7 +162,6 @@ class Window:
         frame.columnconfigure(1, weight=1)
         frame.rowconfigure(0, weight=1)
         frame.rowconfigure(1, weight=1)
-        # frame.bind('<Configure>', self._on_resize)
 
         self._imname = 'sample.png'
         self._ilabel = Label(frame)
@@ -369,12 +196,9 @@ class Window:
         self._imname = fname
         img = Image.open(self._imname)
         self._ipanel.update()
-        size = adjusted_img_size(img, (self._ipanel.winfo_width(), self._ipanel.winfo_height()) )
-        self._img = ImageTk.PhotoImage(img.resize(adjusted_img_size(img, size)))
+        size = utils.adjusted_img_size(img, (self._ipanel.winfo_width(), self._ipanel.winfo_height()) )
+        self._img = ImageTk.PhotoImage(img.resize(utils.adjusted_img_size(img, size)))
         self._ilabel['image'] = self._img
-        
-    # def _on_resize(self, event):
-    #     self._set_img()    
     
     def _on_search_img(self):
         try:
@@ -392,7 +216,8 @@ class Window:
             self._tlabel['text'] = 'Found tools successfully!'
         else:
             messagebox.showerror(self.title, 'Failed to find tools.\n1. Do not obstruct the palette and the canvas\n2. ' + 
-                'Lower the confidence factor\n3. Ensure that the correct window is maximized\n4. Choose the correct application')
+                'Lower the confidence factor\n3. Ensure that the correct window is maximized\n4. Choose the correct application' +
+                '\n5. Ensure that you have your screenshots ready in your assets folder')
         
         self._root.deiconify()
     

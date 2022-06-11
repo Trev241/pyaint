@@ -1,4 +1,5 @@
-from pyaint import Window, Bot
+from ui import Window
+from bot import Bot
 
 import keyboard
 
