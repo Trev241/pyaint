@@ -7,6 +7,8 @@ def on_key(event):
     if event.name == 'esc':
         bot.terminate = True
 
-bot = Bot()
-keyboard.on_press(on_key)
-window = Window('pyaint', bot, 650, 550, 5, 5)
+if __name__ == '__main__':
+    keyboard.on_press(on_key)
+
+    bot = Bot()
+    Window('pyaint', bot, 700, 550, 5, 5)

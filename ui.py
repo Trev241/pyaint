@@ -1,3 +1,4 @@
+import re
 import time
 import tkinter
 import urllib.request
@@ -5,7 +6,8 @@ import utils
 
 from bot import Bot
 from PIL import Image, ImageTk
-from tkinter import Canvas, Label, Scrollbar, Tk, Button, Radiobutton, messagebox, Checkbutton, DoubleVar, IntVar, StringVar, Entry, END
+from threading import Thread
+from tkinter import Canvas, Label, Scrollbar, Tk, Button, messagebox, Checkbutton, DoubleVar, IntVar, Entry, END
 from tkinter.ttk import LabelFrame, Frame, Scale
 
 class Window:
@@ -43,6 +45,7 @@ class Window:
         self.tfnt = ('Trebuchet MS', 9, 'bold')
         self.font = ('Trebuchet MS', 9)
         self.title = title
+        self.draw_thread = Thread(target=self.start)
         
         # CONTROL PANEL    :    [0, 0]
         self._cpanel = self._init_cpanel()
@@ -58,7 +61,7 @@ class Window:
         self._tpanel.update()
         
         # Work to do after the window is visible (necessary for certain widgets to have their widths and heights established
-        self._tlabel['wraplength'] = self._tpanel.winfo_width() - 5 * 2
+        self.tlabel['wraplength'] = self._tpanel.winfo_width() - 5 * 2
         self._set_img('assets/sample.png')
         
         self._root.mainloop()
@@ -80,34 +83,58 @@ class Window:
         self._canvas.bind('<Configure>', self._cpanel_cvs_config)
         self._cframe.bind('<Configure>', self._cpanel_frm_config)
 
-        self._cframe.columnconfigure(0, weight=1)
+        self._cframe.columnconfigure(0, weight=2)
+        self._cframe.columnconfigure(1, weight=1)
         for i in range(14):
             self._cframe.rowconfigure(i, weight=1)
 
         curr_row = 0
 
         # Options
-        btn_names = ('Setup', 'Test', 'Start')
+        btn_names = (
+            'Setup', 
+            'Test', 
+            'Start'
+        )
         buttons = []
         for i in range(len(btn_names)):
             b = Button(self._cframe, text=btn_names[i], font=self.font)
-            b.grid(column=0, row=i, padx=5, pady=5, sticky='ew')
+            b.grid(column=0, row=i, columnspan=2, padx=5, pady=5, sticky='ew')
             buttons.append(b)
         buttons[0]['command'] = self.setup
         buttons[1]['command'] = self.bot.test
         buttons[2]['command'] = self.start
         
-        self._palbel = Label(self._cframe, text='Palette Type', font=self.tfnt)
-        self._palbel.grid(column=0, row=3, padx=5, pady=5, sticky='w')
-        self._pvarbl = StringVar(self._cframe, '1')
-        pvalues = (('MS Paint', '1'), ('skribble.io', '2'))
+        self._palbel = Label(self._cframe, text='Palette Dimensions (W x H)', font=self.tfnt)
+        self._palbel.grid(column=0, row=3, columnspan=2, padx=5, pady=5, sticky='w')
+        self._palblr = Label(self._cframe, text='Rows: ', font=self.font)
+        self._parows = Entry(self._cframe, width=5)
+        self._palblc = Label(self._cframe, text='Columns: ', font=self.font)
+        self._pacols = Entry(self._cframe, width=5)
 
-        curr_row = 4
-        for i in range(len(pvalues)):
-            Radiobutton(self._cframe, text=pvalues[i][0], 
-                value=pvalues[i][1], variable=self._pvarbl, 
-                command=self._on_click_rbtn).grid(column=0, row=i + curr_row, sticky='w')
-        curr_row += len(pvalues)
+        self._parows.insert(0, '2')
+        self._pacols.insert(0, '10')
+        vcmd = (self._root.register(self._validate_dimensions), '%P')
+        ivcmd = (self._root.register(self._on_invalid_dimensions),)
+        self._parows.config(
+            validate='all', 
+            validatecommand=vcmd, 
+            invalidcommand=ivcmd
+        )
+        self._parows.bind('<FocusOut>', self._on_update_dimensions)
+        self._parows.bind('<Return>', self._on_update_dimensions)
+        self._pacols.config(
+            validate='all',
+            validatecommand=vcmd,
+            invalidcommand=ivcmd
+        )
+        self._pacols.bind('<FocusOut>', self._on_update_dimensions)
+        self._pacols.bind('<Return>', self._on_update_dimensions)
+        self._palblr.grid(column=0, row=4, sticky='w', padx=5, pady=5)
+        self._parows.grid(column=1, row=4, sticky='ew', padx=5, pady=5)
+        self._palblc.grid(column=0, row=5, sticky='w', padx=5, pady=5)
+        self._pacols.grid(column=1, row=5, sticky='ew', padx=5, pady=5)
+        curr_row = 6
 
         # For every slider option in options, option layout is    :    (name, default, from, to)
         defaults = self.bot.settings
@@ -127,12 +154,12 @@ class Window:
             self._optslid[i].set(self._options[i][1])
             self._optslid[i].name = f"scale{i}"
             self._optslid[i].set(defaults[i])
-            self._optlabl[i].grid(column=0, row=(i * 2) + curr_row, padx=5, sticky='w')
-            self._optslid[i].grid(column=0, row=(i * 2) + curr_row + 1, padx=5, sticky='ew')
+            self._optlabl[i].grid(column=0, row=(i * 2) + curr_row, columnspan=2,  padx=5, sticky='w')
+            self._optslid[i].grid(column=0, row=(i * 2) + curr_row + 1, columnspan=2,  padx=5, sticky='ew')
         curr_row += size * 2
         
         self._misclbl = Label(self._cframe, text='Misc Settings', font=self.tfnt)
-        self._misclbl.grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._misclbl.grid(column=0, row=curr_row, columnspan=2, padx=5, pady=5, sticky='w')
         curr_row += 1
 
         misc_opt_names = ('Ignore white pixels', 'Use custom colors')
@@ -142,7 +169,7 @@ class Window:
             # The checkbutton submits the index of the option to the callback
             cb = Checkbutton(self._cframe, text=misc_opt_names[i], variable=self._checkbutton_vars[i], 
                 font=self.font, command=lambda val=options[i], index=i: self._on_check(index, val))
-            cb.grid(column=0, row=i + curr_row, padx=5, sticky='w')
+            cb.grid(column=0, row=i + curr_row, columnspan=2, padx=5, sticky='w')
         curr_row += len(misc_opt_names)
 
         return oframe
@@ -155,6 +182,17 @@ class Window:
         # Makes the canvas scrollable
         self._canvas.configure(scrollregion=self._canvas.bbox('all'), width=200)
     
+    def _validate_dimensions(self, value):
+        return re.fullmatch('\d*', value) is not None
+
+    def _on_invalid_dimensions(self):
+        self._root.bell()
+        self.tlabel['text'] = 'Invalid palette dimensions encountered!'
+
+    def _on_update_dimensions(self, event):
+        if event.widget.get() == '':
+            Window._set_etext(event.widget, '1')
+
     def _init_ipanel(self):
         # IMAGE PREVIEW FRAME
         frame = LabelFrame(self._root, text='Preview', borderwidth=3, relief='groove')
@@ -182,8 +220,8 @@ class Window:
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
         
-        self._tlabel = Label(frame, text='Hello! Begin by pressing "Setup"')
-        self._tlabel.grid(column=0, row=0, sticky='ew', padx=5)
+        self.tlabel = Label(frame, text='Hello! Begin by pressing "Setup"')
+        self.tlabel.grid(column=0, row=0, sticky='ew', padx=5)
         
         return frame
         
@@ -195,57 +233,63 @@ class Window:
     def _set_img(self, fname='assets/result.png'):
         self._imname = fname
         img = Image.open(self._imname)
+
+        # Resize image
         self._ipanel.update()
         size = utils.adjusted_img_size(img, (self._ipanel.winfo_width(), self._ipanel.winfo_height()) )
         self._img = ImageTk.PhotoImage(img.resize(utils.adjusted_img_size(img, size)))
+        
         self._ilabel['image'] = self._img
-    
+
     def _on_search_img(self):
         try:
             urllib.request.urlretrieve(self._ientry.get(), 'assets/result.png')
             self._set_img('assets/result.png')
         except:
-            self._tlabel['text'] = 'Invalid URL'
-    
-    def setup(self):
-        messagebox.showinfo(self.title, 'Once you click OK, pyaint will wait 5 seconds and then capture your screen.')
-        self._root.iconify()
-        
-        if self.bot.init_tools(5):
-            messagebox.showinfo(self.title, 'Found tools successfully!')
-            self._tlabel['text'] = 'Found tools successfully!'
-        else:
-            messagebox.showerror(self.title, 'Failed to find tools.\n1. Do not obstruct the palette and the canvas\n2. ' + 
-                'Lower the confidence factor\n3. Ensure that the correct window is maximized\n4. Choose the correct application' +
-                '\n5. Ensure that you have your screenshots ready in your assets folder')
-        
-        self._root.deiconify()
+            self.tlabel['text'] = 'Invalid URL'
     
     def _on_check(self, index, option):
-        self._tlabel['text'] = Window._MISC_TOOLTIPS[index]
+        self.tlabel['text'] = Window._MISC_TOOLTIPS[index]
         # Bot options are updated with the newly toggled option
         if self._checkbutton_vars[index].get() == 1:    # 1 indicates that the button has been checked
             self.draw_options |= option
         else:
             self.draw_options &= ~option
-        
 
     def _on_slider_move(self, event):    
         i = int(event.widget.name[-1])
         self.bot.settings[i] = val = float('{:.2f}'.format(self._optvars[i].get()))
         self._optlabl[i]['text'] = f"{self._options[i][0]}: {val}"  
-        self._tlabel['text'] = Window._SLIDER_TOOLTIPS[i]
-    
-    def _on_click_rbtn(self):
-        self.bot.ptype = self._pvarbl.get()
-        self._tlabel['text'] = 'Informs the bot about the paint application to be botted. You MUST setup if you change this option.'
+        self.tlabel['text'] = Window._SLIDER_TOOLTIPS[i]
+          
+    def setup(self):
+        prows = int(self._parows.get())
+        pcols = int(self._pacols.get())
         
-    def start(self):
-        messagebox.showwarning(self.title, 'Press ESC to stop the bot.')
-        
+        messagebox.showinfo(self.title, 'Once you click OK, pyaint will wait 5 seconds and then capture your screen.')
         self._root.iconify()
-        t = time.time() 
-        result = self.bot.draw(self._imname, self.draw_options)
-        self._root.deiconify
-        self._root.wm_state('normal')
-        self._tlabel['text'] = f"{'Success' if result else 'Failure'}. Time elapsed: {time.time() - t:.2f}s"
+        
+        try:
+            self.bot.init_tools(grace_time=5, prows=prows, pcols=pcols)
+            messagebox.showinfo(self.title, 'Found tools successfully!')
+            self.tlabel['text'] = 'Found tools successfully!'
+        except IndexError as e:
+            messagebox.showerror(self.title, e + '\nPossibly due to inconsistent palette dimensions')
+        except Exception as e:
+            messagebox.showerror(self.title, e)
+            self.tlabel['text'] = e
+        
+        self._root.deiconify()
+
+    def start(self):
+        try:
+            cmap = self.bot.process(self._imname, self.draw_options)
+            messagebox.showwarning(self.title, 'Press ESC to stop the bot.')
+            self._root.iconify()
+            t = time.time() 
+            result = self.bot.draw(cmap)
+            self._root.deiconify
+            self._root.wm_state('normal')
+            self.tlabel['text'] = f"{'Success' if result else 'Failure'}. Time elapsed: {time.time() - t:.2f}s"
+        except Exception as e:
+            messagebox.showerror(self.title, e)
