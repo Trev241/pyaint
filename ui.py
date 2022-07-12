@@ -29,6 +29,9 @@ class Window:
     _MISC_TOOLTIPS = ('Ignores and does not draw the white pixels of an image. Useful for when the canvas is white.',
                       'Use custom colors. This option considerably lengthens the draw duration.')
 
+    TITLE_FONT = ('Trebuchet MS', 10, 'bold')
+    STD_FONT = ('Trebuchet MS', 9)
+
     def __init__(self, title, bot, w, h, x, y):
         self._root = Tk()
         
@@ -36,16 +39,14 @@ class Window:
         self._root.geometry(f"{w}x{h}+{x}+{y}")
         
         self._root.columnconfigure(0, weight=1)
-        self._root.columnconfigure(1, weight=5)
+        self._root.columnconfigure(1, weight=1)
         self._root.rowconfigure(0, weight=2)
         self._root.rowconfigure(1, weight=1)
         
         self.bot = bot
         self.draw_options = 0
-        self.tfnt = ('Trebuchet MS', 9, 'bold')
-        self.font = ('Trebuchet MS', 9)
         self.title = title
-        self.draw_thread = Thread(target=self.start)
+        self.busy = False
         
         # CONTROL PANEL    :    [0, 0]
         self._cpanel = self._init_cpanel()
@@ -98,18 +99,18 @@ class Window:
         )
         buttons = []
         for i in range(len(btn_names)):
-            b = Button(self._cframe, text=btn_names[i], font=self.font)
+            b = Button(self._cframe, text=btn_names[i], font=Window.STD_FONT)
             b.grid(column=0, row=i, columnspan=2, padx=5, pady=5, sticky='ew')
             buttons.append(b)
         buttons[0]['command'] = self.setup
         buttons[1]['command'] = self.bot.test
-        buttons[2]['command'] = self.start
+        buttons[2]['command'] = self.start_draw_thread
         
-        self._palbel = Label(self._cframe, text='Palette Dimensions (W x H)', font=self.tfnt)
+        self._palbel = Label(self._cframe, text='Palette Dimensions (W x H)', font=Window.TITLE_FONT)
         self._palbel.grid(column=0, row=3, columnspan=2, padx=5, pady=5, sticky='w')
-        self._palblr = Label(self._cframe, text='Rows: ', font=self.font)
+        self._palblr = Label(self._cframe, text='Rows: ', font=Window.STD_FONT)
         self._parows = Entry(self._cframe, width=5)
-        self._palblc = Label(self._cframe, text='Columns: ', font=self.font)
+        self._palblc = Label(self._cframe, text='Columns: ', font=Window.STD_FONT)
         self._pacols = Entry(self._cframe, width=5)
 
         self._parows.insert(0, '2')
@@ -146,7 +147,7 @@ class Window:
         )
         size = len(self._options)
         self._optvars = [DoubleVar() for _ in range(size)]
-        self._optlabl = [Label(self._cframe, text=f"{o[0]}: {o[1]:.2f}", font=self.tfnt) for o in self._options]
+        self._optlabl = [Label(self._cframe, text=f"{o[0]}: {o[1]:.2f}", font=Window.TITLE_FONT) for o in self._options]
         self._optslid = [Scale(self._cframe, from_=self._options[i][2], to=self._options[i][3], variable=self._optvars[i]) for i in range(size)]
         
         for i in range(size):
@@ -158,7 +159,7 @@ class Window:
             self._optslid[i].grid(column=0, row=(i * 2) + curr_row + 1, columnspan=2,  padx=5, sticky='ew')
         curr_row += size * 2
         
-        self._misclbl = Label(self._cframe, text='Misc Settings', font=self.tfnt)
+        self._misclbl = Label(self._cframe, text='Misc Settings', font=Window.TITLE_FONT)
         self._misclbl.grid(column=0, row=curr_row, columnspan=2, padx=5, pady=5, sticky='w')
         curr_row += 1
 
@@ -168,7 +169,7 @@ class Window:
         for i in range(len(misc_opt_names)):
             # The checkbutton submits the index of the option to the callback
             cb = Checkbutton(self._cframe, text=misc_opt_names[i], variable=self._checkbutton_vars[i], 
-                font=self.font, command=lambda val=options[i], index=i: self._on_check(index, val))
+                font=Window.STD_FONT, command=lambda val=options[i], index=i: self._on_check(index, val))
             cb.grid(column=0, row=i + curr_row, columnspan=2, padx=5, sticky='w')
         curr_row += len(misc_opt_names)
 
@@ -281,6 +282,22 @@ class Window:
         
         self._root.deiconify()
 
+    def start_draw_thread(self):
+        if not self.busy:
+            self.busy = True
+            
+            self._draw_thread = Thread(target=self.start)
+            self._draw_thread.start()
+            self.manage_draw_thread()
+        else:
+            self.tlabel['text'] = 'Already started!'
+
+    def manage_draw_thread(self):
+        # Display progress updates every half a second
+        if self._draw_thread.is_alive() and self.busy:
+            self._root.after(500, self.manage_draw_thread)
+            self.tlabel['text'] = f"Processing image: {self.bot.progress:.2f}%"
+
     def start(self):
         try:
             cmap = self.bot.process(self._imname, self.draw_options)
@@ -293,3 +310,6 @@ class Window:
             self.tlabel['text'] = f"{'Success' if result else 'Failure'}. Time elapsed: {time.time() - t:.2f}s"
         except Exception as e:
             messagebox.showerror(self.title, e)
+        
+        # Let the thread manager know that the task has ended
+        self.busy = False

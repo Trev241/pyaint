@@ -11,4 +11,4 @@ if __name__ == '__main__':
     keyboard.on_press(on_key)
 
     bot = Bot()
-    Window('pyaint', bot, 700, 550, 5, 5)
+    Window('pyaint', bot, 800, 550, 5, 5)

@@ -32,11 +32,16 @@ class Palette:
             y = y + (self._csizey if (i + 1) % columns == 0 else 0)
 
     def nearest_color(self, query):
-        return min(self.colors, key=lambda color: Palette.euclid_dist(color, query))
+        return min(self.colors, key=lambda color: Palette.dist(color, query))
 
     @staticmethod
-    def euclid_dist(colx, coly):
-        return math.sqrt(sum((s - q) ** 2 for s, q in zip(colx, coly)))
+    def dist(colx, coly):
+        '''
+        Returns the squared distance between two RGB triplets. Since find the root of the 
+        distances has no effect on the sorting order of the final distances, it has been
+        avoided altogether for the sake of performance
+        '''
+        return sum((s - q) ** 2 for s, q in zip(colx, coly))
     
 class Bot:
     CONF, DELAY, STEP, ACCURACY = tuple(i for i in range(4))
@@ -53,6 +58,7 @@ class Bot:
         self.terminate = False
         self.settings = [.75, .05, 5, .75]
         self.options = Bot.IGNORE_WHITE
+        self.progress = 0
         
         pyautogui.PAUSE = 0.0
     
@@ -77,7 +83,7 @@ class Bot:
             pyautogui.moveTo(l)
             time.sleep(.25)
 
-    def process(self, file, flags, logger=None):
+    def process(self, file, flags):
         '''
         Processes the requested file as per the flags submitted and returns 
         a table mapping each color to a list of lines that are to be drawn on 
@@ -96,6 +102,7 @@ class Bot:
         img_small = img.resize((tw, th), resample=Image.NEAREST)
         pix = img_small.load()
         w, h = img_small.size
+        size = w * h
         start = xo, y
 
         cmap = dict()
@@ -112,10 +119,10 @@ class Bot:
                     if flags & Bot.USE_CUSTOM_COLORS:
                         # Find the nearest custom color previously used, if any
                         if len(cmap.keys()) > 0:
-                            near = min(cmap.keys(), key=lambda c : Palette.euclid_dist(c, col))
+                            near = min(cmap.keys(), key=lambda c : Palette.dist(c, col))
                         # Find the euclidean distance of the furthest color
-                        max_dist = math.sqrt( sum( max( 255 - col[i], col[i] - 0) ** 2 for i in range(len(col)) ) )
-                        col = near if (max_dist - Palette.euclid_dist(near, col)) / max_dist >= self.settings[Bot.ACCURACY] else col
+                        max_dist = sum( max( 255 - col[i], col[i] - 0) ** 2 for i in range(len(col)) ) 
+                        col = near if (max_dist - Palette.dist(near, col)) / max_dist >= self.settings[Bot.ACCURACY] else col
                     else:
                         # Find the nearest color from the palette
                         col = self._palette.nearest_color((r, g, b))
@@ -136,16 +143,14 @@ class Bot:
                         cmap[old_col] = lines
                     start = (xo, y + step) if j == w - 1 else (x + step, y)
                 
-                if logger is not None:
-                    completed = ((i * w + (j + 1)) / w * h) * 100
-                    logger['text'] = f"Processing image... {completed}%"
+                self.progress = ((i * w + (j + 1)) / size) * 100
 
                 old_col = col
                 x += step
 
             x = xo
             y += step
-        
+
         return cmap
 
     def draw(self, cmap):
