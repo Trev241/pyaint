@@ -1,13 +1,14 @@
 import re
 import time
 import tkinter
+import traceback
 import urllib.request
 import utils
 
 from bot import Bot
 from PIL import Image, ImageTk
 from threading import Thread
-from tkinter import Canvas, Label, Scrollbar, Tk, Button, messagebox, Checkbutton, DoubleVar, IntVar, Entry, END
+from tkinter import Canvas, Label, OptionMenu, Scrollbar, StringVar, Tk, Button, messagebox, Checkbutton, DoubleVar, IntVar, Entry, END
 from tkinter.ttk import LabelFrame, Frame, Scale
 
 class Window:
@@ -86,7 +87,7 @@ class Window:
 
         self._cframe.columnconfigure(0, weight=2)
         self._cframe.columnconfigure(1, weight=1)
-        for i in range(14):
+        for i in range(19):
             self._cframe.rowconfigure(i, weight=1)
 
         curr_row = 0
@@ -106,7 +107,7 @@ class Window:
         buttons[1]['command'] = self.bot.test
         buttons[2]['command'] = self.start_draw_thread
         
-        self._palbel = Label(self._cframe, text='Palette Dimensions (W x H)', font=Window.TITLE_FONT)
+        self._palbel = Label(self._cframe, text='Palette Dimensions', font=Window.TITLE_FONT)
         self._palbel.grid(column=0, row=3, columnspan=2, padx=5, pady=5, sticky='w')
         self._palblr = Label(self._cframe, text='Rows: ', font=Window.STD_FONT)
         self._parows = Entry(self._cframe, width=5)
@@ -135,7 +136,17 @@ class Window:
         self._parows.grid(column=1, row=4, sticky='ew', padx=5, pady=5)
         self._palblc.grid(column=0, row=5, sticky='w', padx=5, pady=5)
         self._pacols.grid(column=1, row=5, sticky='ew', padx=5, pady=5)
-        curr_row = 6
+
+        self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
+        self._teclbl.grid(column=0, row=6, columnspan=2, sticky='w', padx=5, pady=5)
+        modes = [Bot.SLOTTED, Bot.LAYERED]
+        self._tecvar = StringVar()
+        self._tecvar.set(modes[1])
+        self._mode = modes[1]
+        self._teclst = OptionMenu(self._cframe, self._tecvar, *modes, command=self._update_mode)
+        self._teclst.grid(column=0, row=7, columnspan=2, sticky='ew', padx=5, pady=5)
+
+        curr_row = 8
 
         # For every slider option in options, option layout is    :    (name, default, from, to)
         defaults = self.bot.settings
@@ -155,7 +166,7 @@ class Window:
             self._optslid[i].set(self._options[i][1])
             self._optslid[i].name = f"scale{i}"
             self._optslid[i].set(defaults[i])
-            self._optlabl[i].grid(column=0, row=(i * 2) + curr_row, columnspan=2,  padx=5, sticky='w')
+            self._optlabl[i].grid(column=0, row=(i * 2) + curr_row, columnspan=2, padx=5, pady=5, sticky='w')
             self._optslid[i].grid(column=0, row=(i * 2) + curr_row + 1, columnspan=2,  padx=5, sticky='ew')
         curr_row += size * 2
         
@@ -193,6 +204,9 @@ class Window:
     def _on_update_dimensions(self, event):
         if event.widget.get() == '':
             Window._set_etext(event.widget, '1')
+
+    def _update_mode(self, selection):
+        self._mode = selection
 
     def _init_ipanel(self):
         # IMAGE PREVIEW FRAME
@@ -271,7 +285,7 @@ class Window:
         self._root.iconify()
         
         try:
-            self.bot.init_tools(grace_time=5, prows=prows, pcols=pcols)
+            self.bot.init_tools(grace_time=0, prows=prows, pcols=pcols)
             messagebox.showinfo(self.title, 'Found tools successfully!')
             self.tlabel['text'] = 'Found tools successfully!'
         except IndexError as e:
@@ -300,16 +314,17 @@ class Window:
 
     def start(self):
         try:
-            cmap = self.bot.process(self._imname, self.draw_options)
+            t = time.time() 
+            cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
             messagebox.showwarning(self.title, 'Press ESC to stop the bot.')
             self._root.iconify()
-            t = time.time() 
             result = self.bot.draw(cmap)
             self._root.deiconify
             self._root.wm_state('normal')
             self.tlabel['text'] = f"{'Success' if result else 'Failure'}. Time elapsed: {time.time() - t:.2f}s"
         except Exception as e:
             messagebox.showerror(self.title, e)
+            traceback.print_exc()
         
         # Let the thread manager know that the task has ended
         self.busy = False

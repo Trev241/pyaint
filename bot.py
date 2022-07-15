@@ -1,4 +1,3 @@
-import math
 import pyautogui
 import time
 import utils
@@ -37,9 +36,9 @@ class Palette:
     @staticmethod
     def dist(colx, coly):
         '''
-        Returns the squared distance between two RGB triplets. Since find the root of the 
-        distances has no effect on the sorting order of the final distances, it has been
-        avoided altogether for the sake of performance
+        Returns the squared distance between two RGB triplets. Since finding the root of 
+        the distances has no effect on the sorting order of the final distances, it has 
+        been avoided altogether for the sake of performance
         '''
         return sum((s - q) ** 2 for s, q in zip(colx, coly))
     
@@ -51,6 +50,9 @@ class Bot:
         'assets/custom_cols_mspaint.png'
     )
     
+    SLOTTED = 'slotted'
+    LAYERED = 'layered'
+
     IGNORE_WHITE = 1 << 0
     USE_CUSTOM_COLORS = 1 << 1
 
@@ -83,7 +85,7 @@ class Bot:
             pyautogui.moveTo(l)
             time.sleep(.25)
 
-    def process(self, file, flags):
+    def process(self, file, flags=0, mode=LAYERED):
         '''
         Processes the requested file as per the flags submitted and returns 
         a table mapping each color to a list of lines that are to be drawn on 
@@ -105,15 +107,25 @@ class Bot:
         size = w * h
         start = xo, y
 
-        cmap = dict()
         nearest_colors = dict()
+        cmap = dict()
+
+        col_freq = dict()
+        table_lines = list()
+        table_colors = list()
+
         old_col = None
     
         for i in range(h):
+            if mode is Bot.LAYERED:
+                table_lines.append(list())
+                table_colors.append(set())
+
             for j in range(w): 
                 r, g, b = pix[j, i][:3]
                 col = near = (r, g, b)
 
+                # DESIGNATING COLOR OF THE CURRENT PIXEL
                 # Deciding what to do with new RGB triplet
                 if (r, g, b) not in nearest_colors:
                     if flags & Bot.USE_CUSTOM_COLORS:
@@ -132,24 +144,57 @@ class Bot:
                 else:
                     col = nearest_colors[(r, g, b)]
 
+                # DESIGNATING COLOR LINES
                 # End brush stroke when...
                 # 1. a new color is encountered 
                 # 2. the brush is at the end of the row
                 if j == w - 1 or (old_col != None and old_col != col):
                     end = (x, y)
-                    if not ((flags & Bot.IGNORE_WHITE) and old_col == (255, 255, 255)):
+                    if mode is Bot.SLOTTED and not (old_col == (255, 255, 255) and flags & Bot.IGNORE_WHITE):
                         lines = cmap.get(old_col, [])
                         lines.append( (start, end) )
                         cmap[old_col] = lines
+                    if mode is Bot.LAYERED:
+                        table_lines[i].append((old_col, (start, end)))
+                        table_colors[i].add(old_col)
+                        col_freq[old_col] = col_freq.get(old_col, 0) + end[0] - start[0] + 1
                     start = (xo, y + step) if j == w - 1 else (x + step, y)
                 
-                self.progress = ((i * w + (j + 1)) / size) * 100
+                self.progress = 100 * (i * w + (j + 1)) / size
 
                 old_col = col
                 x += step
 
             x = xo
             y += step
+        
+        if mode is Bot.SLOTTED:
+            return cmap
+
+        # Sort colors in decreasing order of their frequency and maintain a height level index for each color
+        col_freq = tuple(k for k, _ in sorted(col_freq.items(), key=lambda item : item[1], reverse=True))
+        col_index = {col_freq[i]: i for i in range(len(col_freq))}     
+    
+        # This loop will attempt to merge lines in favour of reducing the number of brush strokes when drawing.
+        # Lines of lower layer colors can be easily merged into fewer strokes since they will be repainted over
+        # again by colors from a higher layer
+        for idc, col in enumerate(col_freq):
+            for idr, row in enumerate(table_lines):
+                if col not in table_colors[idr] or (col == (255, 255, 255) and flags & Bot.IGNORE_WHITE):
+                    continue
+
+                start, end, exposed = None, None, False
+                for idl, line in enumerate(row):
+                    if idc <= col_index[line[0]]:
+                        start = line[1][0] if start is None else start
+                        end = line[1][1]
+                        exposed = exposed or idc == col_index[line[0]]
+                    if start is not None and (idc > col_index[line[0]] or idl == len(row) - 1):
+                        if exposed:
+                            lines = cmap.get(col, [])
+                            lines.append((start, end))
+                            cmap[col] = lines
+                        start, exposed = None, False
 
         return cmap
 
@@ -181,9 +226,9 @@ class Bot:
                 if self.terminate:
                     pyautogui.mouseUp()
                     return False
-                
+            
                 time.sleep(self.settings[Bot.DELAY])
                 pyautogui.moveTo(line[0])
                 pyautogui.dragTo(line[1])
-                
+
         return True       
