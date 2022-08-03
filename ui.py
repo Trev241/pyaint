@@ -23,9 +23,10 @@ class Window:
                         'This setting does not affect the botted application\'s brush size. You must do that manually.',
 
                         '[ONLY APPLICABLE FOR WHEN CUSTOM COLORS ARE ENABLED] Affects the color accuracy of each pixel. ' +
-                        'At lower values, colors will be rounded off to match any previously found color that is similar. ' + 
+                        'At lower values, the color variety of the result will be greatly reduced. ' + 
                         'At 1.0 accuracy, every pixel will have perfect colors ' + 
-                        '(this will also have the effect of considerably slowing down the drawing process.)')
+                        '(this will also have the effect of considerably slowing down the drawing process.) ' +
+                        'Recommended setting: 0.9')
     
     _MISC_TOOLTIPS = ('Ignores and does not draw the white pixels of an image. Useful for when the canvas is white.',
                       'Use custom colors. This option considerably lengthens the draw duration.')
@@ -154,7 +155,7 @@ class Window:
             ('Confidence', defaults[0], 0, 1), 
             ('Delay', defaults[1], 0, 1), 
             ('Pixel Size', defaults[2], 3, 50),
-            ('C. Color Accuracy', defaults[3], 0, 1)
+            ('Custom Color Precision', defaults[3], 0, 1)
         )
         size = len(self._options)
         self._optvars = [DoubleVar() for _ in range(size)]
@@ -281,11 +282,11 @@ class Window:
         prows = int(self._parows.get())
         pcols = int(self._pacols.get())
         
-        messagebox.showinfo(self.title, 'Once you click OK, pyaint will wait 5 seconds and then capture your screen.')
+        messagebox.showinfo(self.title, 'Once you click OK, pyaint capture your screen.')
         self._root.iconify()
         
         try:
-            self.bot.init_tools(grace_time=0, prows=prows, pcols=pcols)
+            self.bot.init_tools(grace_time=1, prows=prows, pcols=pcols)
             messagebox.showinfo(self.title, 'Found tools successfully!')
             self.tlabel['text'] = 'Found tools successfully!'
         except IndexError as e:
@@ -323,8 +324,8 @@ class Window:
             self._root.wm_state('normal')
             self.tlabel['text'] = f"{'Success' if result else 'Failure'}. Time elapsed: {time.time() - t:.2f}s"
         except Exception as e:
-            messagebox.showerror(self.title, e)
             traceback.print_exc()
+            messagebox.showerror(self.title, e)
         
         # Let the thread manager know that the task has ended
         self.busy = False

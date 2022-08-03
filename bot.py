@@ -58,7 +58,7 @@ class Bot:
 
     def __init__(self):
         self.terminate = False
-        self.settings = [.75, .05, 5, .75]
+        self.settings = [.75, .05, 5, .9]
         self.options = Bot.IGNORE_WHITE
         self.progress = 0
         
@@ -115,7 +115,11 @@ class Bot:
         table_colors = list()
 
         old_col = None
-    
+
+        # Create interval size from normalized accuracy value
+        # Also setting a lower bound value of 1 to prevent interval_size from reaching 0
+        interval_size = max((1 - self.settings[Bot.ACCURACY]) * 255, 1)
+
         for i in range(h):
             if mode is Bot.LAYERED:
                 table_lines.append(list())
@@ -129,12 +133,16 @@ class Bot:
                 # Deciding what to do with new RGB triplet
                 if (r, g, b) not in nearest_colors:
                     if flags & Bot.USE_CUSTOM_COLORS:
-                        # Find the nearest custom color previously used, if any
-                        if len(cmap.keys()) > 0:
-                            near = min(cmap.keys(), key=lambda c : Palette.dist(c, col))
-                        # Find the euclidean distance of the furthest color
-                        max_dist = sum( max( 255 - col[i], col[i] - 0) ** 2 for i in range(len(col)) ) 
-                        col = near if (max_dist - Palette.dist(near, col)) / max_dist >= self.settings[Bot.ACCURACY] else col
+                        # # Find the nearest custom color previously used, if any
+                        # if len(cmap.keys()) > 0:
+                        #     near = min(cmap.keys(), key=lambda c : Palette.dist(c, col))
+                        # # Find the euclidean distance of the furthest color
+                        # max_dist = sum( max( 255 - col[i], col[i] - 0) ** 2 for i in range(len(col)) ) 
+                        # col = near if (max_dist - Palette.dist(near, col)) / max_dist >= self.settings[Bot.ACCURACY] else col
+
+                        # Obtain the closest color
+                        # round(color_component / interval_size) * interval_size
+                        col = tuple(int(round(v / interval_size) * interval_size) for v in col)
                     else:
                         # Find the nearest color from the palette
                         col = self._palette.nearest_color((r, g, b))
@@ -210,7 +218,7 @@ class Bot:
                 pyautogui.click(self._palette.colors_pos[c], clicks=3, interval=.15)
             else:
                 cc_box = self._custom_colors
-                pyautogui.PAUSE = .025
+                pyautogui.PAUSE = self.settings[Bot.DELAY]
                 pyautogui.click( (cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2 ), clicks=3, interval=.15)
                 pyautogui.press('tab', presses=7, interval=.05)
                 for val in c:
