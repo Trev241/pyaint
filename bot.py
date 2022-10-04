@@ -2,7 +2,6 @@ import pyautogui
 import time
 import utils
 
-from exceptions import PaintToolError
 from PIL import Image
 
 class Palette:
@@ -64,17 +63,27 @@ class Bot:
         
         pyautogui.PAUSE = 0.0
     
-    def init_tools(self, grace_time, prows, pcols):
-        time.sleep(grace_time)
+    def init_tools(self, prows, pcols, pbox, cabox, ccbox):
+        # time.sleep(grace_time)
         
-        pbox = pyautogui.locateOnScreen(Bot.RESOURCES[0], confidence=self.settings[Bot.CONF])
+        # pbox = pyautogui.locateOnScreen(Bot.RESOURCES[0], confidence=self.settings[Bot.CONF])
+        
+        # Previously, the pbox was located using screenshots, this functionality is being phased out in favour of another method.
+        # pyautogui's box format is (topleftx, toplefty, width, height). Likewise, palette expects and operates on this legacy format.
+        # Therefore, pbox must be adjusted to fit the required format
+        pbox = pbox[0], pbox[1], pbox[2] - pbox[0], pbox[3] - pbox[1] 
         self._palette = Palette(pbox, rows=prows, columns=pcols)
 
-        self._canvas = pyautogui.locateOnScreen(Bot.RESOURCES[1], confidence=self.settings[Bot.CONF])
-        if self._canvas is None:
-            raise PaintToolError('Failed to locate canvas and received value None instead')
+        # self._canvas = pyautogui.locateOnScreen(Bot.RESOURCES[1], confidence=self.settings[Bot.CONF])
 
-        self._custom_colors = pyautogui.locateOnScreen(Bot.RESOURCES[2], confidence=self.settings[Bot.CONF])
+        # Just like the old pbox, the bot works on the assumption that the canvas box is stored using the format
+        # (topleftx, toplefty, width, height). Adjustments have been made below to conform with this standard.
+        self._canvas = cabox[0], cabox[1], cabox[2] - cabox[0], cabox[3] - cabox[1]
+        # if self._canvas is None:
+        #     raise PaintToolError('Failed to locate canvas and received value None instead')
+
+        # self._custom_colors = pyautogui.locateOnScreen(Bot.RESOURCES[2], confidence=self.settings[Bot.CONF])
+        self._custom_colors = ccbox[0], ccbox[1], ccbox[2] - ccbox[0], ccbox[3] - ccbox[1]
 
         return True
     

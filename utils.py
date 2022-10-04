@@ -7,7 +7,7 @@ def adjusted_img_size(img, ad):
     '''
     
     aratio = img.size[0] / img.size[1]  
-    ew = aratio * ad[1]                # Estimated width if full available height is to be used
+    ew = aratio * ad[1]          # Estimated width if full available height is to be used
     eh = ad[0] / aratio          # Estimated height if full available width is to be used
     ew = int(min(ew, ad[0]))
     eh = int(min(eh, ad[1]))

@@ -1,2 +1,0 @@
-class PaintToolError(Exception):
-    pass

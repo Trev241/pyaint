@@ -6,9 +6,29 @@ import urllib.request
 import utils
 
 from bot import Bot
-from PIL import Image, ImageTk
+from components import InstructionWindow
+from PIL import (
+    Image, 
+    ImageTk,
+    ImageGrab
+)
+from pynput.mouse import Listener
 from threading import Thread
-from tkinter import Canvas, Label, OptionMenu, Scrollbar, StringVar, Tk, Button, messagebox, Checkbutton, DoubleVar, IntVar, Entry, END
+from tkinter import (
+    Canvas, 
+    Label, 
+    OptionMenu, 
+    Scrollbar, 
+    StringVar, 
+    Tk, 
+    Button, 
+    messagebox, 
+    Checkbutton, 
+    DoubleVar, 
+    IntVar, 
+    Entry, 
+    END
+)
 from tkinter.ttk import LabelFrame, Frame, Scale
 
 class Window:
@@ -40,10 +60,10 @@ class Window:
         self._root.title(title)
         self._root.geometry(f"{w}x{h}+{x}+{y}")
         
-        self._root.columnconfigure(0, weight=1)
-        self._root.columnconfigure(1, weight=1)
-        self._root.rowconfigure(0, weight=2)
-        self._root.rowconfigure(1, weight=1)
+        self._root.columnconfigure(0, weight=1, uniform='column')
+        self._root.columnconfigure(1, weight=2, uniform='column')
+        self._root.rowconfigure(0, weight=4, uniform='row')
+        self._root.rowconfigure(1, weight=1, uniform='row')
         
         self.bot = bot
         self.draw_options = 0
@@ -65,7 +85,7 @@ class Window:
         
         # Work to do after the window is visible (necessary for certain widgets to have their widths and heights established
         self.tlabel['wraplength'] = self._tpanel.winfo_width() - 5 * 2
-        self._set_img('assets/sample.png')
+        self._set_img(path='assets/sample.png')
         
         self._root.mainloop()
         
@@ -96,7 +116,7 @@ class Window:
         # Options
         btn_names = (
             'Setup', 
-            'Test', 
+            'Inspect', 
             'Start'
         )
         buttons = []
@@ -105,7 +125,7 @@ class Window:
             b.grid(column=0, row=i, columnspan=2, padx=5, pady=5, sticky='ew')
             buttons.append(b)
         buttons[0]['command'] = self.setup
-        buttons[1]['command'] = self.bot.test
+        buttons[1]['command'] = self.test
         buttons[2]['command'] = self.start_draw_thread
         
         self._palbel = Label(self._cframe, text='Palette Dimensions', font=Window.TITLE_FONT)
@@ -212,14 +232,14 @@ class Window:
     def _init_ipanel(self):
         # IMAGE PREVIEW FRAME
         frame = LabelFrame(self._root, text='Preview', borderwidth=3, relief='groove')
-        frame.columnconfigure(0, weight=5)
-        frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(0, weight=1)
-        frame.rowconfigure(1, weight=1)
+        frame.columnconfigure(0, weight=4, uniform='column')
+        frame.columnconfigure(1, weight=1, uniform='column')
+        frame.rowconfigure(0, weight=4, uniform='row')
+        frame.rowconfigure(1, weight=1, uniform='row')
 
         self._imname = 'sample.png'
         self._ilabel = Label(frame)
-        self._ilabel.grid(column=0, row=0, padx=5, pady=5)
+        self._ilabel.grid(column=0, row=0, columnspan=2, padx=5, pady=5)
         
         self._ientry = Entry(frame)
         Window._set_etext(self._ientry, 'Enter image URL')
@@ -246,13 +266,16 @@ class Window:
         e.delete(0, END)
         e.insert(0, txt)
         
-    def _set_img(self, fname='assets/result.png'):
-        self._imname = fname
-        img = Image.open(self._imname)
+    def _set_img(self, image=None, path=None):
+        if image is not None:
+            img = image
+        else:
+            self._imname = path if path is not None else 'assets/result.png'
+            img = Image.open(self._imname)
 
         # Resize image
         self._ipanel.update()
-        size = utils.adjusted_img_size(img, (self._ipanel.winfo_width(), self._ipanel.winfo_height()) )
+        size = utils.adjusted_img_size(img, (self._ipanel.winfo_width(), self._ipanel.winfo_height() * .8) )
         self._img = ImageTk.PhotoImage(img.resize(utils.adjusted_img_size(img, size)))
         
         self._ilabel['image'] = self._img
@@ -260,8 +283,9 @@ class Window:
     def _on_search_img(self):
         try:
             urllib.request.urlretrieve(self._ientry.get(), 'assets/result.png')
-            self._set_img('assets/result.png')
+            self._set_img(path='assets/result.png')
         except:
+            traceback.print_exc()
             self.tlabel['text'] = 'Invalid URL'
     
     def _on_check(self, index, option):
@@ -278,34 +302,180 @@ class Window:
         self._optlabl[i]['text'] = f"{self._options[i][0]}: {val}"  
         self.tlabel['text'] = Window._SLIDER_TOOLTIPS[i]
           
-    def setup(self):
-        prows = int(self._parows.get())
-        pcols = int(self._pacols.get())
-        
-        messagebox.showinfo(self.title, 'Once you click OK, pyaint capture your screen.')
-        self._root.iconify()
-        
-        try:
-            self.bot.init_tools(grace_time=1, prows=prows, pcols=pcols)
-            messagebox.showinfo(self.title, 'Found tools successfully!')
-            self.tlabel['text'] = 'Found tools successfully!'
-        except IndexError as e:
-            messagebox.showerror(self.title, e + '\nPossibly due to inconsistent palette dimensions')
-        except Exception as e:
-            messagebox.showerror(self.title, e)
-            self.tlabel['text'] = e
-        
-        self._root.deiconify()
+    def is_free(func):
+        '''
+        Decorator that only executes a function when the bot is not busy by checking the self.busy flag.
+        Useful for when you do not want some functions to interefere with each other.
+        Tasks that use this decorator SHOULD set self.busy to False when they finish! Failure to do so
+        will prevent other processes marked with this decorator from starting.
+        '''
 
+        def decorator(self):
+            if self.busy:
+                self.tlabel['text'] = "Cannot perform action. Currently busy..."
+            else:
+                self.busy = True
+                func(self)
+        
+        return decorator
+
+    def _set_busy(self, val):
+        self.busy = val
+
+    @is_free
+    def setup(self):
+        path = 'assets/tutorial'
+        pages = (
+            (
+                f'{path}/intro.png', 
+                'This short tutorial will briefly guide you on how to setup the bot.'
+            ),
+            (
+                f'{path}/dimensions.png',
+                'Before you continue, switch to the main window and specify the number of distinct colors in your palette for each dimension'
+            ),
+            (
+                f'{path}/regions.png',
+                'You will be designating a region on your screen for each tool to help the bot know approximately where to click in order to use its tools.'
+            ),
+            (
+                None,
+                'To designate a tool\'s region, you must click on its UPPER LEFT and LOWER RIGHT corners.'
+            ),
+            (
+                f'{path}/help_palette_mspaint.png', 
+                'To mark the palette\'s region, you will have to click on the UPPER LEFT and LOWER RIGHT corners as marked in the image.'
+            ),
+            (
+                f'{path}/help_canvas_mspaint.png', 
+                'Repeat the same process as explained before for demarcating the canvas as well.'
+            ),
+            (
+                f'{path}/help_custom_cols_mspaint.png', 
+                'Once again, repeat the same process for the custom colors option.'
+            ),
+            (
+                None,
+                'If you are using a different version of MS Paint or a different application altogether which does not have this tool, ' +
+                'then you may mark any two random points on your screen for this step.'
+            ),
+            (
+                f'{path}/sixpoints.png',
+                'All in all, the bot will expect you to click in total SIX times - two clicks for each tool. ' +
+                'You will hear a ping every time the bot registers a click.'
+            ),
+            (
+                f'{path}/allpoints.png',
+                'For MS Paint, the image above demonstrates an example of the order in which you would have to click (beginning from 1 followed to 6). '
+            ),
+            (
+                f'{path}/cspexample.png',
+                'Here is an example of a different application. The order of clicks here would be as indicated in the image.'
+            ),
+            (
+                f'{path}/incorrect.png',
+                'Remember! Designate ONE tool at a time. For instance, DO NOT click on the upper left corner of the palette and then proceed to click ' +
+                'on the custom color option next.'
+            ),
+            (
+                None,
+                'You must also mark the tools in this order strictly: PALETTE -> CANVAS -> CUSTOM COLOR.'
+            ),
+            (
+                f'{path}/inspect.png',
+                'After the setup is complete, you can inspect the accuracy of the regions marked by clicking on "Inspect"'
+            ),
+            (
+                None,
+                'That\'s it! Remember that once you exit this tutorial, you must do as instructed for the setup to succeed. ' +
+                '(Tip - Use ALT-TAB to switch between windows)'
+            )
+        )
+        self._iwindow = InstructionWindow(
+            parent=self._root, 
+            pages=pages, 
+            title='Setup Tutorial', 
+            on_complete=self._start_listening,
+            on_terminate=lambda : self._set_busy(False)
+        )
+
+    @is_free
+    def test(self):
+        try:
+            pages = (
+                (
+                    self._images[0],
+                    'Palette'
+                ),
+                (
+                    self._images[1],
+                    'Canvas',
+                ),
+                (
+                    self._images[2],
+                    'Custom Colors'
+                )
+            )
+            # Set busy flag to False when inspection is done
+            self._iwindow = InstructionWindow(
+                parent=self._root, 
+                pages=pages, 
+                title='Inspect', 
+                on_terminate=lambda : self._set_busy(False)
+            )
+            self.tlabel['text'] = 'Perform the setup again if the tools were not correctly configured.'
+        except Exception as e:
+            traceback.print_exc()
+            messagebox.showerror(title='Error', message=f'{e} - Perform setup first!')
+            self._set_busy(False)
+            print(e)
+        
+    def _start_listening(self):
+        self._coords = []
+        self._images = []
+        self._boxes = []
+        
+        self._clicks = 0
+        self._number_of_tools = 3
+        
+        self._listener = Listener(on_click=self._on_click)
+        self._listener.start()
+
+    def _on_click(self, x, y, _, pressed):
+        if pressed:
+            self._root.bell()
+            print(x, y)
+            self._clicks += 1
+            self._coords += x, y
+
+            # Create a box every 2 clicks
+            if self._clicks > 0 and self._clicks % 2 == 0:
+                # Determining corner coordinates based on received input. ImageGrab.grab() always expects
+                # the first pair of coordinates to be above and on the left of the second pair
+                top_left = min(self._coords[0], self._coords[2]), min(self._coords[1], self._coords[3])
+                bot_right = max(self._coords[0], self._coords[2]), max(self._coords[1], self._coords[3])
+                box = top_left + bot_right
+                
+                print(f'Capturing box: {box}')
+                self._boxes.append(box)
+                self._images.append(ImageGrab.grab(box))
+                self._coords = []
+
+            if self._clicks >= 2 * self._number_of_tools:
+                self._listener.stop()
+                
+                prows = int(self._parows.get())
+                pcols = int(self._pacols.get())
+
+                self.bot.init_tools(prows=prows, pcols=pcols, pbox=self._boxes[0], cabox=self._boxes[1], ccbox=self._boxes[2])
+                self._set_busy(False)
+                self.tlabel['text'] = 'Setup complete!'
+
+    @is_free
     def start_draw_thread(self):
-        if not self.busy:
-            self.busy = True
-            
-            self._draw_thread = Thread(target=self.start)
-            self._draw_thread.start()
-            self.manage_draw_thread()
-        else:
-            self.tlabel['text'] = 'Already started!'
+        self._draw_thread = Thread(target=self.start)
+        self._draw_thread.start()
+        self.manage_draw_thread()
 
     def manage_draw_thread(self):
         # Display progress updates every half a second
@@ -328,4 +498,4 @@ class Window:
             messagebox.showerror(self.title, e)
         
         # Let the thread manager know that the task has ended
-        self.busy = False
+        self._set_busy(False)
