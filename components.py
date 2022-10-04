@@ -65,7 +65,6 @@ class InstructionWindow:
             self._on_terminate()
 
     def complete(self):
-        self._root.destroy()
+        self.close()
         if self._callback is not None:
             self._callback()
-        self.close()

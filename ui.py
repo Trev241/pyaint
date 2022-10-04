@@ -7,6 +7,7 @@ import utils
 
 from bot import Bot
 from components import InstructionWindow
+from genericpath import isfile
 from PIL import (
     Image, 
     ImageTk,
@@ -126,7 +127,7 @@ class Window:
             buttons.append(b)
         buttons[0]['command'] = self.setup
         buttons[1]['command'] = self.test
-        buttons[2]['command'] = self.start_draw_thread
+        buttons[2]['command'] = self._start_draw_thread
         
         self._palbel = Label(self._cframe, text='Palette Dimensions', font=Window.TITLE_FONT)
         self._palbel.grid(column=0, row=3, columnspan=2, padx=5, pady=5, sticky='w')
@@ -172,7 +173,7 @@ class Window:
         # For every slider option in options, option layout is    :    (name, default, from, to)
         defaults = self.bot.settings
         self._options = (
-            ('Confidence', defaults[0], 0, 1), 
+            # ('Confidence', defaults[0], 0, 1), 
             ('Delay', defaults[1], 0, 1), 
             ('Pixel Size', defaults[2], 3, 50),
             ('Custom Color Precision', defaults[3], 0, 1)
@@ -242,7 +243,7 @@ class Window:
         self._ilabel.grid(column=0, row=0, columnspan=2, padx=5, pady=5)
         
         self._ientry = Entry(frame)
-        Window._set_etext(self._ientry, 'Enter image URL')
+        Window._set_etext(self._ientry, 'Enter URL or File System Path')
         self._ientry.grid(column=0, row=1, sticky='ew', padx=5, pady=5)
         
         self._ibuttn = Button(frame, text='Search', command=self._on_search_img)
@@ -270,7 +271,7 @@ class Window:
         if image is not None:
             img = image
         else:
-            self._imname = path if path is not None else 'assets/result.png'
+            self._imname = path if path is not None else 'assets/sample.png'
             img = Image.open(self._imname)
 
         # Resize image
@@ -282,11 +283,11 @@ class Window:
 
     def _on_search_img(self):
         try:
-            urllib.request.urlretrieve(self._ientry.get(), 'assets/result.png')
-            self._set_img(path='assets/result.png')
-        except:
+            path = self._ientry.get() if isfile(self._ientry.get()) else urllib.request.urlretrieve(self._ientry.get())[0]
+            self._set_img(path=path)
+        except Exception as e:
             traceback.print_exc()
-            self.tlabel['text'] = 'Invalid URL'
+            self.tlabel['text'] = e
     
     def _on_check(self, index, option):
         self.tlabel['text'] = Window._MISC_TOOLTIPS[index]
@@ -405,7 +406,7 @@ class Window:
             pages = (
                 (
                     self._images[0],
-                    'Palette'
+                    f'Palette ({self._parows.get()} x {self._pacols.get()} colors)'
                 ),
                 (
                     self._images[1],
@@ -438,6 +439,7 @@ class Window:
         self._clicks = 0
         self._number_of_tools = 3
         
+        messagebox.showinfo(self.title, 'Click on the UPPER LEFT and LOWER RIGHT corners of each tool.')
         self._listener = Listener(on_click=self._on_click)
         self._listener.start()
 
@@ -472,15 +474,15 @@ class Window:
                 self.tlabel['text'] = 'Setup complete!'
 
     @is_free
-    def start_draw_thread(self):
+    def _start_draw_thread(self):
         self._draw_thread = Thread(target=self.start)
         self._draw_thread.start()
-        self.manage_draw_thread()
+        self._manage_draw_thread()
 
-    def manage_draw_thread(self):
+    def _manage_draw_thread(self):
         # Display progress updates every half a second
         if self._draw_thread.is_alive() and self.busy:
-            self._root.after(500, self.manage_draw_thread)
+            self._root.after(500, self._manage_draw_thread)
             self.tlabel['text'] = f"Processing image: {self.bot.progress:.2f}%"
 
     def start(self):
@@ -495,7 +497,7 @@ class Window:
             self.tlabel['text'] = f"{'Success' if result else 'Failure'}. Time elapsed: {time.time() - t:.2f}s"
         except Exception as e:
             traceback.print_exc()
-            messagebox.showerror(self.title, e)
+            messagebox.showerror('Error', e)
         
         # Let the thread manager know that the task has ended
         self._set_busy(False)
