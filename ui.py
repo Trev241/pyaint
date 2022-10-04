@@ -174,9 +174,9 @@ class Window:
         defaults = self.bot.settings
         self._options = (
             # ('Confidence', defaults[0], 0, 1), 
-            ('Delay', defaults[1], 0, 1), 
-            ('Pixel Size', defaults[2], 3, 50),
-            ('Custom Color Precision', defaults[3], 0, 1)
+            ('Delay', defaults[0], 0, 1), 
+            ('Pixel Size', defaults[1], 3, 50),
+            ('Custom Color Precision', defaults[2], 0, 1)
         )
         size = len(self._options)
         self._optvars = [DoubleVar() for _ in range(size)]

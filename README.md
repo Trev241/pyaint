@@ -4,7 +4,7 @@ pyaint is a simple bot written in Python that can automatically draw images by t
 
 ## Demo
 
-You can watch the bot in action [here](https://youtu.be/qXfUc9KuVlg).
+You can watch the bot in action [here](https://youtu.be/qXfUc9KuVlg) and [here](https://youtu.be/kj0iqZkIG1k).
 
 ## Features
 
@@ -40,10 +40,10 @@ python main.py
 ## How do I use it?
 
 There are a number of options that you can tweak when using the bot which makes it difficult to give an overall guide. Nevertheless, the most basic steps to operate the bot would be to
-1. Click on "Setup". This is necessary to let the bot know where its tools are located on the screen. The bot provides an in-built tutorial to help guide you through the setup.
+1. Click on "Setup".
 2. (Optional) Click on "Inspect" to see if the tools were correctly identified on the screen. Repeat the first step if necessary.
-3. Provide an image of your own that you would like to see the bot draw. This can be done by entering either a link or file path in the space given.
-4. Finally, click on "Start". This will let the bot take control over your mouse and commence the drawing process. If things go out of hand, press ESC to stop the bot and regain control.
+3. Provide an image by entering either a link or file path in the space given.
+4. Finally, click on "Start". If things go out of hand, press ESC to stop the bot and regain control.
 
 Even if you do not intend on using MS Paint, the steps for using the bot should still relatively stay the same.
 

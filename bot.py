@@ -42,7 +42,7 @@ class Palette:
         return sum((s - q) ** 2 for s, q in zip(colx, coly))
     
 class Bot:
-    CONF, DELAY, STEP, ACCURACY = tuple(i for i in range(4))
+    DELAY, STEP, ACCURACY = tuple(i for i in range(3))
     RESOURCES = (
         'assets/palette.png',
         'assets/canvas.png',
@@ -57,7 +57,7 @@ class Bot:
 
     def __init__(self):
         self.terminate = False
-        self.settings = [.75, .05, 5, .9]
+        self.settings = [.05, 5, .9]
         self.options = Bot.IGNORE_WHITE
         self.progress = 0
         
