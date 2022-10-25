@@ -2,10 +2,20 @@ import pyautogui
 import time
 import utils
 
+from exceptions import (
+    NoCustomColorsError,
+    NoCanvasError,
+    NoPaletteError
+)
 from PIL import Image
 
 class Palette:
-    def __init__(self, box, rows, columns):
+    def __init__(self, colors_pos=None, box=None, rows=None, columns=None):
+        if colors_pos is not None:
+            self.colors_pos = colors_pos
+            self.colors = colors_pos.keys()
+            return
+        
         self.box = box
         self.rows = rows
         self.columns = columns
@@ -43,11 +53,11 @@ class Palette:
     
 class Bot:
     DELAY, STEP, ACCURACY = tuple(i for i in range(3))
-    RESOURCES = (
-        'assets/palette.png',
-        'assets/canvas.png',
-        'assets/custom_cols_mspaint.png'
-    )
+    # RESOURCES = (
+    #     'assets/palette.png',
+    #     'assets/canvas.png',
+    #     'assets/custom_cols_mspaint.png'
+    # )
     
     SLOTTED = 'slotted'
     LAYERED = 'layered'
@@ -55,44 +65,51 @@ class Bot:
     IGNORE_WHITE = 1 << 0
     USE_CUSTOM_COLORS = 1 << 1
 
-    def __init__(self):
+    def __init__(self, config_file='config.json'):
         self.terminate = False
         self.settings = [.05, 5, .9]
-        self.options = Bot.IGNORE_WHITE
         self.progress = 0
-        
+        self.options = Bot.IGNORE_WHITE
+        self.config_file = config_file
+
         pyautogui.PAUSE = 0.0
-    
-    def init_tools(self, prows, pcols, pbox, cabox, ccbox):
-        # time.sleep(grace_time)
-        
+
+    def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None) -> Palette:
+
         # pbox = pyautogui.locateOnScreen(Bot.RESOURCES[0], confidence=self.settings[Bot.CONF])
         
         # Previously, the pbox was located using screenshots, this functionality is being phased out in favour of another method.
         # pyautogui's box format is (topleftx, toplefty, width, height). Likewise, palette expects and operates on this legacy format.
         # Therefore, pbox must be adjusted to fit the required format
-        pbox = pbox[0], pbox[1], pbox[2] - pbox[0], pbox[3] - pbox[1] 
-        self._palette = Palette(pbox, rows=prows, columns=pcols)
 
+        try:
+            if colors_pos is not None:
+                self._palette = Palette(colors_pos=colors_pos)
+            else:
+                pbox = pbox[0], pbox[1], pbox[2] - pbox[0], pbox[3] - pbox[1] 
+                self._palette = Palette(box=pbox, rows=prows, columns=pcols)
+        except:
+            raise NoPaletteError('Bot could not continue because palette is either missing or its dimensions are faulty.')
+
+        return self._palette
+
+    def init_canvas(self, cabox):
         # self._canvas = pyautogui.locateOnScreen(Bot.RESOURCES[1], confidence=self.settings[Bot.CONF])
 
         # Just like the old pbox, the bot works on the assumption that the canvas box is stored using the format
         # (topleftx, toplefty, width, height). Adjustments have been made below to conform with this standard.
         self._canvas = cabox[0], cabox[1], cabox[2] - cabox[0], cabox[3] - cabox[1]
-        # if self._canvas is None:
-        #     raise PaintToolError('Failed to locate canvas and received value None instead')
 
+    def init_custom_colors(self, ccbox):
         # self._custom_colors = pyautogui.locateOnScreen(Bot.RESOURCES[2], confidence=self.settings[Bot.CONF])
         self._custom_colors = ccbox[0], ccbox[1], ccbox[2] - ccbox[0], ccbox[3] - ccbox[1]
-
-        return True
     
-    def test(self):
-        box = self._canvas
-        locs = [p for p in self._palette.colors_pos.values()] + [(box[0], box[1]), (box[0] + box[2], box[1] + box[3])]
-        for l in locs:
-            pyautogui.moveTo(l)
-            time.sleep(.25)
+    # def test(self):
+    #     box = self._canvas
+    #     locs = [p for p in self._palette.colors_pos.values()] + [(box[0], box[1]), (box[0] + box[2], box[1] + box[3])]
+    #     for l in locs:
+    #         pyautogui.moveTo(l)
+    #         time.sleep(.25)
 
     def process(self, file, flags=0, mode=LAYERED):
         '''
@@ -103,9 +120,13 @@ class Bot:
         
         self.terminate = False
         step = int(self.settings[Bot.STEP])
-        
         img = Image.open(file).convert('RGBA')
-        x, y, cw, ch = self._canvas
+
+        try: 
+            x, y, cw, ch = self._canvas
+        except:
+            raise NoCanvasError('Bot could not continue because canvas is not initialized')
+
         tw, th = tuple(int(p // step) for p in utils.adjusted_img_size(img, (cw, ch)))
         xo = x = x + ((cw - tw * step) // 2)    # Center the drawing correctly
         y += ((ch - th * step) // 2)
@@ -226,9 +247,12 @@ class Bot:
             if c in self._palette.colors:
                 pyautogui.click(self._palette.colors_pos[c], clicks=3, interval=.15)
             else:
-                cc_box = self._custom_colors
-                pyautogui.PAUSE = self.settings[Bot.DELAY]
-                pyautogui.click( (cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2 ), clicks=3, interval=.15)
+                try:
+                    cc_box = self._custom_colors
+                    pyautogui.PAUSE = self.settings[Bot.DELAY]
+                    pyautogui.click( (cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2 ), clicks=3, interval=.15)
+                except:
+                    raise NoCustomColorsError('Bot could not continue because custom colors are not initialized') 
                 pyautogui.press('tab', presses=7, interval=.05)
                 for val in c:
                     numbers = (d for d in str(val))

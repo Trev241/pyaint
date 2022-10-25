@@ -1,5 +1,5 @@
 from bot import Bot
-from ui import Window
+from ui.window import Window
 
 import keyboard
 

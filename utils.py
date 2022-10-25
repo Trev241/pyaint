@@ -1,9 +1,9 @@
 def adjusted_img_size(img, ad):
     '''
-    Recalculates the width and height of an image to fit within a given space (represented by ad)
+    Recalculates the width and height of an image to fit within a given space.
     If either dimension exceeds the available space, the image will be shrunk to fit accordingly
-    without affecting its aspect ratio. This will result in dead space which is commonly seen in the
-    form of black boxes on some applications.
+    without affecting its aspect ratio. This will result in dead space if the aspect ratios of the
+    two rectangles do not match.
     '''
     
     aratio = img.size[0] / img.size[1]  
