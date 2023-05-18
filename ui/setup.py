@@ -200,8 +200,6 @@ class SetupWindow:
                 self._current_tool['preview'] = f'assets/{self._tool_name}_preview.png'
                 ImageGrab.grab(box).save(self._current_tool['preview'], format='png')
 
-                print(self.tools)
-
                 self._listener.stop()
                 self.parent.deiconify()
                 self._root.deiconify()

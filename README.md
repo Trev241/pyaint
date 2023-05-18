@@ -40,10 +40,9 @@ python main.py
 ## How do I use it?
 
 There are a number of options that you can tweak when using the bot which makes it difficult to give an overall guide. Nevertheless, the most basic steps to operate the bot would be to
-1. Click on "Setup".
-2. (Optional) Click on "Inspect" to see if the tools were correctly identified on the screen. Repeat the first step if necessary.
-3. Provide an image by entering either a link or file path in the space given.
-4. Finally, click on "Start". If things go out of hand, press ESC to stop the bot and regain control.
+1. Click on "Setup" and initialize the tools. You must initialize the palette and canvas at least.
+2. Specify the image you want to draw by entering a URL or by opening a file on your system.
+3. Finally, click on "Start". If things go out of hand, press ESC to stop the bot and regain control.
 
 Even if you do not intend on using MS Paint, the steps for using the bot should still relatively stay the same.
 

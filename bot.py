@@ -249,7 +249,6 @@ class Bot:
             else:
                 try:
                     cc_box = self._custom_colors
-                    pyautogui.PAUSE = self.settings[Bot.DELAY]
                     pyautogui.click( (cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2 ), clicks=3, interval=.15)
                 except:
                     raise NoCustomColorsError('Bot could not continue because custom colors are not initialized') 
@@ -270,6 +269,6 @@ class Bot:
             
                 time.sleep(self.settings[Bot.DELAY])
                 pyautogui.moveTo(line[0])
-                pyautogui.dragTo(line[1])
+                pyautogui.dragTo(line[1], duration=Bot.DELAY)
 
         return True       

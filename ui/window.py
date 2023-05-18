@@ -85,7 +85,7 @@ class Window:
         
         # CONTROL PANEL    :    [0, 0]
         self._cpanel = self._init_cpanel()
-        self._cpanel.grid(column=0, row=0, sticky='nsew', padx=5, pady=5)
+        self._cpanel.grid(column=0, row=0, sticky='nsew', padx=10, pady=5)
         
         # PREVIEW PANEL    :    [0, 1]
         self._ipanel = self._init_ipanel()
@@ -153,7 +153,7 @@ class Window:
             # ('Confidence', defaults[0], 0, 1), 
             ('Delay', defaults[0], 0, 1), 
             ('Pixel Size', defaults[1], 3, 50),
-            ('Precision', defaults[2], 0, 1)
+            ('Precision', defaults[2], 0, 1),
         )
         size = len(self._options)
         self._optvars = [DoubleVar() for _ in range(size)]
