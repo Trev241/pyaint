@@ -67,12 +67,13 @@ class Bot:
 
     def __init__(self, config_file='config.json'):
         self.terminate = False
-        self.settings = [.05, 5, .9]
+        self.settings = [.1, 12, .9]
         self.progress = 0
         self.options = Bot.IGNORE_WHITE
         self.config_file = config_file
 
         pyautogui.PAUSE = 0.0
+        pyautogui.MINIMUM_DURATION = 0.01
 
     def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None) -> Palette:
 
@@ -267,8 +268,8 @@ class Bot:
                     pyautogui.mouseUp()
                     return False
             
-                time.sleep(self.settings[Bot.DELAY])
+                # time.sleep(self.settings[Bot.DELAY])
                 pyautogui.moveTo(line[0])
-                pyautogui.dragTo(line[1], duration=Bot.DELAY)
+                pyautogui.dragTo(line[1][0], line[1][1], self.settings[Bot.DELAY], button='left')
 
         return True       
