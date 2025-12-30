@@ -156,15 +156,26 @@ class Window:
             ('Precision', defaults[2], 0, 1),
         )
         size = len(self._options)
-        self._optvars = [DoubleVar() for _ in range(size)]
-        self._optlabl = [Label(self._cframe, text=f"{o[0]}: {o[1]:.2f}", font=Window.TITLE_FONT) for o in self._options]
+        # Use IntVar for Pixel Size (index 1), DoubleVar for others
+        self._optvars = []
+        for i in range(size):
+            if i == 1:  # Pixel Size
+                self._optvars.append(IntVar())
+            else:
+                self._optvars.append(DoubleVar())
+
+        self._optlabl = []
+        for i, o in enumerate(self._options):
+            if i == 1:  # Pixel Size - show as integer
+                self._optlabl.append(Label(self._cframe, text=f"{o[0]}: {int(o[1])}", font=Window.TITLE_FONT))
+            else:
+                self._optlabl.append(Label(self._cframe, text=f"{o[0]}: {o[1]:.2f}", font=Window.TITLE_FONT))
         self._optslid = [
             Scale(
-                self._cframe, 
-                from_=self._options[i][2], 
-                to=self._options[i][3], 
-                variable=self._optvars[i], 
-                # Lambda must accept an additional first argument that receives the value of the slider
+                self._cframe,
+                from_=self._options[i][2],
+                to=self._options[i][3],
+                variable=self._optvars[i],
                 command=lambda val, index=i : self._on_slider_move(index, val)
             ) for i in range(size)
         ]
@@ -295,8 +306,14 @@ class Window:
             self.draw_options &= ~option
 
     def _on_slider_move(self, index, val):
-        self.bot.settings[index] = val = round(float(val), 3)
-        self._optlabl[index]['text'] = f"{self._options[index][0]}: {val}"
+        val = float(val)
+        if index == 1:  # Pixel Size - force to integer
+            val = int(round(val))
+            self.bot.settings[index] = val
+            self._optlabl[index]['text'] = f"{self._options[index][0]}: {val}"
+        else:
+            self.bot.settings[index] = round(val, 3)
+            self._optlabl[index]['text'] = f"{self._options[index][0]}: {val:.2f}"
         self.tlabel['text'] = Window._SLIDER_TOOLTIPS[index]
 
     def _on_pause_key_press(self, event):

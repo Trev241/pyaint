@@ -82,6 +82,7 @@ class Bot:
         self.draw_state = {
             'color_idx': 0,
             'line_idx': 0,
+            'segment_idx': 0,
             'cmap': None
         }
 
@@ -304,11 +305,51 @@ class Bot:
                     pyautogui.mouseUp()
                     return 'terminated'
 
-                # time.sleep(self.settings[Bot.DELAY])
-                pyautogui.moveTo(line[0])
-                pyautogui.dragTo(line[1][0], line[1][1], self.settings[Bot.DELAY], button='left')
+                # Draw line with pause support
+                start_pos = line[0]
+                end_pos = (line[1][0], line[1][1])
+
+                # Calculate distance
+                dx = end_pos[0] - start_pos[0]
+                dy = end_pos[1] - start_pos[1]
+                distance = (dx**2 + dy**2)**0.5
+
+                if distance < 1:  # Very short line
+                    pyautogui.moveTo(start_pos)
+                    pyautogui.dragTo(end_pos[0], end_pos[1], self.settings[Bot.DELAY], button='left')
+                else:
+                    # Break into segments for pause support
+                    segments = max(2, min(10, int(distance / 10)))  # 2-10 segments based on length
+                    segment_delay = self.settings[Bot.DELAY] / segments
+
+                    pyautogui.moveTo(start_pos)
+                    pyautogui.mouseDown(button='left')
+
+                    for i in range(1, segments + 1):
+                        if self.paused or self.terminate:
+                            pyautogui.mouseUp()
+                            if self.terminate:
+                                return 'terminated'
+                            # Wait for resume
+                            while self.paused and not self.terminate:
+                                time.sleep(0.1)
+                            if self.terminate:
+                                return 'terminated'
+                            # Resume the stroke
+                            pyautogui.mouseDown(button='left')
+
+                        # Calculate next position
+                        t = i / segments
+                        next_x = start_pos[0] + dx * t
+                        next_y = start_pos[1] + dy * t
+
+                        pyautogui.moveTo(next_x, next_y)
+                        time.sleep(segment_delay / segments)  # Distribute delay
+
+                    pyautogui.mouseUp()
 
         # Reset draw state on successful completion
         self.draw_state['color_idx'] = 0
         self.draw_state['line_idx'] = 0
+        self.draw_state['segment_idx'] = 0
         return 'success'
