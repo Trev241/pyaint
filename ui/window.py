@@ -1,8 +1,10 @@
 import json
+import os
 import time
 import tkinter
 import traceback
 import urllib.request
+import urllib.error as urllib_error
 import utils
 
 from ui.setup import SetupWindow
@@ -66,7 +68,12 @@ class Window:
 
     def __init__(self, title, bot, w, h, x, y):
         self._root = Tk()
-        
+        # Prevent saving during initial UI setup (slider.set etc.)
+        self._initializing = True
+        # Config path should be available immediately because some widget
+        # callbacks trigger during initialization and may attempt to save.
+        self._config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+
         self._root.title(title)
         self._root.geometry(f"{w}x{h}+{x}+{y}")
         
@@ -82,6 +89,9 @@ class Window:
         self.draw_options = 0
         self.title = title
         self.busy = False
+
+        # Initialize tools dict early so _init_ipanel can access it
+        self.tools = {}
         
         # TOOLTIP PANEL    :    [1, 0]
         self._tpanel = self._init_tpanel()
@@ -97,7 +107,11 @@ class Window:
         
         
         self._set_img(path='assets/sample.png')
-        self.load_config()  # Load saved config 
+        # Determine config file path relative to project root (one level up from ui/)
+        self._config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+        self.load_config()  # Load saved config
+        # UI initialization finished — allow saving
+        self._initializing = False
         
         self._root.mainloop()
         
@@ -126,12 +140,14 @@ class Window:
         curr_row = 0
 
         # Options
-        btn_names = (
+        btn_names = [
             'Setup',
             # 'Inspect',
             'Pre-compute',
+            'Test Draw',
             'Start'
-        )
+        ]
+
         buttons = []
         for i in range(len(btn_names)):
             b = Button(self._cframe, text=btn_names[i])
@@ -140,7 +156,8 @@ class Window:
         buttons[0]['command'] = self.setup
         # buttons[1]['command'] = self.test
         buttons[1]['command'] = self._precompute_thread
-        buttons[2]['command'] = self._start_draw_thread
+        buttons[2]['command'] = self._test_draw_thread
+        buttons[3]['command'] = self._start_draw_thread
 
         self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
         self._teclbl.grid(column=0, row=4, columnspan=2, sticky='w', padx=5, pady=5)
@@ -239,14 +256,16 @@ class Window:
         frame.rowconfigure(1, weight=1, uniform='row')
 
         self._imname = 'sample.png'
+        self._last_url = None  # Store the last entered URL
         self._ilabel = Label(frame)
         self._ilabel.bind(
-            '<Configure>', 
+            '<Configure>',
             lambda e : self._set_img(path=self._imname)
         )
         self._ilabel.grid(column=0, row=0, columnspan=3, sticky='ns', padx=5, pady=5)
-        
+
         self._ientry = Entry(frame)
+        # Initialize with placeholder - will be updated after config loads
         Window._set_etext(self._ientry, 'Enter URL or File System Path')
         self._ientry.grid(column=0, row=1, sticky='ew', padx=5, pady=5)
         
@@ -337,7 +356,7 @@ class Window:
                             os.unlink(temp_path)
                         raise
 
-            except urllib.error.HTTPError as e:
+            except urllib_error.HTTPError as e:
                 if e.code == 429:  # Rate limited
                     wait_time = min(2 ** attempt, 10)  # Exponential backoff, max 10s
                     print(f"Rate limited, waiting {wait_time}s before retry {attempt + 1}/{retries}")
@@ -347,7 +366,7 @@ class Window:
                     raise ValueError(f"HTTP {e.code}: {e.reason}")
                 else:
                     raise
-            except urllib.error.URLError as e:
+            except urllib_error.URLError as e:
                 if attempt == retries - 1:
                     raise ValueError(f"Network error: {e.reason}")
                 continue
@@ -364,10 +383,22 @@ class Window:
             # Check if it's a local file first
             if isfile(input_text):
                 path = input_text
+                # Don't save file paths as URLs
+                self._last_url = None
             else:
                 # Try to fetch as remote image
                 self.tlabel['text'] = 'Fetching remote image...'
                 path = self._fetch_remote_image(input_text)
+                # Save the URL for persistence
+                self._last_url = input_text
+                self.tools['last_image_url'] = input_text
+                try:
+                    if not getattr(self, '_initializing', False):
+                        with open(self._config_path, 'w', encoding='utf-8') as f:
+                            json.dump(self.tools, f, ensure_ascii=False, indent=4)
+                        print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
+                except Exception as e:
+                    print(f"Failed to save config: {e}")
 
             self._set_img(path=path)
             self.tlabel['text'] = f'Image loaded successfully'
@@ -394,6 +425,19 @@ class Window:
         else:
             self.draw_options &= ~option
 
+        # Save drawing options to config
+        if 'drawing_options' not in self.tools:
+            self.tools['drawing_options'] = {}
+        self.tools['drawing_options']['ignore_white_pixels'] = bool(self.draw_options & Bot.IGNORE_WHITE)
+        self.tools['drawing_options']['use_custom_colors'] = bool(self.draw_options & Bot.USE_CUSTOM_COLORS)
+        try:
+            if not getattr(self, '_initializing', False):
+                with open(self._config_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
+                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
+        except Exception as e:
+            print(f"Failed to save config: {e}")
+
     def _on_slider_move(self, index, val):
         val = float(val)
         if index == 1:  # Pixel Size - force to integer
@@ -403,6 +447,31 @@ class Window:
         else:
             self.bot.settings[index] = round(val, 3)
             self._optlabl[index]['text'] = f"{self._options[index][0]}: {val:.2f}"
+
+        # Save drawing settings to config
+        if 'drawing_settings' not in self.tools:
+            self.tools['drawing_settings'] = {}
+        self.tools['drawing_settings']['delay'] = self.bot.settings[0]
+        self.tools['drawing_settings']['pixel_size'] = self.bot.settings[1]
+        self.tools['drawing_settings']['precision'] = self.bot.settings[2]
+        self.tools['drawing_settings']['jump_delay'] = self.bot.settings[3]
+
+        try:
+            try:
+                if not getattr(self, '_initializing', False):
+                    with open(self._config_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
+                else:
+                    # Skip saving during initialization
+                    pass
+            except Exception as e:
+                print(f"Failed to save config: {e}")
+            else:
+                if not getattr(self, '_initializing', False):
+                    print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
+        except Exception as e:
+            print(f"Failed to save config: {e}")
+
         self.tlabel['text'] = Window._SLIDER_TOOLTIPS[index]
 
     def _on_pause_key_entry_press(self, event):
@@ -424,6 +493,16 @@ class Window:
             self._pause_key_entry.delete(0, END)
             self._pause_key_entry.insert(0, key_name)
             self.bot.pause_key = key_name
+
+            # Save the pause key to config file
+            self.tools['pause_key'] = key_name
+            try:
+                if not getattr(self, '_initializing', False):
+                    with open(self._config_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                print(f"Failed to save config: {e}")
+
             return "break"
 
         # This should never be reached when not busy, but just in case
@@ -432,54 +511,91 @@ class Window:
 
     def load_config(self):
         try:
-            with open('config.json', 'r') as f:
+            with open(self._config_path, 'r', encoding='utf-8') as f:
                 self.tools = json.load(f)
+            print(f"Loaded config from {self._config_path}; keys={list(self.tools.keys())}")
+
+            # Load pause key first
+            self.bot.pause_key = self.tools.get('pause_key', 'p')
+            self._pause_key_entry.delete(0, END)
+            self._pause_key_entry.insert(0, self.bot.pause_key)
+
+            # Load saved drawing settings
+            if 'drawing_settings' in self.tools:
+                settings = self.tools['drawing_settings']
+                # Update bot settings
+                self.bot.settings = [
+                    settings.get('delay', 0.1),
+                    settings.get('pixel_size', 12),
+                    settings.get('precision', 0.9),
+                    settings.get('jump_delay', 0.5)
+                ]
+                # Update UI sliders
+                for i, val in enumerate(self.bot.settings):
+                    if i == 1:  # Pixel Size - force to integer
+                        val = int(val)
+                    self._optvars[i].set(val)
+                    if i == 1:  # Pixel Size - show as integer
+                        self._optlabl[i]['text'] = f"{self._options[i][0]}: {val}"
+                    else:
+                        self._optlabl[i]['text'] = f"{self._options[i][0]}: {val:.2f}"
+
+            # Load saved drawing options
+            if 'drawing_options' in self.tools:
+                options = self.tools['drawing_options']
+                # Update ignore white pixels checkbox
+                ignore_white = options.get('ignore_white_pixels', True)
+                self._checkbutton_vars[0].set(1 if ignore_white else 0)
+                if ignore_white:
+                    self.draw_options |= Bot.IGNORE_WHITE
+                else:
+                    self.draw_options &= ~Bot.IGNORE_WHITE
+
+                # Update use custom colors checkbox
+                use_custom = options.get('use_custom_colors', False)
+                self._checkbutton_vars[1].set(1 if use_custom else 0)
+                if use_custom:
+                    self.draw_options |= Bot.USE_CUSTOM_COLORS
+                else:
+                    self.draw_options &= ~Bot.USE_CUSTOM_COLORS
+
+            # Update URL entry field with last saved URL if available
+            last_url = self.tools.get('last_image_url', '')
+            if last_url:
+                self._ientry.delete(0, END)
+                self._ientry.insert(0, last_url)
+                self._last_url = last_url
+
+            # Try to load old setup data (Palette, Canvas, Custom Colors) if available
             try:
-                self.bot.init_palette(
-                    # Converting string key into tuple
-                    colors_pos={
-                        tuple(map(int, k[1:-1].split(', '))): tuple(v)
-                        for k, v in self.tools['Palette']['color_coords'].items()
-                    }
-                )
-                self.bot.init_canvas(self.tools['Canvas']['box'])
-                self.bot.init_custom_colors(self.tools['Custom Colors']['box'])
-                self.bot.pause_key = self.tools.get('pause_key', 'p')
-                self._pause_key_entry.delete(0, END)
-                self._pause_key_entry.insert(0, self.bot.pause_key)
-                self.tlabel['text'] = 'Successfully loaded old setup from config file.'
-            except Exception as e:
-                traceback.print_exc()
-                self.tlabel['text'] = 'Some tools have not been initialized. This may prevent the bot from working correctly.'
+                if 'Palette' in self.tools and self.tools['Palette'].get('color_coords'):
+                    self.bot.init_palette(
+                        # Converting string key into tuple
+                        colors_pos={
+                            tuple(map(int, k[1:-1].split(', '))): tuple(v)
+                            for k, v in self.tools['Palette']['color_coords'].items()
+                        }
+                    )
+                if 'Canvas' in self.tools and self.tools['Canvas'].get('box'):
+                    self.bot.init_canvas(self.tools['Canvas']['box'])
+                if 'Custom Colors' in self.tools and self.tools['Custom Colors'].get('box'):
+                    self.bot.init_custom_colors(self.tools['Custom Colors']['box'])
+
+                self.tlabel['text'] = 'Successfully loaded setup from config file.'
+            except Exception:
+                # Old setup data might be missing or invalid, but new settings loaded
+                self.tlabel['text'] = 'Loaded settings from config. Setup may need to be redone for full functionality.'
+
         except Exception as e:
+            # Config file missing or invalid, use defaults without overwriting
             self.tools = {
-                'Palette': {
-                    'status': False,
-                    'box': None,
-                    'rows': 1,
-                    'cols': 1,
-                    'color_coords': None,
-                    'preview': None,
-                },
-                'Canvas': {
-                    'status': False,
-                    'box': None,
-                    'preview': None,
-                },
-                'Custom Colors': {
-                    'status': False,
-                    'box': None,
-                    'preview': None,
-                },
                 'pause_key': 'p',
             }
-            with open('config.json', 'w', encoding='utf-8') as f:
-                json.dump(self.tools, f, ensure_ascii=False, indent=4)
             self.bot.pause_key = 'p'
             self._pause_key_entry.delete(0, END)
             self._pause_key_entry.insert(0, 'p')
-            self.tlabel['text'] = f'Config file was either missing or incorrectly modified and has been reset. Please perform setup again. Traceback: {e}'
-          
+            self.tlabel['text'] = f'Config file missing or invalid ({str(e)}). Using default settings.'
+
     def is_free(func):
         '''
         Decorator that only executes a function when the bot is not busy by checking the self.busy flag.
@@ -494,7 +610,7 @@ class Window:
             else:
                 self.busy = True
                 func(self)
-        
+
         return decorator
 
     def _set_busy(self, val):
@@ -503,16 +619,83 @@ class Window:
     @is_free
     def setup(self):
         self.load_config()
-        # Filter tools to only include the setup-relevant entries
-        setup_tools = {k: v for k, v in self.tools.items() if k in ['Palette', 'Canvas', 'Custom Colors']}
-        self._iwindow = SetupWindow(parent=self._root, bot=self.bot, tools=setup_tools, on_complete=self._on_complete_setup, title='Setup')
+        # Ensure setup tools exist with default structure if missing
+        default_tools = {
+            'Palette': {
+                'status': False,
+                'box': None,
+                'rows': 6,
+                'cols': 8,
+                'color_coords': None,
+                'preview': None,
+            },
+            'Canvas': {
+                'status': False,
+                'box': None,
+                'preview': None,
+            },
+            'Custom Colors': {
+                'status': False,
+                'box': None,
+                'preview': None,
+            }
+        }
+
+        # Build a dedicated setup_tools mapping (only the tools) so the
+        # SetupWindow doesn't iterate non-tool keys (like drawing_settings).
+        setup_tools = {}
+        for tool_name in ['Palette', 'Canvas', 'Custom Colors']:
+            existing = self.tools.get(tool_name, {})
+            merged = default_tools[tool_name].copy()
+            merged.update(existing if isinstance(existing, dict) else {})
+            setup_tools[tool_name] = merged
+
+        # Keep a reference so we can merge results back into self.tools
+        self._setup_tools = setup_tools
+        self._iwindow = SetupWindow(parent=self._root, bot=self.bot, tools=self._setup_tools, on_complete=self._on_complete_setup, title='Setup')
 
     def _on_complete_setup(self):
+        # If SetupWindow returned modified setup data, merge it back into self.tools
+        if hasattr(self, '_setup_tools'):
+            for k, v in self._setup_tools.items():
+                self.tools[k] = v
+
+        # The SetupWindow has already modified self._setup_tools, so save everything
         self.tools['pause_key'] = self._pause_key_entry.get().strip() or 'p'
         self.bot.pause_key = self.tools['pause_key']
-        with open('config.json', 'w', encoding='utf-8') as f:
-            json.dump(self.tools, f, ensure_ascii=False, indent=4)
-        self.tlabel['text'] = 'Setup saved.'
+
+        # Convert tuples to lists for JSON serialization
+        for tool_name in ['Canvas', 'Custom Colors']:
+            if tool_name in self.tools and 'box' in self.tools[tool_name]:
+                box = self.tools[tool_name]['box']
+                if isinstance(box, tuple):
+                    self.tools[tool_name]['box'] = list(box)
+
+        # Save current drawing settings
+        if 'drawing_settings' not in self.tools:
+            self.tools['drawing_settings'] = {}
+        self.tools['drawing_settings']['delay'] = self.bot.settings[0]
+        self.tools['drawing_settings']['pixel_size'] = self.bot.settings[1]
+        self.tools['drawing_settings']['precision'] = self.bot.settings[2]
+        self.tools['drawing_settings']['jump_delay'] = self.bot.settings[3]
+
+        # Save current drawing options
+        if 'drawing_options' not in self.tools:
+            self.tools['drawing_options'] = {}
+        self.tools['drawing_options']['ignore_white_pixels'] = bool(self.draw_options & Bot.IGNORE_WHITE)
+        self.tools['drawing_options']['use_custom_colors'] = bool(self.draw_options & Bot.USE_CUSTOM_COLORS)
+
+        # Save current URL if any
+        if hasattr(self, '_last_url') and self._last_url:
+            self.tools['last_image_url'] = self._last_url
+
+        try:
+            with open(self._config_path, 'w', encoding='utf-8') as f:
+                json.dump(self.tools, f, ensure_ascii=False, indent=4)
+            self.tlabel['text'] = 'Setup saved.'
+        except Exception as e:
+            self.tlabel['text'] = f'Failed to save config: {str(e)}'
+
         self._set_busy(False)
 
     @is_free
@@ -549,6 +732,22 @@ class Window:
             self._set_busy(False)
 
     @is_free
+    def _test_draw_thread(self):
+        self._test_draw_thread = Thread(target=self.test_draw)
+        self._test_draw_thread.start()
+        self._manage_test_draw_thread()
+
+    def _manage_test_draw_thread(self):
+        # Display progress updates every half a second
+        if self._test_draw_thread.is_alive() and self.busy:
+            self._root.after(500, self._manage_test_draw_thread)
+            self.tlabel['text'] = f"Test drawing: {self.bot.progress:.2f}%"
+        elif self.busy:
+            # Test draw finished
+            self.tlabel['text'] = 'Test draw completed!'
+            self._set_busy(False)
+
+    @is_free
     def _start_draw_thread(self):
         self._draw_thread = Thread(target=self.start)
         self._draw_thread.start()
@@ -559,6 +758,72 @@ class Window:
         if self._draw_thread.is_alive() and self.busy:
             self._root.after(500, self._manage_draw_thread)
             self.tlabel['text'] = f"Processing image: {self.bot.progress:.2f}%"
+
+    def test_draw(self):
+        try:
+            t = time.time()
+
+            # Check for cached computation first
+            has_cache, cache_file = self.bot.get_cached_status(self._imname, flags=self.draw_options, mode=self._mode)
+            if has_cache:
+                # Load from cache
+                print(f"Loading from cache: {cache_file}")
+                cache_data = self.bot.load_cached(cache_file)
+                if cache_data:
+                    cmap = cache_data['cmap']
+                    # Log cache details
+                    num_colors = len(cmap)
+                    total_points = sum(len(lines) for lines in cmap.values())
+                    cache_time = time.ctime(cache_data['timestamp'])
+                    print(f"Cache loaded - {num_colors} colors, {total_points} coordinate points")
+                    print(f"Cached on: {cache_time}")
+                    print(f"Settings: Delay={cache_data['settings'][0]}, PixelSize={cache_data['settings'][1]}")
+                    self.tlabel['text'] = f"Using cached computation for test draw"
+                else:
+                    # Cache invalid, fall back to processing
+                    print("Cache file invalid, processing live...")
+                    cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
+            else:
+                # No cache, process normally
+                print("No cache available, processing live...")
+                cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
+
+            # Count total lines and limit to first 20 (or fewer if less available)
+            total_lines = sum(len(lines) for lines in cmap.values())
+            test_lines = min(20, total_lines)
+            print(f"Test drawing first {test_lines} lines out of {total_lines} total")
+
+            messagebox.showinfo(self.title, f'Test drawing the first {test_lines} lines. Adjust your brush size in the painting app, then use the full "Start" button.')
+            self._root.iconify()
+            # Clear any previous termination/paused state so test can be retried
+            self.bot.terminate = False
+            self.bot.paused = False
+            self.bot.drawing = False
+            self.bot.draw_state = {
+                'color_idx': 0,
+                'line_idx': 0,
+                'segment_idx': 0,
+                'current_color': None,
+                'was_paused': False
+            }
+
+            result = self.bot.test_draw(cmap, max_lines=test_lines)
+            self._root.deiconify()  # type: ignore
+            self._root.wm_state('normal')  # type: ignore
+            if result == 'success':
+                self.tlabel['text'] = f"Test draw completed. Time elapsed: {time.time() - t:.2f}s"
+            elif result == 'terminated':
+                self.tlabel['text'] = f"Test draw terminated by user. Time elapsed: {time.time() - t:.2f}s"
+                # Clear termination so future tests can run
+                self.bot.terminate = False
+            else:
+                self.tlabel['text'] = f"Test draw result: {result}"
+        except Exception as e:
+            traceback.print_exc()
+            messagebox.showerror(self.title, str(e))
+
+        # Let the thread manager know that the task has ended
+        self._set_busy(False)
 
     def start(self):
         try:
@@ -596,6 +861,18 @@ class Window:
 
             messagebox.showwarning(self.title, f'Press ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
             self._root.iconify()
+            # Clear any previous termination/paused state before starting
+            self.bot.terminate = False
+            self.bot.paused = False
+            self.bot.drawing = False
+            self.bot.draw_state = {
+                'color_idx': 0,
+                'line_idx': 0,
+                'segment_idx': 0,
+                'current_color': None,
+                'was_paused': False
+            }
+
             result = self.bot.draw(cmap)
             self._root.deiconify()  # type: ignore
             self._root.wm_state('normal')  # type: ignore
@@ -611,6 +888,8 @@ class Window:
                     'current_color': None,
                     'was_paused': False
                 }
+                # Clear termination flag so user can start again
+                self.bot.terminate = False
             elif result == 'paused':
                 self.tlabel['text'] = f"Paused. Press {self.bot.pause_key} again to resume. Time elapsed: {time.time() - t:.2f}s"
             else:

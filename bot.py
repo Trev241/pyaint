@@ -457,6 +457,70 @@ class Bot:
         self.draw_state['was_paused'] = False
         return 'success'
 
+    def test_draw(self, cmap, max_lines=20):
+        '''
+        Test draw the first max_lines from the coordinate map.
+        Useful for calibrating brush size before full drawing.
+        '''
+        # Set drawing flag for pause/resume support during test draw
+        self.drawing = True
+        lines_drawn = 0
+
+        for color_idx, (c, lines) in enumerate(cmap.items()):
+            if lines_drawn >= max_lines:
+                break
+
+            # Log color change
+            print(f"Switching to color {c} for test draw")
+
+            if c in self._palette.colors:
+                pyautogui.click(self._palette.colors_pos[c], clicks=3, interval=.15)
+            else:
+                try:
+                    cc_box = self._custom_colors
+                    pyautogui.click((cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2), clicks=3, interval=.15)
+                except:
+                    raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
+                pyautogui.press('tab', presses=7, interval=.05)
+                for val in c:
+                    numbers = (d for d in str(val))
+                    for n in numbers:
+                        pyautogui.press(str(n))
+                    pyautogui.press('tab')
+                pyautogui.press('tab')
+                pyautogui.press('enter')
+                pyautogui.PAUSE = 0.0
+
+            for line_idx, line in enumerate(lines):
+                if lines_drawn >= max_lines:
+                    break
+
+                # Log progress
+                lines_drawn += 1
+                print(f"Drawing test line {lines_drawn}/{max_lines} for color {c}")
+
+                # Check for pause/terminate
+                if self.terminate:
+                    pyautogui.mouseUp()
+                    self.drawing = False  # Clear drawing flag on termination
+                    return 'terminated'
+
+                # Draw the line (simplified, no segmentation for test draw)
+                start_pos, end_pos = line
+                distance = ((end_pos[0] - start_pos[0]) ** 2 + (end_pos[1] - start_pos[1]) ** 2) ** 0.5
+
+                if distance < 1:  # Very short line
+                    pyautogui.moveTo(start_pos)
+                    pyautogui.dragTo(end_pos[0], end_pos[1], self.settings[Bot.DELAY], button='left')
+                else:
+                    # Simple drag for test draw
+                    pyautogui.moveTo(start_pos)
+                    pyautogui.dragTo(end_pos[0], end_pos[1], self.settings[Bot.DELAY], button='left')
+
+        print(f"Test draw completed: {lines_drawn} lines drawn")
+        self.drawing = False  # Clear drawing flag
+        return 'success'
+
     def get_cache_filename(self, image_path, flags=0, mode=LAYERED):
         """Generate a unique cache filename based on image and settings"""
         # Read image file to compute hash
