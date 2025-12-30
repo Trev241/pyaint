@@ -86,6 +86,7 @@ class Bot:
             'color_idx': 0,
             'line_idx': 0,
             'segment_idx': 0,
+            'current_color': None,
             'cmap': None
         }
 
@@ -269,7 +270,8 @@ class Bot:
         Supports pause/resume functionality and configurable jump delays.
         '''
 
-        # Reset paused state at start of new draw
+        # Reset bot state for fresh drawing session
+        self.terminate = False
         self.paused = False
         last_stroke_end = None  # Track last stroke position for jump detection
 
@@ -277,6 +279,11 @@ class Bot:
             # Skip colors already drawn if resuming
             if color_idx < self.draw_state['color_idx']:
                 continue
+
+            # If resuming and we have a specific color to resume with, use that instead
+            if self.draw_state['current_color'] is not None and color_idx == self.draw_state['color_idx']:
+                c = self.draw_state['current_color']
+                print(f"Resuming with saved color {c}")
 
             # Log color change with cached coordinate info
             num_strokes = len(lines)
@@ -317,9 +324,15 @@ class Bot:
                         print(f"Large jump detected ({jump_distance:.1f} pixels) - adding {self.settings[Bot.JUMP_DELAY]}s delay")
                         time.sleep(self.settings[Bot.JUMP_DELAY])
 
-                # Wait if paused
+                # Wait if paused - detect when we come out of pause for stroke replay
+                was_paused = False
                 while self.paused and not self.terminate:
+                    was_paused = True
                     time.sleep(0.1)  # Small delay to avoid busy waiting
+
+                # If we just came out of pause, mark for stroke replay
+                if was_paused:
+                    self.draw_state['was_paused'] = True
 
                 if self.terminate:
                     pyautogui.mouseUp()
@@ -344,8 +357,19 @@ class Bot:
                     pyautogui.moveTo(start_pos)
                     pyautogui.mouseDown(button='left')
 
-                    for i in range(1, segments + 1):
+                    # Always replay the current stroke when resuming from pause
+                    start_segment = 1
+                    if self.draw_state.get('was_paused', False):
+                        print(f"Replaying stroke after pause - ensuring clean result")
+                        self.draw_state['was_paused'] = False
+
+                    for i in range(start_segment, segments + 1):
                         if self.paused or self.terminate:
+                            # Save current state for resume
+                            self.draw_state['color_idx'] = color_idx
+                            self.draw_state['line_idx'] = line_idx
+                            self.draw_state['segment_idx'] = i - 1  # Current segment being drawn
+                            self.draw_state['current_color'] = c  # Save current color
                             pyautogui.mouseUp()
                             if self.terminate:
                                 return 'terminated'
@@ -354,7 +378,28 @@ class Bot:
                                 time.sleep(0.1)
                             if self.terminate:
                                 return 'terminated'
-                            # Resume the stroke
+                            # Resume the stroke - ensure we're using the correct color
+                            if self.draw_state['current_color'] != c:
+                                print(f"Resuming with color {self.draw_state['current_color']} (was {c})")
+                                c = self.draw_state['current_color']
+                                # Re-select the correct color
+                                if c in self._palette.colors:
+                                    pyautogui.click(self._palette.colors_pos[c], clicks=3, interval=.15)
+                                else:
+                                    try:
+                                        cc_box = self._custom_colors
+                                        pyautogui.click((cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2), clicks=3, interval=.15)
+                                    except:
+                                        raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
+                                    pyautogui.press('tab', presses=7, interval=.05)
+                                    for val in c:
+                                        numbers = (d for d in str(val))
+                                        for n in numbers:
+                                            pyautogui.press(str(n))
+                                        pyautogui.press('tab')
+                                    pyautogui.press('tab')
+                                    pyautogui.press('enter')
+                                pyautogui.PAUSE = 0.0
                             pyautogui.mouseDown(button='left')
 
                         # Calculate next position
@@ -374,6 +419,8 @@ class Bot:
         self.draw_state['color_idx'] = 0
         self.draw_state['line_idx'] = 0
         self.draw_state['segment_idx'] = 0
+        self.draw_state['current_color'] = None
+        self.draw_state['was_paused'] = False
         return 'success'
 
     def get_cache_filename(self, image_path, flags=0, mode=LAYERED):
@@ -398,11 +445,64 @@ class Bot:
 
         return f"{cache_dir}/{image_hash}_{settings_hash}.json"
 
+    def estimate_drawing_time(self, cmap):
+        """Estimate how long drawing might take based on coordinate data"""
+        try:
+            total_strokes = sum(len(lines) for lines in cmap.values())
+            estimated_seconds = 0
+
+            # Calculate time for each color's strokes
+            for color, lines in cmap.items():
+                last_end_pos = None
+
+                for i, line in enumerate(lines):
+                    start_pos, end_pos = line
+
+                    # Calculate stroke distance
+                    distance = ((end_pos[0] - start_pos[0]) ** 2 + (end_pos[1] - start_pos[1]) ** 2) ** 0.5
+
+                    # Add normal delay for each stroke
+                    estimated_seconds += self.settings[Bot.DELAY]
+
+                    # Check for jump delay if this isn't the first stroke in this color
+                    if last_end_pos is not None:
+                        jump_distance = ((start_pos[0] - last_end_pos[0]) ** 2 + (start_pos[1] - last_end_pos[1]) ** 2) ** 0.5
+                        if jump_distance > 5:  # Same threshold as in draw method
+                            estimated_seconds += self.settings[Bot.JUMP_DELAY]
+
+                    # Update last position for next jump check
+                    last_end_pos = end_pos
+
+            # Add color switching overhead (~0.5 seconds per color)
+            num_colors = len(cmap)
+            estimated_seconds += num_colors * 0.5
+
+            # Format nicely
+            if estimated_seconds < 10:
+                return f"~{estimated_seconds:.1f} seconds"
+            elif estimated_seconds < 60:
+                return f"~{estimated_seconds:.0f} seconds"
+            elif estimated_seconds < 3600:
+                minutes = int(estimated_seconds // 60)
+                seconds = estimated_seconds % 60
+                return f"~{minutes}:{seconds:02.0f} minutes"
+            else:
+                hours = int(estimated_seconds // 3600)
+                minutes = int((estimated_seconds % 3600) // 60)
+                return f"~{hours}:{minutes:02.0f} hours"
+
+        except Exception:
+            return "Unknown (unable to analyze)"
+
     def precompute(self, image_path, flags=0, mode=LAYERED):
         """Pre-compute the image processing and save to cache"""
         cache_file = self.get_cache_filename(image_path, flags, mode)
         if cache_file is None:
             raise RuntimeError("Cannot precompute: canvas not initialized")
+
+        print("Pre-computing image...")
+
+        start_time = time.time()
 
         # Process the image
         cmap = self.process(image_path, flags, mode)
@@ -426,6 +526,10 @@ class Bot:
         # Save to cache file
         with open(cache_file, 'w') as f:
             json.dump(cache_data, f, indent=2)
+
+        actual_time = time.time() - start_time
+        print(f"Pre-computation completed in {actual_time:.2f} seconds")
+        print(f"Cache saved to: {cache_file}")
 
         return cache_file
 

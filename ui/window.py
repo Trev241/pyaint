@@ -460,7 +460,15 @@ class Window:
     def precompute(self):
         try:
             cache_file = self.bot.precompute(self._imname, flags=self.draw_options, mode=self._mode)
-            self.tlabel['text'] = f'Pre-compute saved to {cache_file}'
+
+            # Load the cached data to estimate drawing time
+            cache_data = self.bot.load_cached(cache_file)
+            if cache_data:
+                drawing_eta = self.bot.estimate_drawing_time(cache_data['cmap'])
+                self.tlabel['text'] = f'Pre-compute completed! Estimated drawing time: {drawing_eta}'
+            else:
+                self.tlabel['text'] = f'Pre-compute completed! Cache saved.'
+
         except Exception as e:
             traceback.print_exc()
             messagebox.showerror(self.title, f'Pre-compute failed: {str(e)}')
@@ -508,6 +516,11 @@ class Window:
                 print("No cache available, processing live...")
                 cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
 
+            # Show drawing time estimate
+            drawing_eta = self.bot.estimate_drawing_time(cmap)
+            print(f"Estimated drawing time: {drawing_eta}")
+            self.tlabel['text'] = f"Starting draw - ETA: {drawing_eta}"
+
             messagebox.showwarning(self.title, f'Press ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
             self._root.iconify()
             result = self.bot.draw(cmap)
@@ -517,6 +530,14 @@ class Window:
                 self.tlabel['text'] = f"Success. Time elapsed: {time.time() - t:.2f}s"
             elif result == 'terminated':
                 self.tlabel['text'] = f"Terminated by user. Time elapsed: {time.time() - t:.2f}s"
+                # Reset bot state for fresh start after termination
+                self.bot.draw_state = {
+                    'color_idx': 0,
+                    'line_idx': 0,
+                    'segment_idx': 0,
+                    'current_color': None,
+                    'was_paused': False
+                }
             elif result == 'paused':
                 self.tlabel['text'] = f"Paused. Press {self.bot.pause_key} again to resume. Time elapsed: {time.time() - t:.2f}s"
             else:
