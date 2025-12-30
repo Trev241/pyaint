@@ -313,39 +313,52 @@ class Bot:
                 if nl.get('enabled') and nl.get('coords'):
                     nx, ny = nl['coords']
                     print(f"[NewLayer] attempting click at {(nx, ny)} with mods={nl.get('modifiers')}")
-                    # Hold modifiers
-                    if nl['modifiers'].get('ctrl'):
-                        pyautogui.keyDown('ctrl')
-                    if nl['modifiers'].get('alt'):
-                        pyautogui.keyDown('alt')
-                    if nl['modifiers'].get('shift'):
-                        pyautogui.keyDown('shift')
 
-                    # Give the OS a moment to register modifier keydowns
-                    time.sleep(0.12)
+                    # Track which modifiers were pressed so we can release them in reverse order
+                    pressed_modifiers = []
+
+                    # Hold modifiers in order (Ctrl, Alt, Shift)
+                    modifier_keys = [('ctrl', 'ctrl'), ('alt', 'alt'), ('shift', 'shift')]
+                    for mod_key, pygui_key in modifier_keys:
+                        if nl['modifiers'].get(mod_key):
+                            pyautogui.keyDown(pygui_key)
+                            pressed_modifiers.append(pygui_key)
+                            print(f"[NewLayer] pressed modifier: {pygui_key}")
+
+                    # Give the OS time to register modifier keydowns
+                    time.sleep(0.15)
 
                     # Use explicit mouseDown/mouseUp for better reliability in some apps
                     print(f"[NewLayer] performing mouseDown at {(nx, ny)}")
                     pyautogui.mouseDown(nx, ny, button='left')
-                    time.sleep(0.06)
+                    time.sleep(0.08)
                     pyautogui.mouseUp(nx, ny, button='left')
                     print(f"[NewLayer] mouse click performed at {(nx, ny)}")
 
-                    # Short delay to ensure the target app processes the click before releasing modifiers
-                    time.sleep(0.18)
+                    # Wait for the target app to process the click
+                    time.sleep(0.25)
 
-                    # Release modifiers
-                    if nl['modifiers'].get('shift'):
-                        pyautogui.keyUp('shift')
-                    if nl['modifiers'].get('alt'):
-                        pyautogui.keyUp('alt')
-                    if nl['modifiers'].get('ctrl'):
-                        pyautogui.keyUp('ctrl')
+                    # Release modifiers in reverse order (Shift, Alt, Ctrl)
+                    for pygui_key in reversed(pressed_modifiers):
+                        pyautogui.keyUp(pygui_key)
+                        print(f"[NewLayer] released modifier: {pygui_key}")
 
-                    # Give a bit more time for UI to update before selecting color
-                    time.sleep(0.12)
-            except Exception:
-                pass
+                    # Ensure all modifiers are fully released before proceeding
+                    time.sleep(0.15)
+
+                    # Wait at least 0.5 seconds before starting to paint to ensure new layer is ready
+                    print(f"[NewLayer] waiting 0.5 seconds before painting...")
+                    time.sleep(0.5)
+
+            except Exception as e:
+                print(f"[NewLayer] Error during new layer creation: {e}")
+                # Ensure modifiers are released even if there's an error
+                try:
+                    pyautogui.keyUp('shift')
+                    pyautogui.keyUp('alt')
+                    pyautogui.keyUp('ctrl')
+                except:
+                    pass
 
             if c in self._palette.colors:
                 pyautogui.click(self._palette.colors_pos[c], clicks=3, interval=.15)

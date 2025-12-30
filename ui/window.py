@@ -112,8 +112,19 @@ class Window:
         self.load_config()  # Load saved config
         # UI initialization finished — allow saving
         self._initializing = False
-        
+
         self._root.mainloop()
+
+    def __del__(self):
+        """Clean up cache directory on application exit"""
+        try:
+            import shutil
+            cache_dir = 'cache'
+            if os.path.exists(cache_dir):
+                shutil.rmtree(cache_dir)
+                print(f"Cleaned up cache directory: {cache_dir}")
+        except Exception as e:
+            print(f"Warning: Could not clean up cache directory: {e}")
         
     def _init_cpanel(self):
         # CONTROL PANEL FRAME
