@@ -346,9 +346,9 @@ class Bot:
                     # Ensure all modifiers are fully released before proceeding
                     time.sleep(0.15)
 
-                    # Wait at least 0.5 seconds before starting to paint to ensure new layer is ready
-                    print(f"[NewLayer] waiting 0.5 seconds before painting...")
-                    time.sleep(0.5)
+                    # Wait at least 0.25 seconds before starting to paint to ensure new layer is ready
+                    print(f"[NewLayer] waiting 0.25 seconds before painting...")
+                    time.sleep(0.25)
 
             except Exception as e:
                 print(f"[NewLayer] Error during new layer creation: {e}")
@@ -435,7 +435,7 @@ class Bot:
                     self.drawing = False  # Clear drawing flag on termination
                     return 'terminated'
 
-                # Draw line with pause support
+                # Draw line with pause support (complete each stroke before checking pause)
                 end_pos = (line[1][0], line[1][1])
 
                 # Calculate distance
@@ -447,7 +447,7 @@ class Bot:
                     pyautogui.moveTo(start_pos)
                     pyautogui.dragTo(end_pos[0], end_pos[1], self.settings[Bot.DELAY], button='left')
                 else:
-                    # Break into segments for pause support
+                    # Break into segments for smooth drawing
                     segments = max(2, min(10, int(distance / 10)))  # 2-10 segments based on length
                     segment_delay = self.settings[Bot.DELAY] / segments
 
@@ -461,44 +461,6 @@ class Bot:
                         self.draw_state['was_paused'] = False
 
                     for i in range(start_segment, segments + 1):
-                        if self.paused or self.terminate:
-                            # Save current state for resume
-                            self.draw_state['color_idx'] = color_idx
-                            self.draw_state['line_idx'] = line_idx
-                            self.draw_state['segment_idx'] = i - 1  # Current segment being drawn
-                            self.draw_state['current_color'] = c  # Save current color
-                            pyautogui.mouseUp()
-                            if self.terminate:
-                                return 'terminated'
-                            # Wait for resume
-                            while self.paused and not self.terminate:
-                                time.sleep(0.1)
-                            if self.terminate:
-                                return 'terminated'
-                            # Resume the stroke - ensure we're using the correct color
-                            if self.draw_state['current_color'] != c:
-                                print(f"Resuming with color {self.draw_state['current_color']} (was {c})")
-                                c = self.draw_state['current_color']
-                                # Re-select the correct color
-                                if c in self._palette.colors:
-                                    pyautogui.click(self._palette.colors_pos[c], clicks=3, interval=.15)
-                                else:
-                                    try:
-                                        cc_box = self._custom_colors
-                                        pyautogui.click((cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2), clicks=3, interval=.15)
-                                    except:
-                                        raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
-                                    pyautogui.press('tab', presses=7, interval=.05)
-                                    for val in c:
-                                        numbers = (d for d in str(val))
-                                        for n in numbers:
-                                            pyautogui.press(str(n))
-                                        pyautogui.press('tab')
-                                    pyautogui.press('tab')
-                                    pyautogui.press('enter')
-                                pyautogui.PAUSE = 0.0
-                            pyautogui.mouseDown(button='left')
-
                         # Calculate next position
                         t = i / segments
                         next_x = start_pos[0] + dx * t
@@ -508,6 +470,25 @@ class Bot:
                         time.sleep(segment_delay / segments)  # Distribute delay
 
                     pyautogui.mouseUp()
+
+                # Check for pause after completing the stroke
+                if self.paused or self.terminate:
+                    # Save current state for resume
+                    self.draw_state['color_idx'] = color_idx
+                    self.draw_state['line_idx'] = line_idx
+                    self.draw_state['segment_idx'] = 0  # Stroke completed, so reset segment
+                    self.draw_state['current_color'] = c  # Save current color
+                    if self.terminate:
+                        return 'terminated'
+                    # Wait for resume
+                    print("Paused after completing stroke - press resume to continue")
+                    while self.paused and not self.terminate:
+                        time.sleep(0.1)
+                    if self.terminate:
+                        return 'terminated'
+                    # Resume - replay the current stroke to ensure clean result
+                    print(f"Resuming - replaying current stroke for color {c}")
+                    self.draw_state['was_paused'] = True
 
                 # Update last stroke position for jump detection
                 last_stroke_end = end_pos
