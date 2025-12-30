@@ -123,8 +123,9 @@ class Window:
 
         # Options
         btn_names = (
-            'Setup', 
-            # 'Inspect', 
+            'Setup',
+            # 'Inspect',
+            'Pre-compute',
             'Start'
         )
         buttons = []
@@ -134,7 +135,10 @@ class Window:
             buttons.append(b)
         buttons[0]['command'] = self.setup
         # buttons[1]['command'] = self.test
-        buttons[1]['command'] = self._start_draw_thread
+        buttons[1]['command'] = self._precompute_thread
+        buttons[2]['command'] = self._start_draw_thread
+
+        curr_row = 4
 
         self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
         self._teclbl.grid(column=0, row=2, columnspan=2, sticky='w', padx=5, pady=5)
@@ -278,8 +282,18 @@ class Window:
         self._ipanel.update()
         size = utils.adjusted_img_size(img, (self._ipanel.winfo_width() - 10, self._ipanel.winfo_height() * .8 - 10) )
         self._img = ImageTk.PhotoImage(img.resize(size))
-        
+
         self._ilabel['image'] = self._img
+
+        # Check cache status and update status (only if canvas is initialized)
+        if hasattr(self.bot, '_canvas') and self.bot._canvas is not None:
+            has_cache, _ = self.bot.get_cached_status(self._imname, flags=self.draw_options, mode=self._mode)
+            if has_cache:
+                self.tlabel['text'] = 'Cached computation available ✓'
+            else:
+                self.tlabel['text'] = 'No cached computation - will process live'
+        else:
+            self.tlabel['text'] = 'Loading configuration...'
 
     def _on_search_img(self):
         try:
@@ -424,6 +438,31 @@ class Window:
         self._set_busy(False)
 
     @is_free
+    def _precompute_thread(self):
+        self._precompute_thread = Thread(target=self.precompute)
+        self._precompute_thread.start()
+        self._manage_precompute_thread()
+
+    def _manage_precompute_thread(self):
+        if self._precompute_thread.is_alive() and self.busy:
+            self._root.after(500, self._manage_precompute_thread)
+            self.tlabel['text'] = f"Pre-computing: {self.bot.progress:.2f}%"
+        elif self.busy:
+            # Pre-compute finished
+            self.tlabel['text'] = 'Pre-compute completed! Cache saved.'
+            self._set_busy(False)
+
+    def precompute(self):
+        try:
+            cache_file = self.bot.precompute(self._imname, flags=self.draw_options, mode=self._mode)
+            self.tlabel['text'] = f'Pre-compute saved to {cache_file}'
+        except Exception as e:
+            traceback.print_exc()
+            messagebox.showerror(self.title, f'Pre-compute failed: {str(e)}')
+        finally:
+            self._set_busy(False)
+
+    @is_free
     def _start_draw_thread(self):
         self._draw_thread = Thread(target=self.start)
         self._draw_thread.start()
@@ -438,7 +477,22 @@ class Window:
     def start(self):
         try:
             t = time.time()
-            cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
+
+            # Check for cached computation first
+            has_cache, cache_file = self.bot.get_cached_status(self._imname, flags=self.draw_options, mode=self._mode)
+            if has_cache:
+                # Load from cache
+                cache_data = self.bot.load_cached(cache_file)
+                if cache_data:
+                    cmap = cache_data['cmap']
+                    self.tlabel['text'] = f"Using cached computation ✓"
+                else:
+                    # Cache invalid, fall back to processing
+                    cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
+            else:
+                # No cache, process normally
+                cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
+
             messagebox.showwarning(self.title, f'Press ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
             self._root.iconify()
             result = self.bot.draw(cmap)
