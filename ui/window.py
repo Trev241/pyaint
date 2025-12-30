@@ -482,15 +482,25 @@ class Window:
             has_cache, cache_file = self.bot.get_cached_status(self._imname, flags=self.draw_options, mode=self._mode)
             if has_cache:
                 # Load from cache
+                print(f"Loading from cache: {cache_file}")
                 cache_data = self.bot.load_cached(cache_file)
                 if cache_data:
                     cmap = cache_data['cmap']
-                    self.tlabel['text'] = f"Using cached computation ✓"
+                    # Log cache details
+                    num_colors = len(cmap)
+                    total_points = sum(len(lines) for lines in cmap.values())
+                    cache_time = time.ctime(cache_data['timestamp'])
+                    print(f"Cache loaded - {num_colors} colors, {total_points} coordinate points")
+                    print(f"Cached on: {cache_time}")
+                    print(f"Settings: Delay={cache_data['settings'][0]}, PixelSize={cache_data['settings'][1]}")
+                    self.tlabel['text'] = f"Using cached computation"
                 else:
                     # Cache invalid, fall back to processing
+                    print("Cache file invalid, processing live...")
                     cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
             else:
                 # No cache, process normally
+                print("No cache available, processing live...")
                 cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
 
             messagebox.showwarning(self.title, f'Press ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')

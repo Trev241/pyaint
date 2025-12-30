@@ -277,6 +277,10 @@ class Bot:
             if color_idx < self.draw_state['color_idx']:
                 continue
 
+            # Log color change with cached coordinate info
+            num_strokes = len(lines)
+            print(f"Switching to color {c} - {num_strokes} cached coordinate points")
+
             if c in self._palette.colors:
                 pyautogui.click(self._palette.colors_pos[c], clicks=3, interval=.15)
             else:
@@ -299,6 +303,10 @@ class Bot:
                 # Skip lines already drawn if resuming
                 if color_idx == self.draw_state['color_idx'] and line_idx < self.draw_state['line_idx']:
                     continue
+
+                # Log stroke progress
+                progress_percent = ((line_idx + 1) / len(lines)) * 100
+                print(f"Drawing stroke {line_idx + 1}/{len(lines)} for color {c} - {progress_percent:.1f}% complete")
 
                 # Wait if paused
                 while self.paused and not self.terminate:
