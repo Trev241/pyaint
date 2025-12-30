@@ -104,7 +104,7 @@ class Window:
         self._canvas = Canvas(oframe, borderwidth=0, highlightthickness=0)
         # Create inner self._cframe that will be held by the canvas
         self._cframe = tkinter.Frame(self._canvas, borderwidth=0, highlightthickness=0)
-        self._cframe.pack(fill='both', expand='true')
+        self._cframe.pack(fill='both', expand=True)
         scroll = Scrollbar(oframe, orient='vertical', command=self._canvas.yview)
         self._canvas.configure(yscrollcommand=scroll.set)
 
@@ -172,7 +172,6 @@ class Window:
         for i in range(size):
             # self._optslid[i].bind('<ButtonRelease-1>', self._on_slider_move)
             self._optslid[i].set(self._options[i][1])
-            self._optslid[i].name = f"scale{i}"
             self._optslid[i].set(defaults[i])
             self._optlabl[i].grid(column=0, row=(i * 2) + curr_row, columnspan=2, padx=5, pady=5, sticky='w')
             self._optslid[i].grid(column=0, row=(i * 2) + curr_row + 1, columnspan=2,  padx=5, sticky='ew')
@@ -187,10 +186,17 @@ class Window:
         options = [Bot.IGNORE_WHITE, Bot.USE_CUSTOM_COLORS]
         for i in range(len(misc_opt_names)):
             # The checkbutton submits the index of the option to the callback
-            cb = Checkbutton(self._cframe, text=misc_opt_names[i], variable=self._checkbutton_vars[i], 
+            cb = Checkbutton(self._cframe, text=misc_opt_names[i], variable=self._checkbutton_vars[i],
                 command=lambda val=options[i], index=i: self._on_check(index, val))
             cb.grid(column=0, row=i + curr_row, columnspan=2, padx=5, sticky='w')
         curr_row += len(misc_opt_names)
+
+        # Pause Key Setting
+        Label(self._cframe, text='Pause Key', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._pause_key_entry = Entry(self._cframe)
+        self._pause_key_entry.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
+        self._pause_key_entry.bind('<Key>', self._on_pause_key_press)
+        curr_row += 1
 
         return oframe
 
@@ -288,10 +294,32 @@ class Window:
         else:
             self.draw_options &= ~option
 
-    def _on_slider_move(self, index, val): 
+    def _on_slider_move(self, index, val):
         self.bot.settings[index] = val = round(float(val), 3)
-        self._optlabl[index]['text'] = f"{self._options[index][0]}: {val}"  
+        self._optlabl[index]['text'] = f"{self._options[index][0]}: {val}"
         self.tlabel['text'] = Window._SLIDER_TOOLTIPS[index]
+
+    def _on_pause_key_press(self, event):
+        # Capture the key name from the key press event
+        key_name = event.keysym.lower()
+        # Handle special cases
+        if key_name.startswith('f') and key_name[1:].isdigit():
+            key_name = key_name  # f1, f2, etc.
+        elif len(key_name) > 1:
+            # For special keys, keep as-is
+            pass
+        else:
+            # For regular keys, use the char
+            key_name = event.char.lower() if event.char else key_name
+
+        # Update the entry field
+        self._pause_key_entry.delete(0, END)
+        self._pause_key_entry.insert(0, key_name)
+
+        # Immediately update the bot's pause key
+        self.bot.pause_key = key_name
+
+        return "break"  # Prevent the key from being inserted normally
 
     def load_config(self):
         try:
@@ -301,39 +329,46 @@ class Window:
                 self.bot.init_palette(
                     # Converting string key into tuple
                     colors_pos={
-                        tuple(map(int, k[1:-1].split(', '))): tuple(v) 
+                        tuple(map(int, k[1:-1].split(', '))): tuple(v)
                         for k, v in self.tools['Palette']['color_coords'].items()
                     }
                 )
                 self.bot.init_canvas(self.tools['Canvas']['box'])
                 self.bot.init_custom_colors(self.tools['Custom Colors']['box'])
+                self.bot.pause_key = self.tools.get('pause_key', 'p')
+                self._pause_key_entry.delete(0, END)
+                self._pause_key_entry.insert(0, self.bot.pause_key)
                 self.tlabel['text'] = 'Successfully loaded old setup from config file.'
             except Exception as e:
                 traceback.print_exc()
                 self.tlabel['text'] = 'Some tools have not been initialized. This may prevent the bot from working correctly.'
         except Exception as e:
             self.tools = {
-                'Palette': { 
-                    'status': False, 
-                    'box': None, 
+                'Palette': {
+                    'status': False,
+                    'box': None,
                     'rows': 1,
                     'cols': 1,
                     'color_coords': None,
                     'preview': None,
                 },
-                'Canvas': { 
-                    'status': False, 
-                    'box': None, 
-                    'preview': None,
-                }, 
-                'Custom Colors': { 
+                'Canvas': {
                     'status': False,
                     'box': None,
                     'preview': None,
                 },
+                'Custom Colors': {
+                    'status': False,
+                    'box': None,
+                    'preview': None,
+                },
+                'pause_key': 'p',
             }
             with open('config.json', 'w', encoding='utf-8') as f:
                 json.dump(self.tools, f, ensure_ascii=False, indent=4)
+            self.bot.pause_key = 'p'
+            self._pause_key_entry.delete(0, END)
+            self._pause_key_entry.insert(0, 'p')
             self.tlabel['text'] = f'Config file was either missing or incorrectly modified and has been reset. Please perform setup again. Traceback: {e}'
           
     def is_free(func):
@@ -359,11 +394,15 @@ class Window:
     @is_free
     def setup(self):
         self.load_config()
-        self._iwindow = SetupWindow(parent=self._root, bot=self.bot, tools=self.tools, on_complete=self._on_complete_setup, title='Setup')
+        # Filter tools to only include the setup-relevant entries
+        setup_tools = {k: v for k, v in self.tools.items() if k in ['Palette', 'Canvas', 'Custom Colors']}
+        self._iwindow = SetupWindow(parent=self._root, bot=self.bot, tools=setup_tools, on_complete=self._on_complete_setup, title='Setup')
 
     def _on_complete_setup(self):
+        self.tools['pause_key'] = self._pause_key_entry.get().strip() or 'p'
+        self.bot.pause_key = self.tools['pause_key']
         with open('config.json', 'w', encoding='utf-8') as f:
-            json.dump(self.tools, f, ensure_ascii=False, indent=4)        
+            json.dump(self.tools, f, ensure_ascii=False, indent=4)
         self.tlabel['text'] = 'Setup saved.'
         self._set_busy(False)
 
@@ -381,17 +420,24 @@ class Window:
 
     def start(self):
         try:
-            t = time.time() 
+            t = time.time()
             cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
-            messagebox.showwarning(self.title, 'Press ESC to stop the bot.')
+            messagebox.showwarning(self.title, f'Press ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
             self._root.iconify()
             result = self.bot.draw(cmap)
-            self._root.deiconify
-            self._root.wm_state('normal')
-            self.tlabel['text'] = f"{'Success' if result else 'Failure'}. Time elapsed: {time.time() - t:.2f}s"
+            self._root.deiconify()  # type: ignore
+            self._root.wm_state('normal')  # type: ignore
+            if result == 'success':
+                self.tlabel['text'] = f"Success. Time elapsed: {time.time() - t:.2f}s"
+            elif result == 'terminated':
+                self.tlabel['text'] = f"Terminated by user. Time elapsed: {time.time() - t:.2f}s"
+            elif result == 'paused':
+                self.tlabel['text'] = f"Paused. Press {self.bot.pause_key} again to resume. Time elapsed: {time.time() - t:.2f}s"
+            else:
+                self.tlabel['text'] = f"Unknown result: {result}"
         except Exception as e:
             traceback.print_exc()
-            messagebox.showerror(self.title,  e)
-        
+            messagebox.showerror(self.title, str(e))
+
         # Let the thread manager know that the task has ended
         self._set_busy(False)
