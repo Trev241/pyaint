@@ -59,7 +59,7 @@ class Palette:
         return sum((s - q) ** 2 for s, q in zip(colx, coly))
     
 class Bot:
-    DELAY, STEP, ACCURACY = tuple(i for i in range(3))
+    DELAY, STEP, ACCURACY, JUMP_DELAY = tuple(i for i in range(4))
     # RESOURCES = (
     #     'assets/palette.png',
     #     'assets/canvas.png',
@@ -76,7 +76,7 @@ class Bot:
         self.terminate = False
         self.paused = False
         self.pause_key = 'p'
-        self.settings = [.1, 12, .9]
+        self.settings = [.1, 12, .9, 0.5]  # Added jump delay default
         self.progress = 0
         self.options = Bot.IGNORE_WHITE
         self.config_file = config_file
@@ -266,11 +266,12 @@ class Bot:
         Draws the image as per the coordinates of the processed cmap table.
         Depending upon the selection of colors used, the bot will choose
         from either the standard palette or custom color option accordingly.
-        Supports pause/resume functionality.
+        Supports pause/resume functionality and configurable jump delays.
         '''
 
         # Reset paused state at start of new draw
         self.paused = False
+        last_stroke_end = None  # Track last stroke position for jump detection
 
         for color_idx, (c, lines) in enumerate(cmap.items()):
             # Skip colors already drawn if resuming
@@ -308,6 +309,14 @@ class Bot:
                 progress_percent = ((line_idx + 1) / len(lines)) * 100
                 print(f"Drawing stroke {line_idx + 1}/{len(lines)} for color {c} - {progress_percent:.1f}% complete")
 
+                # Check for large cursor jumps and add delay
+                start_pos = line[0]
+                if last_stroke_end is not None:
+                    jump_distance = ((start_pos[0] - last_stroke_end[0]) ** 2 + (start_pos[1] - last_stroke_end[1]) ** 2) ** 0.5
+                    if jump_distance > 5:  # More than 5 pixels apart
+                        print(f"Large jump detected ({jump_distance:.1f} pixels) - adding {self.settings[Bot.JUMP_DELAY]}s delay")
+                        time.sleep(self.settings[Bot.JUMP_DELAY])
+
                 # Wait if paused
                 while self.paused and not self.terminate:
                     time.sleep(0.1)  # Small delay to avoid busy waiting
@@ -317,7 +326,6 @@ class Bot:
                     return 'terminated'
 
                 # Draw line with pause support
-                start_pos = line[0]
                 end_pos = (line[1][0], line[1][1])
 
                 # Calculate distance
@@ -358,6 +366,9 @@ class Bot:
                         time.sleep(segment_delay / segments)  # Distribute delay
 
                     pyautogui.mouseUp()
+
+                # Update last stroke position for jump detection
+                last_stroke_end = end_pos
 
         # Reset draw state on successful completion
         self.draw_state['color_idx'] = 0

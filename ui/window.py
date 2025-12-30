@@ -39,20 +39,24 @@ from tkinter.ttk import (
 
 class Window:
     _SLIDER_TOOLTIPS = (
-        # 'The confidence factor affects the bot\'s accuracy to find its tools. ' + 
-        # 'Lower confidence allows more room for error but is just as likely to generate false positives. ' + 
+        # 'The confidence factor affects the bot\'s accuracy to find its tools. ' +
+        # 'Lower confidence allows more room for error but is just as likely to generate false positives. ' +
         # 'Avoid extremely low values.',
 
-        'Affects the delay (more accurately duration) for each stroke. ' + 
+        'Affects the delay (more accurately duration) for each stroke. ' +
         'Increase the delay if your machine is slow and does not respond well to extremely fast input',
 
         'For more detailed results, reduce the pixel size. Remember that lower pixel sizes imply longer draw times.' +
         'This setting does not affect the botted application\'s brush size. You must do that manually.',
 
         'Affects custom color accuracy for each pixel. ' +
-        'At lower values, the color variety of the result will be greatly reduced. ' + 
+        'At lower values, the color variety of the result will be greatly reduced. ' +
         'At 1.0 accuracy, every pixel will have perfect colors ' + 
-        'Recommended setting: 0.9'    
+        'Recommended setting: 0.9',
+
+        'Adds delay when cursor jumps more than 5 pixels between strokes. ' +
+        'Helps prevent unintended strokes from rapid cursor movement. ' +
+        'Recommended: 0.5 seconds'
     )
     
     _MISC_TOOLTIPS = (
@@ -154,10 +158,11 @@ class Window:
         # For every slider option in options, option layout is    :    (name, default, from, to)
         defaults = self.bot.settings
         self._options = (
-            # ('Confidence', defaults[0], 0, 1), 
-            ('Delay', defaults[0], 0, 1), 
+            # ('Confidence', defaults[0], 0, 1),
+            ('Delay', defaults[0], 0, 1),
             ('Pixel Size', defaults[1], 3, 50),
             ('Precision', defaults[2], 0, 1),
+            ('Jump Delay', defaults[3] if len(defaults) > 3 else 0.5, 0, 2),
         )
         size = len(self._options)
         # Use IntVar for Pixel Size (index 1), DoubleVar for others
