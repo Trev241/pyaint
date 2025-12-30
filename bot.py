@@ -275,6 +275,11 @@ class Bot:
         self.paused = False
         last_stroke_end = None  # Track last stroke position for jump detection
 
+        # Calculate total strokes for progress tracking
+        self.total_strokes = sum(len(lines) for lines in cmap.values())
+        self.start_time = time.time()
+        self.completed_strokes = 0
+
         for color_idx, (c, lines) in enumerate(cmap.items()):
             # Skip colors already drawn if resuming
             if color_idx < self.draw_state['color_idx']:
@@ -312,9 +317,34 @@ class Bot:
                 if color_idx == self.draw_state['color_idx'] and line_idx < self.draw_state['line_idx']:
                     continue
 
-                # Log stroke progress
+                # Update progress and calculate estimates
+                self.completed_strokes += 1
+                strokes_remaining = self.total_strokes - self.completed_strokes
+
+                # Calculate elapsed time and estimate remaining time
+                elapsed_time = time.time() - self.start_time
+                if self.completed_strokes > 0:
+                    avg_time_per_stroke = elapsed_time / self.completed_strokes
+                    estimated_remaining = strokes_remaining * avg_time_per_stroke
+
+                    # Format time remaining
+                    if estimated_remaining < 60:
+                        time_remaining = f"{estimated_remaining:.1f}s"
+                    elif estimated_remaining < 3600:
+                        minutes = int(estimated_remaining // 60)
+                        seconds = estimated_remaining % 60
+                        time_remaining = f"{minutes}:{seconds:02.0f}"
+                    else:
+                        hours = int(estimated_remaining // 3600)
+                        minutes = int((estimated_remaining % 3600) // 60)
+                        time_remaining = f"{hours}:{minutes:02.0f}h"
+                else:
+                    time_remaining = "calculating..."
+
+                # Log stroke progress with time remaining and strokes left
                 progress_percent = ((line_idx + 1) / len(lines)) * 100
                 print(f"Drawing stroke {line_idx + 1}/{len(lines)} for color {c} - {progress_percent:.1f}% complete")
+                print(f"Total progress: {self.completed_strokes}/{self.total_strokes} strokes - {time_remaining} remaining")
 
                 # Check for large cursor jumps and add delay
                 start_pos = line[0]
