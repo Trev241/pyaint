@@ -91,6 +91,17 @@ class Bot:
             'cmap': None
         }
 
+        # New Layer feature state
+        self.new_layer = {
+            'enabled': False,
+            'coords': None,           # (x, y)
+            'modifiers': {
+                'ctrl': False,
+                'alt': False,
+                'shift': False
+            }
+        }
+
         pyautogui.PAUSE = 0.0
         pyautogui.MINIMUM_DURATION = 0.01
 
@@ -295,6 +306,46 @@ class Bot:
             # Log color change with cached coordinate info
             num_strokes = len(lines)
             print(f"Switching to color {c} - {num_strokes} cached coordinate points")
+
+            # If New Layer is enabled, click the new-layer button with modifiers
+            try:
+                nl = self.new_layer
+                if nl.get('enabled') and nl.get('coords'):
+                    nx, ny = nl['coords']
+                    print(f"[NewLayer] attempting click at {(nx, ny)} with mods={nl.get('modifiers')}")
+                    # Hold modifiers
+                    if nl['modifiers'].get('ctrl'):
+                        pyautogui.keyDown('ctrl')
+                    if nl['modifiers'].get('alt'):
+                        pyautogui.keyDown('alt')
+                    if nl['modifiers'].get('shift'):
+                        pyautogui.keyDown('shift')
+
+                    # Give the OS a moment to register modifier keydowns
+                    time.sleep(0.12)
+
+                    # Use explicit mouseDown/mouseUp for better reliability in some apps
+                    print(f"[NewLayer] performing mouseDown at {(nx, ny)}")
+                    pyautogui.mouseDown(nx, ny, button='left')
+                    time.sleep(0.06)
+                    pyautogui.mouseUp(nx, ny, button='left')
+                    print(f"[NewLayer] mouse click performed at {(nx, ny)}")
+
+                    # Short delay to ensure the target app processes the click before releasing modifiers
+                    time.sleep(0.18)
+
+                    # Release modifiers
+                    if nl['modifiers'].get('shift'):
+                        pyautogui.keyUp('shift')
+                    if nl['modifiers'].get('alt'):
+                        pyautogui.keyUp('alt')
+                    if nl['modifiers'].get('ctrl'):
+                        pyautogui.keyUp('ctrl')
+
+                    # Give a bit more time for UI to update before selecting color
+                    time.sleep(0.12)
+            except Exception:
+                pass
 
             if c in self._palette.colors:
                 pyautogui.click(self._palette.colors_pos[c], clicks=3, interval=.15)

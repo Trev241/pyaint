@@ -226,6 +226,14 @@ class Window:
             cb.grid(column=0, row=i + curr_row, columnspan=2, padx=5, sticky='w')
         curr_row += len(misc_opt_names)
 
+        # New Layer option
+        Label(self._cframe, text='New Layer', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._newlayer_var = IntVar()
+        self._newlayer_cb = Checkbutton(self._cframe, text='Enable New Layer', variable=self._newlayer_var,
+            command=self._on_newlayer_toggle)
+        self._newlayer_cb.grid(column=1, row=curr_row, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
         # Pause Key Setting
         Label(self._cframe, text='Pause Key', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
         self._pause_key_entry = Entry(self._cframe)
@@ -438,6 +446,21 @@ class Window:
         except Exception as e:
             print(f"Failed to save config: {e}")
 
+    def _on_newlayer_toggle(self):
+        enabled = bool(self._newlayer_var.get())
+        # Update bot state and tools dict
+        self.bot.new_layer['enabled'] = enabled
+        if 'New Layer' not in self.tools:
+            self.tools['New Layer'] = {'status': False, 'coords': None, 'modifiers': {'ctrl': False, 'alt': False, 'shift': False}}
+        self.tools['New Layer']['enabled'] = enabled
+        try:
+            if not getattr(self, '_initializing', False):
+                with open(self._config_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
+                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
+        except Exception as e:
+            print(f"Failed to save config: {e}")
+
     def _on_slider_move(self, index, val):
         val = float(val)
         if index == 1:  # Pixel Size - force to integer
@@ -596,6 +619,26 @@ class Window:
             self._pause_key_entry.insert(0, 'p')
             self.tlabel['text'] = f'Config file missing or invalid ({str(e)}). Using default settings.'
 
+        # Apply New Layer settings to bot if present
+        try:
+            nl = self.tools.get('New Layer')
+            if nl:
+                # coords may be stored as list
+                coords = nl.get('coords')
+                if isinstance(coords, list) and len(coords) >= 2:
+                    self.bot.new_layer['coords'] = (int(coords[0]), int(coords[1]))
+                elif isinstance(coords, tuple):
+                    self.bot.new_layer['coords'] = coords
+                self.bot.new_layer['enabled'] = bool(nl.get('enabled', nl.get('status', False)))
+                mods = nl.get('modifiers', {})
+                self.bot.new_layer['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
+                self.bot.new_layer['modifiers']['alt'] = bool(mods.get('alt', False))
+                self.bot.new_layer['modifiers']['shift'] = bool(mods.get('shift', False))
+                # Update UI checkbox
+                self._newlayer_var.set(1 if self.bot.new_layer['enabled'] else 0)
+        except Exception:
+            pass
+
     def is_free(func):
         '''
         Decorator that only executes a function when the bot is not busy by checking the self.busy flag.
@@ -638,13 +681,23 @@ class Window:
                 'status': False,
                 'box': None,
                 'preview': None,
+            },
+            'New Layer': {
+                'status': False,
+                'coords': None,
+                'enabled': False,
+                'modifiers': {
+                    'ctrl': False,
+                    'alt': False,
+                    'shift': False
+                }
             }
         }
 
         # Build a dedicated setup_tools mapping (only the tools) so the
         # SetupWindow doesn't iterate non-tool keys (like drawing_settings).
         setup_tools = {}
-        for tool_name in ['Palette', 'Canvas', 'Custom Colors']:
+        for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer']:
             existing = self.tools.get(tool_name, {})
             merged = default_tools[tool_name].copy()
             merged.update(existing if isinstance(existing, dict) else {})
@@ -659,6 +712,28 @@ class Window:
         if hasattr(self, '_setup_tools'):
             for k, v in self._setup_tools.items():
                 self.tools[k] = v
+
+        # If New Layer was configured during setup, apply it to bot state
+        try:
+            nl = self.tools.get('New Layer')
+            if nl:
+                coords = nl.get('coords')
+                if isinstance(coords, list) and len(coords) >= 2:
+                    self.bot.new_layer['coords'] = (int(coords[0]), int(coords[1]))
+                elif isinstance(coords, tuple):
+                    self.bot.new_layer['coords'] = coords
+                self.bot.new_layer['enabled'] = bool(nl.get('enabled', nl.get('status', False)))
+                mods = nl.get('modifiers', {})
+                self.bot.new_layer['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
+                self.bot.new_layer['modifiers']['alt'] = bool(mods.get('alt', False))
+                self.bot.new_layer['modifiers']['shift'] = bool(mods.get('shift', False))
+                # Update main UI checkbox to reflect new state
+                try:
+                    self._newlayer_var.set(1 if self.bot.new_layer['enabled'] else 0)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # The SetupWindow has already modified self._setup_tools, so save everything
         self.tools['pause_key'] = self._pause_key_entry.get().strip() or 'p'
