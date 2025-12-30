@@ -1,61 +1,165 @@
-# pyaint
-## What is it?
-pyaint is a simple bot written in Python that can automatically draw images by taking control of your mouse. It works on MS Paint, Clip Studio Paint, skribbl (with the risk of being kicked) or essentially any image editing software as long as there is support for a brush, a color palette grid and a canvas. 
+# Pyaint
 
-## Demo
-
-You can watch the bot in action [here](https://youtu.be/qXfUc9KuVlg) and [here](https://youtu.be/kj0iqZkIG1k).
+An intelligent drawing automation tool that converts images into precise mouse movements for painting applications. Built with Python and designed for artists and designers who want to recreate digital images through automated brush strokes.
 
 ## Features
 
-- Compatible with almost any drawing application software
-- Draw images from either your computer or the internet
-- Produce images with near perfect color accuracy with the help of custom colors (supported only in MS Paint)
+### Core Functionality
+- **Multi-Application Support**: Compatible with MS Paint, Clip Studio Paint, skribbl, and most drawing software
+- **Dual Input Methods**: Load images from local files or remote URLs
+- **High-Precision Drawing**: Produces near-perfect color accuracy with customizable precision settings
+- **Real-time Progress**: Live progress tracking with estimated completion time
+
+### Advanced Controls
+- **Configurable Timing**: Adjustable stroke delay for different system speeds
+- **Detail Control**: Pixel size settings for balancing detail vs. drawing time
+- **Color Optimization**: Precision settings for color accuracy vs. performance
+- **Smart Movement**: Jump delay optimization for large cursor movements
+- **Background Handling**: Option to ignore white pixels for cleaner results
+
+### Drawing Modes
+- **Test Draw**: Draw first 20 lines to calibrate brush size before full drawing
+- **Full Drawing**: Complete automated image recreation
+- **Pause/Resume**: Configurable hotkey for interruption and continuation
+- **Mid-Stroke Recovery**: Resume drawing from exact interruption point
+
+### Performance Features
+- **Intelligent Caching**: Pre-compute image processing for instant subsequent runs
+- **Layered Processing**: Advanced color layering algorithms for optimal results
+- **Background Processing**: Non-blocking computation with progress updates
+- **Memory Efficient**: Optimized for large images and long drawing sessions
+
+### Additional Features
+- **New Layer Automation**: Automatic layer creation with keyboard modifier support
+- **Settings Persistence**: All preferences automatically saved and restored
+- **Windows Compatible**: Optimized for Windows with Python 3.8+
+- **Error Recovery**: Robust error handling and graceful failure recovery
+
+## Installation
+
+### Requirements
+- Python 3.8 or higher (3.8 recommended)
+- Windows operating system
+
+### Setup
+1. Clone or download the repository
+
+2. **Optional: Create a conda environment** (recommended for isolation):
+   ```bash
+   conda create -n pyaint python=3.8
+   conda activate pyaint
+   ```
+
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Run the application:
+   ```bash
+   python main.py
+   ```
+
+## Usage
+
+### Initial Setup
+1. Launch the application
+2. Click **"Setup"** to configure your drawing environment
+3. Initialize the **Palette**, **Canvas**, and **Custom Colors** by clicking the corners as prompted
+4. Configure your preferred settings using the control panel sliders
+
+### Basic Drawing
+1. Enter an image URL or select a local file
+2. Click **"Pre-compute"** (optional, for caching)
+3. Click **"Test Draw"** to calibrate brush size with the first 20 lines
+4. Adjust brush settings in your painting application
+5. Click **"Start"** for complete automated drawing
+
+### Controls
+- **ESC**: Stop current drawing operation
+- **Custom Pause Key**: Pause/resume drawing (default: 'p')
+- **Setup**: Configure palette, canvas, and custom colors
+- **Pre-compute**: Cache image processing for faster subsequent runs
+- **Test Draw**: Draw sample lines for brush calibration
+- **Start**: Begin full image drawing
+
+## Configuration
+
+### Drawing Settings
+- **Delay**: Stroke timing (0.0-1.0 seconds)
+- **Pixel Size**: Detail level (3-50 pixels)
+- **Precision**: Color accuracy (0.0-1.0)
+- **Jump Delay**: Cursor movement optimization (0.0-2.0 seconds)
+
+### Options
+- **Ignore White Pixels**: Skip drawing white areas
+- **Use Custom Colors**: Enable advanced color mixing
+- **New Layer**: Automatic layer creation with modifiers
+
+### Hotkeys
+- **Pause Key**: Configurable key for pause/resume (any keyboard key)
+- **ESC**: Emergency stop for all operations
+
+## Architecture
+
+The application consists of three main components:
+
+### Bot (`bot.py`)
+Core drawing engine handling image processing, mouse automation, and drawing algorithms.
+
+### Window (`ui/window.py`)
+Graphical user interface with real-time controls and progress monitoring.
+
+### Setup (`ui/setup.py`)
+Configuration wizard for initializing palette, canvas, and custom color regions.
 
 ## Dependencies
 
-Here are all the libraries used in this project
+- **PyAutoGUI**: Cross-platform GUI automation
+- **Pillow**: Image processing and manipulation
+- **pynput**: Global keyboard input monitoring
+- **NumPy**: Mathematical computations (via Pillow)
 
-- [PyAutoGUI]
-- [Pillow]
-- [pynput]
-- [keyboard]
+## Troubleshooting
 
-## How do I run it?
+### Common Issues
+- **Drawing not starting**: Ensure palette and canvas are properly initialized
+- **Colors incorrect**: Check custom colors setup and precision settings
+- **Slow performance**: Reduce pixel size or increase delay settings
+- **Application not responding**: Use ESC to stop and restart
 
-pyaint requires [Python](https://www.python.org) v3+ to run.
-
-Open your shell in the root directory of the project and then run the command below to install the required dependencies.
-
-```sh
-pip install -r ./requirements.txt
-```
-
-Then simply run `main.py`.
-
-```sh
-python main.py
-```
-
-## How do I use it?
-
-There are a number of options that you can tweak when using the bot which makes it difficult to give an overall guide. Nevertheless, the most basic steps to operate the bot would be to
-1. Click on "Setup" and initialize the tools. You must initialize the palette and canvas at least.
-2. Specify the image you want to draw by entering a URL or by opening a file on your system.
-3. Finally, click on "Start". If things go out of hand, press ESC to stop the bot and regain control.
-
-Even if you do not intend on using MS Paint, the steps for using the bot should still relatively stay the same.
+### Performance Tips
+- Use **Pre-compute** for images you'll draw multiple times
+- Adjust **Pixel Size** based on desired detail level
+- Enable **Ignore White Pixels** for images with large white areas
+- Fine-tune **Jump Delay** for optimal cursor movement
 
 ## Development
 
-Suggestions or contributions to the project are welcome.
+### Project Structure
+```
+pyaint/
+├── main.py              # Application entry point
+├── bot.py               # Core drawing engine
+├── ui/
+│   ├── window.py        # Main GUI interface
+│   └── setup.py         # Setup configuration wizard
+├── exceptions.py        # Custom error classes
+├── utils.py             # Utility functions
+└── requirements.txt     # Python dependencies
+```
+
+### Contributing
+Suggestions and contributions are welcome. Please ensure compatibility with the existing codebase and maintain the application's stability.
 
 ## License
 
-GPL 3.0
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
 
-[//]: # (These are reference links used in the body of this note and get stripped out when the markdown processor does its job. There is no need to format nicely because it shouldn't be seen. Thanks SO - http://stackoverflow.com/questions/4823468/store-comments-in-markdown-syntax)
-   [PyAutoGUI]: <https://pypi.org/project/PyAutoGUI/>
-   [Pillow]: <https://pypi.org/project/Pillow/>
-   [pynput]: <https://pypi.org/project/pynput/>
-   [keyboard]: <https://pypi.org/project/keyboard/>
+## Credits
+
+This project is a fork of the original [pyaint](https://github.com/Trev241/pyaint) by Trev241. The original implementation provided the foundation for this enhanced version with additional features and improvements.
+
+---
+
+*Pyaint - Bringing digital images to life through automated artistry*

@@ -83,7 +83,23 @@ class SetupWindow:
             # Instead, do "lambda t=tool : self._start_listening(t)" which will pass the tool of the current iteration for every new callback.
             # (Note that t here stores the current tool as a default argument)
             Button(settings_frame, text='Initialize', command=lambda n=k, t=v : self._start_listening(n, t)).grid(column=0, columnspan=2, row=0, sticky='ew', padx=5, pady=5)
-            Button(settings_frame, text='Preview', command=lambda n=k : self._set_preview(n)).grid(column=2, columnspan=2, row=0, sticky='ew', padx=5, pady=5)
+            # For New Layer, show modifier checkboxes instead of a preview button
+            if k == 'New Layer':
+                # Create modifier checkboxes (CTRL, ALT, SHIFT)
+                from tkinter import Checkbutton, IntVar
+                self._mod_vars = getattr(self, '_mod_vars', {})
+                mv = {}
+                mods = v.get('modifiers', {}) if isinstance(v, dict) else {}
+                for ci, name in enumerate(('ctrl', 'alt', 'shift')):
+                    iv = IntVar()
+                    iv.set(1 if mods.get(name, False) else 0)
+                    cb = Checkbutton(settings_frame, text=name.upper(), variable=iv,
+                                     command=lambda n=name, iv=iv: self._on_modifier_toggle(k, n, iv))
+                    cb.grid(column=2 + ci, row=0, padx=2, sticky='w')
+                    mv[name] = iv
+                self._mod_vars[k] = mv
+            else:
+                Button(settings_frame, text='Preview', command=lambda n=k : self._set_preview(n)).grid(column=2, columnspan=2, row=0, sticky='ew', padx=5, pady=5)
 
             if k == 'Palette':
                 settings_frame.rowconfigure(1, weight=1, uniform='row')
@@ -153,8 +169,10 @@ class SetupWindow:
 
         self._coords = []
         self._clicks = 0
-        
-        if messagebox.askokcancel(self.title, 'Click on the UPPER LEFT and LOWER RIGHT corners of the tool.') == True:
+        # Determine number of clicks required (New Layer uses single-click)
+        self._required_clicks = 1 if self._tool_name == 'New Layer' else 2
+        prompt = 'Click the location of the button.' if self._required_clicks == 1 else 'Click on the UPPER LEFT and LOWER RIGHT corners of the tool.'
+        if messagebox.askokcancel(self.title, prompt) == True:
             self._listener = Listener(on_click=self._on_click)
             self._listener.start()
             self._root.iconify()
@@ -168,37 +186,47 @@ class SetupWindow:
             self._clicks += 1
             self._coords += x, y
 
-            if self._clicks == 2:
-                # Determining corner coordinates based on received input. ImageGrab.grab() always expects
-                # the first pair of coordinates to be above and on the left of the second pair
-                top_left = min(self._coords[0], self._coords[2]), min(self._coords[1], self._coords[3])
-                bot_right = max(self._coords[0], self._coords[2]), max(self._coords[1], self._coords[3])
-                box = top_left + bot_right
-                
-                print(f'Capturing box: {box}')
-                
+            if self._clicks == self._required_clicks:
                 init_functions = {
                     'Palette': self.bot.init_palette,
                     'Canvas': self.bot.init_canvas,
                     'Custom Colors': self.bot.init_custom_colors
                 }
 
-                if self._tool_name == 'Palette':
-                    p = init_functions['Palette'](prows=self.rows, pcols=self.cols, pbox=box)
-                    # JSON does not support saving tuples hence the key has been converted into a string instead
-                    self._current_tool['color_coords'] = {str(k): v for k, v in p.colors_pos.items()}
-                    self._current_tool['rows'] = self.rows
-                    self._current_tool['cols'] = self.cols
-                else:
-                    init_functions[self._tool_name](box)
+                if self._required_clicks == 2:
+                    # Determining corner coordinates based on received input. ImageGrab.grab() always expects
+                    # the first pair of coordinates to be above and on the left of the second pair
+                    top_left = min(self._coords[0], self._coords[2]), min(self._coords[1], self._coords[3])
+                    bot_right = max(self._coords[0], self._coords[2]), max(self._coords[1], self._coords[3])
+                    box = top_left + bot_right
+                    print(f'Capturing box: {box}')
 
-                self._current_tool['status'] = True
-                self._current_tool['box'] = box
-                self._statuses[self._tool_name].configure(text='INITIALIZED', background='green')
-                
-                self._preview_panel.update()
-                self._current_tool['preview'] = f'assets/{self._tool_name}_preview.png'
-                ImageGrab.grab(box).save(self._current_tool['preview'], format='png')
+                    if self._tool_name == 'Palette':
+                        p = init_functions['Palette'](prows=self.rows, pcols=self.cols, pbox=box)
+                        # JSON does not support saving tuples hence the key has been converted into a string instead
+                        self._current_tool['color_coords'] = {str(k): v for k, v in p.colors_pos.items()}
+                        self._current_tool['rows'] = self.rows
+                        self._current_tool['cols'] = self.cols
+                    else:
+                        init_functions[self._tool_name](box)
+
+                    self._current_tool['status'] = True
+                    self._current_tool['box'] = box
+                    self._statuses[self._tool_name].configure(text='INITIALIZED', background='green')
+
+                    self._preview_panel.update()
+                    self._current_tool['preview'] = f'assets/{self._tool_name}_preview.png'
+                    ImageGrab.grab(box).save(self._current_tool['preview'], format='png')
+
+                else:
+                    # Single-click tools like New Layer
+                    # Save the clicked point as coords
+                    coords = (int(self._coords[0]), int(self._coords[1]))
+                    print(f'Captured point: {coords}')
+                    # Store as simple coords and mark status
+                    self._current_tool['coords'] = list(coords)
+                    self._current_tool['status'] = True
+                    self._statuses[self._tool_name].configure(text='INITIALIZED', background='green')
 
                 self._listener.stop()
                 self.parent.deiconify()
@@ -214,6 +242,16 @@ class SetupWindow:
         if event.widget.get() == '':
             event.widget.delete(0, END)
             event.widget.insert(0, '1')
+
+    def _on_modifier_toggle(self, tool_name, modifier_name, intvar):
+        # Update the stored tools dict modifiers for the given tool
+        try:
+            if tool_name in self.tools:
+                if 'modifiers' not in self.tools[tool_name] or not isinstance(self.tools[tool_name]['modifiers'], dict):
+                    self.tools[tool_name]['modifiers'] = {}
+                self.tools[tool_name]['modifiers'][modifier_name] = bool(intvar.get())
+        except Exception:
+            pass
 
     def close(self):
         self._root.destroy()
