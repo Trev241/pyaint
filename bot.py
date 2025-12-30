@@ -80,6 +80,7 @@ class Bot:
         self.progress = 0
         self.options = Bot.IGNORE_WHITE
         self.config_file = config_file
+        self.drawing = False  # Flag to indicate if currently drawing
 
         # Drawing state for pause/resume
         self.draw_state = {
@@ -273,6 +274,7 @@ class Bot:
         # Reset bot state for fresh drawing session
         self.terminate = False
         self.paused = False
+        self.drawing = True  # Mark as actively drawing
         last_stroke_end = None  # Track last stroke position for jump detection
 
         # Calculate total strokes for progress tracking
@@ -366,6 +368,7 @@ class Bot:
 
                 if self.terminate:
                     pyautogui.mouseUp()
+                    self.drawing = False  # Clear drawing flag on termination
                     return 'terminated'
 
                 # Draw line with pause support
@@ -446,6 +449,7 @@ class Bot:
                 last_stroke_end = end_pos
 
         # Reset draw state on successful completion
+        self.drawing = False  # Clear drawing flag
         self.draw_state['color_idx'] = 0
         self.draw_state['line_idx'] = 0
         self.draw_state['segment_idx'] = 0

@@ -142,18 +142,16 @@ class Window:
         buttons[1]['command'] = self._precompute_thread
         buttons[2]['command'] = self._start_draw_thread
 
-        curr_row = 4
-
         self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
-        self._teclbl.grid(column=0, row=2, columnspan=2, sticky='w', padx=5, pady=5)
+        self._teclbl.grid(column=0, row=4, columnspan=2, sticky='w', padx=5, pady=5)
         modes = [Bot.SLOTTED, Bot.LAYERED]
         self._tecvar = StringVar()
         self._tecvar.set(modes[1])
         self._mode = modes[1]
         self._teclst = OptionMenu(self._cframe, self._tecvar, self._mode, *modes, command=self._update_mode)
-        self._teclst.grid(column=0, row=3, columnspan=2, sticky='ew', padx=5, pady=5)
+        self._teclst.grid(column=0, row=5, columnspan=2, sticky='ew', padx=5, pady=5)
 
-        curr_row = 4
+        curr_row = 6
 
         # For every slider option in options, option layout is    :    (name, default, from, to)
         defaults = self.bot.settings
@@ -215,7 +213,7 @@ class Window:
         Label(self._cframe, text='Pause Key', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
         self._pause_key_entry = Entry(self._cframe)
         self._pause_key_entry.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
-        self._pause_key_entry.bind('<Key>', self._on_pause_key_press)
+        self._pause_key_entry.bind('<Key>', self._on_pause_key_entry_press)
         curr_row += 1
 
         return oframe
@@ -300,13 +298,85 @@ class Window:
         else:
             self.tlabel['text'] = 'Loading configuration...'
 
+    def _fetch_remote_image(self, url, timeout=10, retries=3):
+        """Fetch remote image with proper headers and error handling"""
+        import tempfile
+        import os
+
+        # Create a proper request with headers
+        req = urllib.request.Request(
+            url,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+        )
+
+        for attempt in range(retries):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as response:
+                    # Check if response is actually an image
+                    content_type = response.headers.get('content-type', '').lower()
+                    if not content_type.startswith('image/'):
+                        raise ValueError(f"URL does not point to an image (content-type: {content_type})")
+
+                    # Create temporary file
+                    fd, temp_path = tempfile.mkstemp(suffix='.png')
+                    try:
+                        with os.fdopen(fd, 'wb') as tmp_file:
+                            tmp_file.write(response.read())
+                        return temp_path
+                    except Exception:
+                        os.close(fd)
+                        if os.path.exists(temp_path):
+                            os.unlink(temp_path)
+                        raise
+
+            except urllib.error.HTTPError as e:
+                if e.code == 429:  # Rate limited
+                    wait_time = min(2 ** attempt, 10)  # Exponential backoff, max 10s
+                    print(f"Rate limited, waiting {wait_time}s before retry {attempt + 1}/{retries}")
+                    time.sleep(wait_time)
+                    continue
+                elif e.code >= 400:
+                    raise ValueError(f"HTTP {e.code}: {e.reason}")
+                else:
+                    raise
+            except urllib.error.URLError as e:
+                if attempt == retries - 1:
+                    raise ValueError(f"Network error: {e.reason}")
+                continue
+
+        raise ValueError("Failed to fetch image after all retries")
+
     def _on_search_img(self):
         try:
-            path = self._ientry.get() if isfile(self._ientry.get()) else urllib.request.urlretrieve(self._ientry.get())[0]
+            input_text = self._ientry.get().strip()
+            if not input_text:
+                self.tlabel['text'] = 'Please enter a URL or file path'
+                return
+
+            # Check if it's a local file first
+            if isfile(input_text):
+                path = input_text
+            else:
+                # Try to fetch as remote image
+                self.tlabel['text'] = 'Fetching remote image...'
+                path = self._fetch_remote_image(input_text)
+
             self._set_img(path=path)
+            self.tlabel['text'] = f'Image loaded successfully'
+
+        except ValueError as e:
+            self.tlabel['text'] = f'Error: {str(e)}'
         except Exception as e:
             traceback.print_exc()
-            self.tlabel['text'] = e
+            self.tlabel['text'] = f'Unexpected error: {str(e)}'
 
     def _open_file(self):
         try:
@@ -335,27 +405,30 @@ class Window:
             self._optlabl[index]['text'] = f"{self._options[index][0]}: {val:.2f}"
         self.tlabel['text'] = Window._SLIDER_TOOLTIPS[index]
 
-    def _on_pause_key_press(self, event):
-        # Capture the key name from the key press event
-        key_name = event.keysym.lower()
-        # Handle special cases
-        if key_name.startswith('f') and key_name[1:].isdigit():
-            key_name = key_name  # f1, f2, etc.
-        elif len(key_name) > 1:
-            # For special keys, keep as-is
-            pass
-        else:
-            # For regular keys, use the char
-            key_name = event.char.lower() if event.char else key_name
+    def _on_pause_key_entry_press(self, event):
+        # Only allow setting the pause key when not drawing
+        if not self.busy:
+            # When not drawing, allow setting the pause key by typing in the entry field
+            key_name = event.keysym.lower()
+            # Handle special cases
+            if key_name.startswith('f') and key_name[1:].isdigit():
+                key_name = key_name  # f1, f2, etc.
+            elif len(key_name) > 1:
+                # For special keys, keep as-is
+                pass
+            else:
+                # For regular keys, use the char
+                key_name = event.char.lower() if event.char else key_name
 
-        # Update the entry field
-        self._pause_key_entry.delete(0, END)
-        self._pause_key_entry.insert(0, key_name)
+            # Update the entry field and bot's pause key
+            self._pause_key_entry.delete(0, END)
+            self._pause_key_entry.insert(0, key_name)
+            self.bot.pause_key = key_name
+            return "break"
 
-        # Immediately update the bot's pause key
-        self.bot.pause_key = key_name
-
-        return "break"  # Prevent the key from being inserted normally
+        # This should never be reached when not busy, but just in case
+        print(f"Unexpected pause key press while busy={self.busy}")
+        return "break"
 
     def load_config(self):
         try:
