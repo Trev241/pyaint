@@ -4,6 +4,7 @@ import utils
 import hashlib
 import json
 import os
+from typing import Optional, Tuple, Dict, List, Any
 
 from exceptions import (
     NoCustomColorsError,
@@ -102,6 +103,11 @@ class Bot:
             }
         }
 
+        # Canvas and palette will be initialized later
+        self._canvas = None
+        self._palette = None
+        self._custom_colors = None
+
         pyautogui.PAUSE = 0.0
         pyautogui.MINIMUM_DURATION = 0.01
 
@@ -193,7 +199,8 @@ class Bot:
                 table_lines.append(list())
                 table_colors.append(set())
 
-            for j in range(w): 
+            x = xo  # Reset x to start of row
+            for j in range(w):
                 r, g, b = pix[j, i][:3]
                 col = near = (r, g, b)
 
@@ -336,7 +343,7 @@ class Bot:
                     print(f"[NewLayer] mouse click performed at {(nx, ny)}")
 
                     # Wait for the target app to process the click
-                    time.sleep(0.25)
+                    time.sleep(0.75)
 
                     # Release modifiers in reverse order (Shift, Alt, Ctrl)
                     for pygui_key in reversed(pressed_modifiers):
@@ -346,9 +353,9 @@ class Bot:
                     # Ensure all modifiers are fully released before proceeding
                     time.sleep(0.15)
 
-                    # Wait at least 0.25 seconds before starting to paint to ensure new layer is ready
-                    print(f"[NewLayer] waiting 0.25 seconds before painting...")
-                    time.sleep(0.25)
+                    # Wait at least 0.75 seconds before starting to paint to ensure new layer is ready
+                    print(f"[NewLayer] waiting 0.75 seconds before painting...")
+                    time.sleep(0.75)
 
             except Exception as e:
                 print(f"[NewLayer] Error during new layer creation: {e}")
@@ -424,6 +431,13 @@ class Bot:
                 was_paused = False
                 while self.paused and not self.terminate:
                     was_paused = True
+                    # Ensure any stuck modifier keys are released during pause
+                    try:
+                        pyautogui.keyUp('shift')
+                        pyautogui.keyUp('alt')
+                        pyautogui.keyUp('ctrl')
+                    except:
+                        pass  # Ignore errors if keys are already released
                     time.sleep(0.1)  # Small delay to avoid busy waiting
 
                 # If we just came out of pause, mark for stroke replay
@@ -718,6 +732,160 @@ class Bot:
 
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
             return None
+
+    def process_region(self, file, region, flags=0, mode=LAYERED, canvas_target=None):
+        '''
+        Processes a specific region of an image as per the flags submitted and returns
+        a table mapping each color to a list of lines that are to be drawn on
+        the canvas. Each line contains both starting and terminating coordinates.
+
+        region: (x1, y1, x2, y2) - coordinates in the reference image space
+        canvas_target: (x, y, w, h) - target canvas area where drawing should happen (optional)
+        '''
+
+        self.terminate = False
+        step = int(self.settings[Bot.STEP])
+        img = Image.open(file).convert('RGBA')
+
+        # Crop the image to the specified region
+        x1, y1, x2, y2 = region
+        img_cropped = img.crop((x1, y1, x2, y2))
+
+        try:
+            canvas_x, canvas_y, canvas_w, canvas_h = self._canvas  # type: ignore[union-attr]
+        except:
+            raise NoCanvasError('Bot could not continue because canvas is not initialized')
+
+        # Determine where to position the drawing on the canvas
+        if canvas_target is not None:
+            # Use the specified target area
+            target_x, target_y, target_w, target_h = canvas_target
+            # Scale the cropped image to fit the target area while maintaining aspect ratio
+            cropped_w, cropped_h = img_cropped.size
+            scale = min(target_w / cropped_w, target_h / cropped_h)
+            scaled_w = int(cropped_w * scale)
+            scaled_h = int(cropped_h * scale)
+            # Position at the target location
+            xo = target_x
+            y_start = target_y
+            x = xo  # Initialize x for the loop
+        else:
+            # Default behavior: scale to fit canvas and center
+            cropped_w, cropped_h = img_cropped.size
+            scale = min(canvas_w / cropped_w, canvas_h / cropped_h)
+            scaled_w = int(cropped_w * scale)
+            scaled_h = int(cropped_h * scale)
+            # Center on canvas
+            offset_x = (canvas_w - scaled_w) // 2
+            offset_y = (canvas_h - scaled_h) // 2
+            xo = canvas_x + offset_x
+            y_start = canvas_y + offset_y
+            x = xo  # Initialize x for the loop
+
+        # Calculate pixel step for the scaled image
+        tw, th = scaled_w // step, scaled_h // step
+
+        try:
+            # Try newer PIL syntax
+            img_small = img_cropped.resize((tw, th), resample=Image.Resampling.NEAREST)
+        except AttributeError:
+            # Fallback to older PIL syntax
+            img_small = img_cropped.resize((tw, th), resample=Image.NEAREST)  # type: ignore
+        pix = img_small.load()
+        w, h = img_small.size
+        start = xo, y_start
+
+        nearest_colors = dict()
+        cmap = dict()
+
+        col_freq = dict()
+        table_lines = list()
+        table_colors = list()
+
+        old_col = None
+
+        # Create interval size from normalized accuracy value
+        # Also setting a lower bound value of 1 to prevent interval_size from reaching 0
+        interval_size = max((1 - self.settings[Bot.ACCURACY]) * 255, 1)
+
+        for i in range(h):
+            if mode is Bot.LAYERED:
+                table_lines.append(list())
+                table_colors.append(set())
+
+            for j in range(w):
+                r, g, b = pix[j, i][:3]
+                col = near = (r, g, b)
+
+                # DESIGNATING COLOR OF THE CURRENT PIXEL
+                # Deciding what to do with new RGB triplet
+                if (r, g, b) not in nearest_colors:
+                    if flags & Bot.USE_CUSTOM_COLORS:
+                        # Obtain the closest color
+                        # round(color_component / interval_size) * interval_size
+                        col = tuple(int(round(v / interval_size) * interval_size) for v in col)
+                    else:
+                        # Find the nearest color from the palette
+                        col = self._palette.nearest_color((r, g, b))
+
+                    # Save the nearest color for this RGB triplet to avoid recomputing it
+                    nearest_colors[(r, g, b)] = col
+                else:
+                    col = nearest_colors[(r, g, b)]
+
+                # DESIGNATING COLOR LINES
+                # End brush stroke when...
+                # 1. a new color is encountered
+                # 2. the brush is at the end of the row
+                if j == w - 1 or (old_col != None and old_col != col):
+                    end = (x, y_start)
+                    if mode is Bot.SLOTTED and not (old_col == (255, 255, 255) and flags & Bot.IGNORE_WHITE):
+                        lines = cmap.get(old_col, [])
+                        lines.append( (start, end) )
+                        cmap[old_col] = lines
+                    if mode is Bot.LAYERED:
+                        table_lines[i].append((old_col, (start, end)))
+                        table_colors[i].add(old_col)
+                        col_freq[old_col] = col_freq.get(old_col, 0) + end[0] - start[0] + 1
+                    start = (xo, y_start + step) if j == w - 1 else (x + step, y_start)
+
+                self.progress = 100 * (i * w + (j + 1)) / (w * h)
+
+                old_col = col
+                x += step
+
+            x = xo
+            y_start += step
+
+        if mode is Bot.SLOTTED:
+            return cmap
+
+        # Sort colors in decreasing order of their frequency and maintain a height level index for each color
+        col_freq = tuple(k for k, _ in sorted(col_freq.items(), key=lambda item : item [1], reverse=True))
+        col_index = {col_freq[i]: i for i in range(len(col_freq))}
+
+        # This loop will attempt to merge lines in favour of reducing the number of brush strokes when drawing.
+        # Lines of lower layer colors can be easily merged into fewer strokes since they will be repainted over
+        # again by colors from a higher layer
+        for idc, col in enumerate(col_freq):
+            for idr, row in enumerate(table_lines):
+                if col not in table_colors[idr] or (col == (255, 255, 255) and flags & Bot.IGNORE_WHITE):
+                    continue
+
+                start, end, exposed = None, None, False
+                for idl, line in enumerate(row):
+                    if idc <= col_index[line[0]]:
+                        start = line[1][0] if start is None else start
+                        end = line[1][1]
+                        exposed = exposed or idc == col_index[line[0]]
+                    if start is not None and (idc > col_index[line[0]] or idl == len(row) - 1):
+                        if exposed:
+                            lines = cmap.get(col, [])
+                            lines.append((start, end))
+                            cmap[col] = lines
+                        start, exposed = None, False
+
+        return cmap
 
     def get_cached_status(self, image_path, flags=0, mode=LAYERED):
         """Check if valid cached computation exists"""

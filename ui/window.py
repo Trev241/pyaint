@@ -252,6 +252,26 @@ class Window:
         self._pause_key_entry.bind('<Key>', self._on_pause_key_entry_press)
         curr_row += 1
 
+        # Redraw Region section
+        Label(self._cframe, text='Redraw Region', font=Window.TITLE_FONT).grid(column=0, row=curr_row, columnspan=2, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        # Redraw buttons
+        self._redraw_pick_btn = Button(self._cframe, text='Pick Region', command=self._on_redraw_pick)
+        self._redraw_pick_btn.grid(column=0, row=curr_row, padx=5, pady=5, sticky='ew')
+        self._redraw_draw_btn = Button(self._cframe, text='Draw Region', command=self._redraw_draw_thread)
+        self._redraw_draw_btn.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
+        curr_row += 1
+
+        # Redraw region display
+        self._redraw_region_label = Label(self._cframe, text='No region selected', font=('TkDefaultFont', 8))
+        self._redraw_region_label.grid(column=0, row=curr_row, columnspan=2, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        # Initialize redraw state
+        self._redraw_region = None  # Will store (x1, y1, x2, y2) canvas coordinates
+        self._redraw_picking = False  # Flag for when we're in region selection mode
+
         return oframe
 
     def _cpanel_cvs_config(self, event):
@@ -910,6 +930,282 @@ class Window:
 
         # Let the thread manager know that the task has ended
         self._set_busy(False)
+
+    def _on_redraw_pick(self):
+        """Start region selection mode for redraw functionality (like canvas setup)"""
+        if not hasattr(self.bot, '_canvas') or self.bot._canvas is None:
+            messagebox.showerror(self.title, "Canvas not configured. Please run Setup first.")
+            return
+
+        self._redraw_picking = True
+        self._coords = []
+        self._clicks = 0
+        self._required_clicks = 2
+
+        # Prompt user like the setup process
+        if messagebox.askokcancel(self.title, "Click on the UPPER LEFT and LOWER RIGHT corners of the region you want to redraw.") == True:
+            from pynput.mouse import Listener
+            self._listener = Listener(on_click=self._on_redraw_click)
+            self._listener.start()
+            self._root.iconify()
+
+    def _on_redraw_click(self, x, y, button, pressed):
+        """Handle mouse clicks for redraw region selection (like setup canvas selection)"""
+        if pressed:
+            self._root.bell()
+            print(x, y)
+            self._clicks += 1
+            self._coords += x, y
+
+            if self._clicks == self._required_clicks:
+                # Determining corner coordinates based on received input. ImageGrab.grab() always expects
+                # the first pair of coordinates to be above and on the left of the second pair
+                top_left = min(self._coords[0], self._coords[2]), min(self._coords[1], self._coords[3])
+                bot_right = max(self._coords[0], self._coords[2]), max(self._coords[1], self._coords[3])
+                box = top_left + bot_right
+                print(f'Capturing box: {box}')
+
+                # Store the selected region coordinates
+                self._redraw_region = box
+                self._redraw_region_label['text'] = f"Region: ({box[0]}, {box[1]}) to ({box[2]}, {box[3]})"
+                self.tlabel['text'] = "Redraw region selected. Click 'Draw Region' to start drawing."
+                self._redraw_picking = False
+
+                self._listener.stop()
+                self._root.deiconify()
+
+                messagebox.showinfo(self.title, f"Region selected!\n\nTop-left: ({box[0]}, {box[1]})\nBottom-right: ({box[2]}, {box[3]})\n\nYou can now click 'Draw Region' to redraw this area.")
+
+    def _get_redraw_region_manual(self):
+        """Get redraw region coordinates manually from user input"""
+        # Create a simple dialog to get coordinates
+        import tkinter.simpledialog as sd
+
+        try:
+            x1 = sd.askinteger(self.title, "Enter X coordinate of first point (top-left):")
+            if x1 is None:
+                self._cancel_redraw_pick()
+                return
+
+            y1 = sd.askinteger(self.title, "Enter Y coordinate of first point (top-left):")
+            if y1 is None:
+                self._cancel_redraw_pick()
+                return
+
+            x2 = sd.askinteger(self.title, "Enter X coordinate of second point (bottom-right):")
+            if x2 is None:
+                self._cancel_redraw_pick()
+                return
+
+            y2 = sd.askinteger(self.title, "Enter Y coordinate of second point (bottom-right):")
+            if y2 is None:
+                self._cancel_redraw_pick()
+                return
+
+            # Validate coordinates
+            if x1 >= x2 or y1 >= y2:
+                messagebox.showerror(self.title, "Invalid region: first point must be above and left of second point.")
+                self._cancel_redraw_pick()
+                return
+
+            self._redraw_region = (x1, y1, x2, y2)
+            self._redraw_region_label['text'] = f"Region: ({x1}, {y1}) to ({x2}, {y2})"
+            self.tlabel['text'] = "Redraw region selected. Click 'Draw Region' to start drawing."
+            self._redraw_picking = False
+
+        except Exception as e:
+            messagebox.showerror(self.title, f"Error getting coordinates: {str(e)}")
+            self._cancel_redraw_pick()
+
+    def _cancel_redraw_pick(self):
+        """Cancel the redraw region selection"""
+        self._redraw_picking = False
+        self.tlabel['text'] = "Redraw region selection cancelled."
+
+    @is_free
+    def _redraw_draw_thread(self):
+        """Start the redraw region drawing process"""
+        if self._redraw_region is None:
+            messagebox.showerror(self.title, "No redraw region selected. Please click 'Pick Region' first.")
+            return
+
+        if not hasattr(self.bot, '_canvas') or self.bot._canvas is None:
+            messagebox.showerror(self.title, "Canvas not configured. Please run Setup first.")
+            return
+
+        self._redraw_thread = Thread(target=self.redraw_region)
+        self._redraw_thread.start()
+        self._manage_redraw_thread()
+
+    def _manage_redraw_thread(self):
+        """Manage the redraw thread progress"""
+        if self._redraw_thread.is_alive() and self.busy:
+            self._root.after(500, self._manage_redraw_thread)
+            self.tlabel['text'] = f"Processing redraw region: {self.bot.progress:.2f}%"
+        elif self.busy:
+            # Redraw finished
+            self.tlabel['text'] = 'Redraw region completed!'
+            self._set_busy(False)
+
+    def redraw_region(self):
+        """Process and draw only the selected region"""
+        try:
+            t = time.time()
+
+            # Convert canvas region to reference image region
+            canvas_region = self._redraw_region  # (x1, y1, x2, y2) in canvas coordinates
+            image_region = self._canvas_to_image_region(canvas_region)
+
+            print(f"Canvas region: {canvas_region}")
+            print(f"Image region: {image_region}")
+
+            # Process only the selected region of the image and draw it at the selected canvas location
+            canvas_target = (canvas_region[0], canvas_region[1], canvas_region[2] - canvas_region[0], canvas_region[3] - canvas_region[1])
+            cmap = self.bot.process_region(self._imname, image_region, flags=self.draw_options, mode=self._mode, canvas_target=canvas_target)
+
+            if not cmap or len(cmap) == 0:
+                self.tlabel['text'] = "No drawable content found in selected region."
+                return
+
+            # Show drawing time estimate
+            drawing_eta = self.bot.estimate_drawing_time(cmap)
+            print(f"Estimated redraw time: {drawing_eta}")
+            self.tlabel['text'] = f"Starting redraw - ETA: {drawing_eta}"
+
+            messagebox.showwarning(self.title, f'Redrawing selected region.\nPress ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
+            self._root.iconify()
+
+            # Clear any previous termination/paused state
+            self.bot.terminate = False
+            self.bot.paused = False
+            self.bot.drawing = False
+            self.bot.draw_state = {
+                'color_idx': 0,
+                'line_idx': 0,
+                'segment_idx': 0,
+                'current_color': None,
+                'was_paused': False
+            }
+
+            result = self.bot.draw(cmap)
+            self._root.deiconify()
+            self._root.wm_state('normal')
+
+            if result == 'success':
+                self.tlabel['text'] = f"Redraw completed. Time elapsed: {time.time() - t:.2f}s"
+            elif result == 'terminated':
+                self.tlabel['text'] = f"Redraw terminated by user. Time elapsed: {time.time() - t:.2f}s"
+                self.bot.terminate = False
+            elif result == 'paused':
+                self.tlabel['text'] = f"Redraw paused. Press {self.bot.pause_key} again to resume."
+            else:
+                self.tlabel['text'] = f"Unknown redraw result: {result}"
+
+        except Exception as e:
+            traceback.print_exc()
+            messagebox.showerror(self.title, f'Redraw failed: {str(e)}')
+        finally:
+            self._set_busy(False)
+
+    def _canvas_to_image_region(self, canvas_region):
+        """Convert canvas coordinates to reference image coordinates"""
+        x1, y1, x2, y2 = canvas_region
+
+        # Get canvas dimensions
+        canvas_x, canvas_y, canvas_w, canvas_h = self.bot._canvas
+
+        # Load the reference image to get its dimensions
+        img = Image.open(self._imname)
+        img_w, img_h = img.size
+
+        # Calculate scaling factors
+        scale_x = img_w / canvas_w
+        scale_y = img_h / canvas_h
+
+        # Convert canvas coordinates to image coordinates
+        img_x1 = int((x1 - canvas_x) * scale_x)
+        img_y1 = int((y1 - canvas_y) * scale_y)
+        img_x2 = int((x2 - canvas_x) * scale_x)
+        img_y2 = int((y2 - canvas_y) * scale_y)
+
+        # Ensure coordinates are within image bounds
+        img_x1 = max(0, min(img_x1, img_w))
+        img_y1 = max(0, min(img_y1, img_h))
+        img_x2 = max(0, min(img_x2, img_w))
+        img_y2 = max(0, min(img_y2, img_h))
+
+        return (img_x1, img_y1, img_x2, img_y2)
+
+    def _capture_redraw_points(self):
+        """Capture two mouse clicks to define the redraw region"""
+        import pyautogui
+        import keyboard
+
+        points = []
+        click_count = 0
+        last_mouse_state = False
+
+        print("Mouse capture started. Press 'ESC' to cancel.")
+        print("Move mouse to first point and click...")
+
+        try:
+            while click_count < 2 and not keyboard.is_pressed('esc'):
+                # Check for mouse click (detect press, not hold)
+                current_mouse_state = pyautogui.mouseDown()
+                if current_mouse_state and not last_mouse_state:
+                    # Mouse was just pressed
+                    x, y = pyautogui.position()
+                    points.append((x, y))
+                    click_count += 1
+
+                    if click_count == 1:
+                        print(f"First point captured: ({x}, {y})")
+                        print("Now move to bottom-right point and click...")
+                    elif click_count == 2:
+                        print(f"Second point captured: ({x}, {y})")
+
+                    # Small delay to debounce
+                    time.sleep(0.3)
+
+                last_mouse_state = current_mouse_state
+                time.sleep(0.01)  # Small polling delay
+
+            if keyboard.is_pressed('esc'):
+                raise KeyboardInterrupt("User cancelled with ESC")
+
+            # Validate the points
+            if len(points) == 2:
+                x1, y1 = points[0]
+                x2, y2 = points[1]
+
+                # Ensure first point is top-left, second is bottom-right
+                min_x, max_x = min(x1, x2), max(x1, x2)
+                min_y, max_y = min(y1, y2), max(y1, y2)
+
+                self._redraw_region = (min_x, min_y, max_x, max_y)
+                self._redraw_region_label['text'] = f"Region: ({min_x}, {min_y}) to ({max_x}, {max_y})"
+                self.tlabel['text'] = "Redraw region selected. Click 'Draw Region' to start drawing."
+                self._redraw_picking = False
+
+                # Restore the UI
+                self._root.deiconify()
+                self._root.wm_state('normal')
+
+                print(f"Region selected: ({min_x}, {min_y}) to ({max_x}, {max_y})")
+                messagebox.showinfo(self.title, f"Region selected!\n\nTop-left: ({min_x}, {min_y})\nBottom-right: ({max_x}, {max_y})\n\nYou can now click 'Draw Region' to redraw this area.")
+
+        except KeyboardInterrupt:
+            print("Mouse capture cancelled by user")
+            self._cancel_redraw_pick()
+            # Restore the UI
+            self._root.deiconify()
+            self._root.wm_state('normal')
+        except Exception as e:
+            print(f"Error during mouse capture: {e}")
+            self._cancel_redraw_pick()
+            # Restore the UI
+            self._root.deiconify()
+            self._root.wm_state('normal')
 
     def start(self):
         try:
