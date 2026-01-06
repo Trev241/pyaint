@@ -556,21 +556,49 @@ class SetupWindow:
             messagebox.showwarning(self.title, 'No valid rows found!')
             return
         
+        # Get instructions for this mode
+        instructions = {
+            '1_row': [
+                ('Click on CENTER of FIRST color box (leftmost) in the row.', 'first_col'),
+                ('Click on CENTER of SECOND color box in the row.', 'second_col'),
+                ('Click on CENTER of LAST color box (rightmost) in the row.', 'last_col')
+            ],
+            'multi_row': [
+                ('Click on CENTER of FIRST color box (leftmost) in the FIRST row.', 'first_row_first_col'),
+                ('Click on CENTER of SECOND color box in the FIRST row.', 'first_row_second_col'),
+                ('Click on CENTER of LAST color box (rightmost) in the FIRST row.', 'first_row_last_col'),
+                ('Click on CENTER of FIRST color box in the SECOND row.', 'second_row_first_col'),
+                ('Click on CENTER of FIRST color box (leftmost) in the LAST row.', 'last_row_first_col'),
+                ('Click on CENTER of LAST color box (rightmost) in the LAST row.', 'last_row_last_col')
+            ]
+        }
+        
         # Start the precision estimation process
         self._precision_points = []
         self._precision_step = 0
-        self._color_sel_window.iconify()
         
-        # Show first instruction
-        self._show_precision_instruction()
+        # Show all instructions in one dialog
+        self._show_precision_dialog(instructions[self._precision_mode])
     
-    def _show_precision_dialog(self, instruction):
-        """Show precision estimation instruction dialog"""
-        result = messagebox.askokcancel('Precision Estimate - Step ' + str(self._precision_step + 1), instruction)
+    def _show_precision_dialog(self, instructions_list):
+        """Show precision estimation instructions - all at once"""
+        # Build instruction text
+        instruction_text = "Click on the following points in order:\n\n"
+        for i, (step_name, point_type) in enumerate(instructions_list):
+            instruction_text += f"{i+1}. {step_name}\n"
+        
+        instruction_text += "\nClick OK to begin, then click the points on your palette in the order shown above."
+        
+        result = messagebox.askokcancel('Precision Estimate Instructions', instruction_text)
         
         if result:
             # User confirmed - minimize window and start listening
             self._color_sel_window.iconify()
+            
+            # Set up for first point
+            self._precision_step = 0
+            point_type = instructions_list[0][1]
+            self._current_point_type = point_type
             
             # Start listening for click
             self._coords = []
@@ -633,8 +661,29 @@ class SetupWindow:
                 
                 # Move to next step
                 self._precision_step += 1
-                self._listener.stop()
-                self._show_precision_instruction()
+                
+                # Check if we have all required points
+                instructions = {
+                    '1_row': 3,  # 3 points for 1-row mode
+                    'multi_row': 6  # 6 points for multi-row mode
+                }
+                
+                if self._precision_step >= instructions[self._precision_mode]:
+                    # All points collected, calculate centers
+                    self._listener.stop()
+                    self._calculate_precision_centers()
+                else:
+                    # Continue to next point - no dialog, just wait for next click
+                    self._clicks = 0
+                    self._coords = []
+                    # Set point type for next step
+                    if self._precision_mode == '1_row':
+                        point_types = ['first_col', 'second_col', 'last_col']
+                    else:
+                        point_types = ['first_row_first_col', 'first_row_second_col', 'first_row_last_col', 
+                                     'second_row_first_col', 'last_row_first_col', 'last_row_last_col']
+                    self._current_point_type = point_types[self._precision_step]
+                    print(f'Waiting for next click: {self._current_point_type}')
     
     def _calculate_precision_centers(self):
         """Calculate all centers based on precision estimate reference points"""
@@ -766,6 +815,7 @@ class SetupWindow:
         palette_w = self.palette_box[2] - self.palette_box[0]
         palette_h = self.palette_box[3] - self.palette_box[1]
         
+        # Create overlay window
         overlay = Toplevel()
         overlay.overrideredirect(True)  # Remove window decorations
         overlay.attributes('-topmost', True)  # Keep on top
@@ -777,36 +827,25 @@ class SetupWindow:
         canvas = Canvas(overlay, bg='white', highlightthickness=0)
         canvas.pack(fill='both', expand=True)
         
-        # Draw circles at each estimated center position
+        # Draw crosshairs at each estimated center position
         for i in sorted(self._manual_centers.keys()):
             center_x, center_y = self._manual_centers[i]
-            # Circle radius (slightly larger than typical palette color)
-            radius = 15
             
-            # Draw red circle at center with white fill to block out underlying color
-            canvas.create_oval(
-                center_x - radius, center_y - radius,
-                center_x + radius, center_y + radius,
-                outline='red',
-                fill='white',
-                width=3
-            )
-            
-            # Draw crosshair for precision
+            # Draw red crosshair for precision
             canvas.create_line(
-                center_x - 5, center_y,
-                center_x + 5, center_y,
-                fill='red', width=2
+                center_x - 8, center_y,
+                center_x + 8, center_y,
+                fill='red', width=3
             )
             canvas.create_line(
-                center_x, center_y - 5,
-                center_x, center_y + 5,
-                fill='red', width=2
+                center_x, center_y - 8,
+                center_x, center_y + 8,
+                fill='red', width=3
             )
             
             # Add label showing color number
             canvas.create_text(
-                center_x, center_y - radius - 10,
+                center_x, center_y - 15,
                 text=str(i + 1),
                 fill='red',
                 font=('Arial', 12, 'bold')
@@ -854,36 +893,25 @@ class SetupWindow:
         canvas = Canvas(overlay, bg='white', highlightthickness=0)
         canvas.pack(fill='both', expand=True)
         
-        # Draw circles at each custom center position
+        # Draw crosshairs at each custom center position
         for i in sorted(self._manual_centers.keys()):
             center_x, center_y = self._manual_centers[i]
-            # Circle radius (slightly larger than typical palette color)
-            radius = 15
             
-            # Draw blue circle at center with white fill to block out underlying color
-            canvas.create_oval(
-                center_x - radius, center_y - radius,
-                center_x + radius, center_y + radius,
-                outline='blue',
-                fill='white',
-                width=3
-            )
-            
-            # Draw crosshair for precision
+            # Draw blue crosshair for precision
             canvas.create_line(
-                center_x - 5, center_y,
-                center_x + 5, center_y,
-                fill='blue', width=2
+                center_x - 8, center_y,
+                center_x + 8, center_y,
+                fill='blue', width=3
             )
             canvas.create_line(
-                center_x, center_y - 5,
-                center_x, center_y + 5,
-                fill='blue', width=2
+                center_x, center_y - 8,
+                center_x, center_y + 8,
+                fill='blue', width=3
             )
             
             # Add label showing color number
             canvas.create_text(
-                center_x, center_y - radius - 10,
+                center_x, center_y - 15,
                 text=str(i + 1),
                 fill='blue',
                 font=('Arial', 12, 'bold')
