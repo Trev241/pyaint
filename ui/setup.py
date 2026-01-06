@@ -349,6 +349,12 @@ class SetupWindow:
         
         Button(
             done_frame,
+            text='Show Custom Centers',
+            command=self._show_custom_centers_overlay
+        ).pack(side='left', padx=5)
+        
+        Button(
+            done_frame,
             text='Select All',
             command=self._select_all_colors
         ).pack(side='left', padx=5)
@@ -593,6 +599,83 @@ class SetupWindow:
             f'Red circles showed estimated positions on your palette.\n'
             f'Yellow cells in the grid show estimated centers.\n\n'
             f'You can still manually adjust by clicking "Pick Centers" to pick specific centers.'
+        ))
+    
+    def _show_custom_centers_overlay(self):
+        """Show overlay circles on screen at manually picked center positions"""
+        from tkinter import Toplevel, Canvas
+        import time
+        
+        if not self._manual_centers:
+            messagebox.showwarning(self.title, 'No custom centers to show! Please pick centers first using "Pick Centers" mode.')
+            return
+        
+        # Create overlay window positioned exactly over palette
+        palette_x = self.palette_box[0]
+        palette_y = self.palette_box[1]
+        palette_w = self.palette_box[2] - self.palette_box[0]
+        palette_h = self.palette_box[3] - self.palette_box[1]
+        
+        overlay = Toplevel()
+        overlay.overrideredirect(True)  # Remove window decorations
+        overlay.attributes('-topmost', True)  # Keep on top
+        overlay.attributes('-alpha', 0.9)  # Slightly transparent
+        overlay.config(bg='white')  # White background to make blue circles visible
+        overlay.geometry(f'{palette_w}x{palette_h}+{palette_x}+{palette_y}')
+        
+        # Create canvas
+        canvas = Canvas(overlay, bg='white', highlightthickness=0)
+        canvas.pack(fill='both', expand=True)
+        
+        # Draw circles at each custom center position
+        for i in sorted(self._manual_centers.keys()):
+            center_x, center_y = self._manual_centers[i]
+            # Circle radius (slightly larger than typical palette color)
+            radius = 15
+            
+            # Draw blue circle at center with white fill to block out underlying color
+            canvas.create_oval(
+                center_x - radius, center_y - radius,
+                center_x + radius, center_y + radius,
+                outline='blue',
+                fill='white',
+                width=3
+            )
+            
+            # Draw crosshair for precision
+            canvas.create_line(
+                center_x - 5, center_y,
+                center_x + 5, center_y,
+                fill='blue', width=2
+            )
+            canvas.create_line(
+                center_x, center_y - 5,
+                center_x, center_y + 5,
+                fill='blue', width=2
+            )
+            
+            # Add label showing color number
+            canvas.create_text(
+                center_x, center_y - radius - 10,
+                text=str(i + 1),
+                fill='blue',
+                font=('Arial', 12, 'bold')
+            )
+        
+        # Update window
+        overlay.update()
+        
+        # Show for 3 seconds then close
+        self._root.after(3000, lambda: overlay.destroy())
+        print('Showing custom centers overlay for 3 seconds...')
+        
+        # Show info dialog after overlay closes
+        self._root.after(3100, lambda: messagebox.showinfo(
+            self.title, 
+            f'Displaying {len(self._manual_centers)} custom centers!\n\n'
+            f'Blue circles showed your manually picked positions on your palette.\n'
+            f'Yellow cells in the grid show custom centers.\n\n'
+            f'You can adjust centers by clicking "Pick Centers" to pick specific centers.'
         ))
     
     def _on_escape_press(self, event):
