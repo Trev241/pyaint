@@ -39,7 +39,12 @@ An intelligent drawing automation tool that converts images into precise mouse m
 ### Advanced Palette Features
 - **Manual Color Center Picking**: Click to set exact center points for each palette color
 - **Valid Positions Selection**: Toggle which palette colors are valid/invalid
-- **Auto-Estimate Centers**: Automatically calculate center points for all valid colors
+- **Auto-Estimate Centers**: Automatically calculate center points using grid-based estimation
+- **Precision Estimate**: Advanced center calculation using reference point selection for maximum accuracy
+  - **1 Row Mode**: Pick first box, second box, and last box of the row to calculate spacing
+  - **2+ Rows Mode**: Pick first row (1st, 2nd, last boxes), second row (1st box), and last row (1st, last boxes)
+  - **3+ Rows Mode**: Picks first row (1st, 2nd, last boxes), second row (1st box), last row (1st, last boxes)
+  - Automatically calculates spacing between boxes and rows for precise center estimation
 - **Grid-Based Configuration**: Visual grid for easy palette cell selection
 - **Preview Generation**: Visual preview of captured palette, canvas, and custom color regions
 
@@ -84,7 +89,11 @@ An intelligent drawing automation tool that converts images into precise mouse m
 5. Optionally use advanced palette features:
    - Toggle valid/invalid palette cells
    - Pick exact center points for precise color selection
-   - Auto-estimate centers for quick setup
+   - Auto-estimate centers for quick setup (uses simple grid calculation)
+   - **Precision Estimate** for maximum accuracy (uses reference point selection):
+     - Select 3-5 reference points based on your palette's row count
+     - System calculates exact spacing between boxes and rows
+     - Automatically estimates centers for all valid positions
 6. Configure your preferred settings using the control panel sliders
 
 ### Basic Drawing
@@ -174,10 +183,12 @@ Configuration wizard for initializing palette, canvas, and custom color regions 
 - Use **Layered mode** for better visual results, **Slotted mode** for faster processing
 
 ### Palette Tips
-- Use **Auto-Estimate Centers** for quick initial setup
-- Use **Pick Centers** for precise color selection on complex palettes
+- Use **Auto-Estimate Centers** for quick initial setup on regular grids
+- Use **Precision Estimate** for maximum accuracy on irregular or complex palettes
+- Use **Pick Centers** for precise color selection on complex palettes requiring manual input
 - Toggle invalid positions to exclude broken or unused colors
 - Preview captured regions to verify correct configuration
+- For Precision Estimate with multiple rows, ensure you have at least 2 valid rows for accurate row spacing calculation
 
 ## Development
 

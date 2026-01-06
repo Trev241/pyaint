@@ -321,6 +321,11 @@ class Bot:
         self.total_strokes = sum(len(lines) for lines in cmap.values())
         self.start_time = time.time()
         self.completed_strokes = 0
+        
+        # Store estimated time in seconds for comparison
+        self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
+        estimated_str = self._format_time(self.estimated_time_seconds)
+        print(f"Estimated drawing time: {estimated_str}")
 
         for color_idx, (c, lines) in enumerate(cmap.items()):
             # Skip colors already drawn if resuming
@@ -346,7 +351,7 @@ class Bot:
                     # Track which modifiers were pressed so we can release them in reverse order
                     pressed_modifiers = []
 
-                    # Hold modifiers in order (Ctrl, Alt, Shift)
+                    # Press modifiers immediately before the click
                     modifier_keys = [('ctrl', 'ctrl'), ('alt', 'alt'), ('shift', 'shift')]
                     for mod_key, pygui_key in modifier_keys:
                         if nl['modifiers'].get(mod_key):
@@ -354,26 +359,36 @@ class Bot:
                             pressed_modifiers.append(pygui_key)
                             print(f"[NewLayer] pressed modifier: {pygui_key}")
 
-                    # Give the OS time to register modifier keydowns
-                    time.sleep(0.15)
-
-                    # Use explicit mouseDown/mouseUp for better reliability in some apps
+                    # Click the button with modifiers active
                     print(f"[NewLayer] performing mouseDown at {(nx, ny)}")
                     pyautogui.mouseDown(nx, ny, button='left')
                     time.sleep(0.08)
                     pyautogui.mouseUp(nx, ny, button='left')
                     print(f"[NewLayer] mouse click performed at {(nx, ny)}")
 
-                    # Wait for the target app to process the click
-                    time.sleep(0.75)
-
-                    # Release modifiers in reverse order (Shift, Alt, Ctrl)
+                    # Release modifiers immediately after the click with robust handling
                     for pygui_key in reversed(pressed_modifiers):
                         pyautogui.keyUp(pygui_key)
                         print(f"[NewLayer] released modifier: {pygui_key}")
+                        time.sleep(0.05)  # Small delay to ensure each key release is registered
 
-                    # Ensure all modifiers are fully released before proceeding
-                    time.sleep(0.15)
+                    # Brute-force release all modifiers as backup (in case tracked list missed any)
+                    try:
+                        pyautogui.keyUp('shift')
+                        time.sleep(0.05)
+                        pyautogui.keyUp('alt')
+                        time.sleep(0.05)
+                        pyautogui.keyUp('ctrl')
+                        time.sleep(0.05)
+                        print(f"[NewLayer] force-released all modifiers as backup")
+                    except:
+                        pass
+
+                    # Additional delay to ensure OS processes all key release events
+                    time.sleep(0.1)
+
+                    # Wait for the target app to process the click (without modifiers active)
+                    time.sleep(0.75)
 
                     # Wait at least 0.75 seconds before starting to paint to ensure new layer is ready
                     print(f"[NewLayer] waiting 0.75 seconds before painting...")
@@ -481,7 +496,7 @@ class Bot:
 
                 if distance < 1:  # Very short line
                     pyautogui.moveTo(start_pos)
-                    pyautogui.dragTo(end_pos[0], end_pos[1], self.settings[Bot.DELAY], button='left')
+                    pyautogui.dragTo(end_pos[0], end_pos[1], 0, button='left')
                 else:
                     # Break into segments for smooth drawing
                     segments = max(2, min(10, int(distance / 10)))  # 2-10 segments based on length
@@ -529,6 +544,25 @@ class Bot:
                 # Update last stroke position for jump detection
                 last_stroke_end = end_pos
 
+        # Calculate actual time and show comparison
+        actual_time = time.time() - self.start_time
+        actual_str = self._format_time(actual_time)
+        estimated_str = self._format_time(self.estimated_time_seconds)
+        
+        # Calculate difference (positive = saved time, negative = extra time)
+        diff_seconds = self.estimated_time_seconds - actual_time
+        if diff_seconds >= 0:
+            diff_str = f"Saved: {self._format_time(diff_seconds)}"
+        else:
+            diff_str = f"Extra: {self._format_time(abs(diff_seconds))}"
+        
+        print("=" * 50)
+        print(f"Drawing completed!")
+        print(f"Estimated: {estimated_str}")
+        print(f"Actual:   {actual_str}")
+        print(f"{diff_str}")
+        print("=" * 50)
+        
         # Reset draw state on successful completion
         self.drawing = False  # Clear drawing flag
         self.draw_state['color_idx'] = 0
@@ -546,6 +580,12 @@ class Bot:
         # Set drawing flag for pause/resume support during test draw
         self.drawing = True
         lines_drawn = 0
+        self.start_time = time.time()  # Track start time for test draw
+        
+        # Estimate time for the full cmap (not just test lines)
+        self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
+        estimated_str = self._format_time(self.estimated_time_seconds)
+        print(f"Estimated drawing time (full): {estimated_str}")
 
         for color_idx, (c, lines) in enumerate(cmap.items()):
             if lines_drawn >= max_lines:
@@ -592,13 +632,31 @@ class Bot:
 
                 if distance < 1:  # Very short line
                     pyautogui.moveTo(start_pos)
-                    pyautogui.dragTo(end_pos[0], end_pos[1], self.settings[Bot.DELAY], button='left')
+                    pyautogui.dragTo(end_pos[0], end_pos[1], 0.2, button='left')
                 else:
-                    # Simple drag for test draw
+                    # Simple drag for test draw with moderate speed
                     pyautogui.moveTo(start_pos)
-                    pyautogui.dragTo(end_pos[0], end_pos[1], self.settings[Bot.DELAY], button='left')
+                    pyautogui.dragTo(end_pos[0], end_pos[1], 0.2, button='left')
+                    time.sleep(0.2)  # Delay between strokes
 
+        # Show time comparison for test draw
+        actual_time = time.time() - self.start_time
+        actual_str = self._format_time(actual_time)
+        
+        # Calculate difference (positive = saved time, negative = extra time)
+        diff_seconds = self.estimated_time_seconds - actual_time
+        if diff_seconds >= 0:
+            diff_str = f"Saved: {self._format_time(diff_seconds)}"
+        else:
+            diff_str = f"Extra: {self._format_time(abs(diff_seconds))}"
+        
+        print("=" * 50)
         print(f"Test draw completed: {lines_drawn} lines drawn")
+        print(f"Estimated (full): {self._format_time(self.estimated_time_seconds)}")
+        print(f"Actual (test):   {actual_str}")
+        print(f"{diff_str}")
+        print("=" * 50)
+        
         self.drawing = False  # Clear drawing flag
         return 'success'
 
@@ -624,8 +682,8 @@ class Bot:
 
         return f"{cache_dir}/{image_hash}_{settings_hash}.json"
 
-    def estimate_drawing_time(self, cmap):
-        """Estimate how long drawing might take based on coordinate data"""
+    def _estimate_drawing_time_seconds(self, cmap):
+        """Estimate drawing time in seconds (internal helper method)"""
         try:
             total_strokes = sum(len(lines) for lines in cmap.values())
             estimated_seconds = 0
@@ -655,6 +713,29 @@ class Bot:
             # Add color switching overhead (~0.5 seconds per color)
             num_colors = len(cmap)
             estimated_seconds += num_colors * 0.5
+
+            return estimated_seconds
+
+        except Exception:
+            return 0.0
+
+    def _format_time(self, seconds):
+        """Format seconds into a human-readable time string"""
+        if seconds < 60:
+            return f"{seconds:.0f}s"
+        elif seconds < 3600:
+            minutes = int(seconds // 60)
+            secs = int(seconds % 60)
+            return f"{minutes}:{secs:02d}"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            return f"{hours}:{minutes:02d}h"
+
+    def estimate_drawing_time(self, cmap):
+        """Estimate how long drawing might take based on coordinate data"""
+        try:
+            estimated_seconds = self._estimate_drawing_time_seconds(cmap)
 
             # Format nicely
             if estimated_seconds < 10:
@@ -945,7 +1026,7 @@ class Bot:
 
             # Draw the line
             pyautogui.mouseDown(button='left')
-            pyautogui.dragTo(end_x, end_y, self.settings[Bot.DELAY], button='left')
+            pyautogui.dragTo(end_x, end_y, 0.2, button='left')
             pyautogui.mouseUp()
 
             # Small delay between lines

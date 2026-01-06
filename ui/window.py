@@ -929,9 +929,11 @@ class Window:
             self._root.wm_state('normal')
 
             if result == 'success':
-                self.tlabel['text'] = f"Simple test draw completed. Time elapsed: {time.time() - t:.2f}s"
+                actual_time = time.time() - t
+                self.tlabel['text'] = f"Simple test draw completed. Time elapsed: {actual_time:.2f}s"
             elif result == 'terminated':
-                self.tlabel['text'] = f"Simple test draw terminated. Time elapsed: {time.time() - t:.2f}s"
+                actual_time = time.time() - t
+                self.tlabel['text'] = f"Simple test draw terminated. Time elapsed: {actual_time:.2f}s"
                 self.bot.terminate = False
             else:
                 self.tlabel['text'] = f"Simple test draw result: {result}"
@@ -1006,9 +1008,27 @@ class Window:
             self._root.deiconify()  # type: ignore
             self._root.wm_state('normal')  # type: ignore
             if result == 'success':
-                self.tlabel['text'] = f"Test draw completed. Time elapsed: {time.time() - t:.2f}s"
+                actual_time = time.time() - t
+                # Show time comparison if available
+                if hasattr(self.bot, 'estimated_time_seconds'):
+                    estimated_str = self.bot._format_time(self.bot.estimated_time_seconds)
+                    actual_str = self.bot._format_time(actual_time)
+                    diff_seconds = self.bot.estimated_time_seconds - actual_time
+                    if diff_seconds >= 0:
+                        diff_str = f"Saved: {self.bot._format_time(diff_seconds)}"
+                    else:
+                        diff_str = f"Extra: {self.bot._format_time(abs(diff_seconds))}"
+                    self.tlabel['text'] = f"Test draw completed! Est: {estimated_str}, Act: {actual_str}, {diff_str}"
+                else:
+                    self.tlabel['text'] = f"Test draw completed. Time elapsed: {actual_time:.2f}s"
             elif result == 'terminated':
-                self.tlabel['text'] = f"Test draw terminated by user. Time elapsed: {time.time() - t:.2f}s"
+                actual_time = time.time() - t
+                if hasattr(self.bot, 'estimated_time_seconds'):
+                    estimated_str = self.bot._format_time(self.bot.estimated_time_seconds)
+                    actual_str = self.bot._format_time(actual_time)
+                    self.tlabel['text'] = f"Test draw terminated. Est: {estimated_str}, Act: {actual_str}"
+                else:
+                    self.tlabel['text'] = f"Test draw terminated by user. Time elapsed: {actual_time:.2f}s"
                 # Clear termination so future tests can run
                 self.bot.terminate = False
             else:
@@ -1181,9 +1201,27 @@ class Window:
             self._root.wm_state('normal')
 
             if result == 'success':
-                self.tlabel['text'] = f"Redraw completed. Time elapsed: {time.time() - t:.2f}s"
+                actual_time = time.time() - t
+                # Show time comparison if available
+                if hasattr(self.bot, 'estimated_time_seconds'):
+                    estimated_str = self.bot._format_time(self.bot.estimated_time_seconds)
+                    actual_str = self.bot._format_time(actual_time)
+                    diff_seconds = self.bot.estimated_time_seconds - actual_time
+                    if diff_seconds >= 0:
+                        diff_str = f"Saved: {self.bot._format_time(diff_seconds)}"
+                    else:
+                        diff_str = f"Extra: {self.bot._format_time(abs(diff_seconds))}"
+                    self.tlabel['text'] = f"Redraw completed! Est: {estimated_str}, Act: {actual_str}, {diff_str}"
+                else:
+                    self.tlabel['text'] = f"Redraw completed. Time elapsed: {actual_time:.2f}s"
             elif result == 'terminated':
-                self.tlabel['text'] = f"Redraw terminated by user. Time elapsed: {time.time() - t:.2f}s"
+                actual_time = time.time() - t
+                if hasattr(self.bot, 'estimated_time_seconds'):
+                    estimated_str = self.bot._format_time(self.bot.estimated_time_seconds)
+                    actual_str = self.bot._format_time(actual_time)
+                    self.tlabel['text'] = f"Redraw terminated. Est: {estimated_str}, Act: {actual_str}"
+                else:
+                    self.tlabel['text'] = f"Redraw terminated by user. Time elapsed: {actual_time:.2f}s"
                 self.bot.terminate = False
             elif result == 'paused':
                 self.tlabel['text'] = f"Redraw paused. Press {self.bot.pause_key} again to resume."
@@ -1348,9 +1386,27 @@ class Window:
             self._root.deiconify()  # type: ignore
             self._root.wm_state('normal')  # type: ignore
             if result == 'success':
-                self.tlabel['text'] = f"Success. Time elapsed: {time.time() - t:.2f}s"
+                actual_time = time.time() - t
+                # Show time comparison if available
+                if hasattr(self.bot, 'estimated_time_seconds'):
+                    estimated_str = self.bot._format_time(self.bot.estimated_time_seconds)
+                    actual_str = self.bot._format_time(actual_time)
+                    diff_seconds = self.bot.estimated_time_seconds - actual_time
+                    if diff_seconds >= 0:
+                        diff_str = f"Saved: {self.bot._format_time(diff_seconds)}"
+                    else:
+                        diff_str = f"Extra: {self.bot._format_time(abs(diff_seconds))}"
+                    self.tlabel['text'] = f"Success! Est: {estimated_str}, Act: {actual_str}, {diff_str}"
+                else:
+                    self.tlabel['text'] = f"Success. Time elapsed: {actual_time:.2f}s"
             elif result == 'terminated':
-                self.tlabel['text'] = f"Terminated by user. Time elapsed: {time.time() - t:.2f}s"
+                actual_time = time.time() - t
+                if hasattr(self.bot, 'estimated_time_seconds'):
+                    estimated_str = self.bot._format_time(self.bot.estimated_time_seconds)
+                    actual_str = self.bot._format_time(actual_time)
+                    self.tlabel['text'] = f"Terminated. Est: {estimated_str}, Act: {actual_str}"
+                else:
+                    self.tlabel['text'] = f"Terminated by user. Time elapsed: {actual_time:.2f}s"
                 # Reset bot state for fresh start after termination
                 self.bot.draw_state = {
                     'color_idx': 0,
@@ -1362,7 +1418,13 @@ class Window:
                 # Clear termination flag so user can start again
                 self.bot.terminate = False
             elif result == 'paused':
-                self.tlabel['text'] = f"Paused. Press {self.bot.pause_key} again to resume. Time elapsed: {time.time() - t:.2f}s"
+                actual_time = time.time() - t
+                if hasattr(self.bot, 'estimated_time_seconds'):
+                    estimated_str = self.bot._format_time(self.bot.estimated_time_seconds)
+                    actual_str = self.bot._format_time(actual_time)
+                    self.tlabel['text'] = f"Paused. Press {self.bot.pause_key} again to resume. Est: {estimated_str}, Act: {actual_str}"
+                else:
+                    self.tlabel['text'] = f"Paused. Press {self.bot.pause_key} again to resume. Time elapsed: {actual_time:.2f}s"
             else:
                 self.tlabel['text'] = f"Unknown result: {result}"
         except Exception as e:
