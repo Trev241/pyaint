@@ -161,7 +161,7 @@ class Window:
 
         self._cframe.columnconfigure(0, weight=2)
         self._cframe.columnconfigure(1, weight=1)
-        for i in range(19):
+        for i in range(20):
             self._cframe.rowconfigure(i, weight=1)
 
         curr_row = 0
@@ -172,6 +172,7 @@ class Window:
             # 'Inspect',
             'Pre-compute',
             'Test Draw',
+            'Simple Test Draw',
             'Start'
         ]
 
@@ -184,18 +185,19 @@ class Window:
         # buttons[1]['command'] = self.test
         buttons[1]['command'] = self.start_precompute_thread
         buttons[2]['command'] = self.start_test_draw_thread
-        buttons[3]['command'] = self.start_draw_thread
+        buttons[3]['command'] = self.start_simple_test_draw_thread
+        buttons[4]['command'] = self.start_draw_thread
 
         self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
-        self._teclbl.grid(column=0, row=4, columnspan=2, sticky='w', padx=5, pady=5)
+        self._teclbl.grid(column=0, row=5, columnspan=2, sticky='w', padx=5, pady=5)
         modes = [Bot.SLOTTED, Bot.LAYERED]
         self._tecvar = StringVar()
         self._tecvar.set(modes[1])
         self._mode = modes[1]
         self._teclst = OptionMenu(self._cframe, self._tecvar, self._mode, *modes, command=self._update_mode)
-        self._teclst.grid(column=0, row=5, columnspan=2, sticky='ew', padx=5, pady=5)
+        self._teclst.grid(column=0, row=6, columnspan=2, sticky='ew', padx=5, pady=5)
 
-        curr_row = 6
+        curr_row = 7
 
         # For every slider option in options, option layout is    :    (name, default, from, to)
         defaults = self.bot.settings
@@ -885,6 +887,58 @@ class Window:
         elif self.busy:
             # Test draw finished
             self.tlabel['text'] = 'Test draw completed!'
+            self._set_busy(False)
+
+    @is_free
+    def start_simple_test_draw_thread(self):
+        """Start the simple test draw in a separate thread"""
+        if not hasattr(self.bot, '_canvas') or self.bot._canvas is None:
+            messagebox.showerror(self.title, "Canvas not configured. Please run Setup first.")
+            self._set_busy(False)
+            return
+
+        self._simple_test_thread_obj = Thread(target=self.simple_test_draw)
+        self._simple_test_thread_obj.start()
+        self._manage_simple_test_draw_thread()
+
+    def _manage_simple_test_draw_thread(self):
+        """Manage the simple test draw thread"""
+        if getattr(self, '_simple_test_thread_obj', None) is not None and self._simple_test_thread_obj.is_alive() and self.busy:
+            self._root.after(500, self._manage_simple_test_draw_thread)
+            self.tlabel['text'] = "Simple test drawing in progress..."
+        elif self.busy:
+            # Simple test draw finished
+            self.tlabel['text'] = 'Simple test draw completed!'
+            self._set_busy(False)
+
+    def simple_test_draw(self):
+        """Execute simple test draw"""
+        try:
+            t = time.time()
+
+            messagebox.showinfo(self.title, 'Simple test draw: Will draw 5 lines (1/4 canvas width each) starting from upper-left corner.\n\nPlease select your desired color in the painting app first. No color picking will occur.')
+            self._root.iconify()
+
+            # Clear any previous termination/paused state
+            self.bot.terminate = False
+            self.bot.paused = False
+            self.bot.drawing = False
+
+            result = self.bot.simple_test_draw()
+            self._root.deiconify()
+            self._root.wm_state('normal')
+
+            if result == 'success':
+                self.tlabel['text'] = f"Simple test draw completed. Time elapsed: {time.time() - t:.2f}s"
+            elif result == 'terminated':
+                self.tlabel['text'] = f"Simple test draw terminated. Time elapsed: {time.time() - t:.2f}s"
+                self.bot.terminate = False
+            else:
+                self.tlabel['text'] = f"Simple test draw result: {result}"
+        except Exception as e:
+            traceback.print_exc()
+            messagebox.showerror(self.title, f'Simple test draw failed: {str(e)}')
+        finally:
             self._set_busy(False)
 
     @is_free

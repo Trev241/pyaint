@@ -909,6 +909,52 @@ class Bot:
 
         return cmap
 
+    def simple_test_draw(self):
+        '''
+        Simple test draw that draws 5 horizontal lines starting from the
+        upper-left corner of the canvas. Each line is 1/4 of the canvas width.
+        No color picking - user should manually set their desired color first.
+        Useful for quickly adjusting brush size.
+        '''
+        try:
+            canvas_x, canvas_y, canvas_w, canvas_h = self._canvas
+        except:
+            raise NoCanvasError('Bot could not continue because canvas is not initialized')
+
+        self.drawing = True
+        print("Starting simple test draw...")
+
+        # Calculate 1/4 of canvas width
+        quarter_width = canvas_w // 4
+
+        # Draw 5 horizontal lines
+        for i in range(5):
+            # Calculate vertical position (start at 0, move down by pixel_size)
+            y_offset = i * self.settings[Bot.STEP]
+
+            start_x = canvas_x
+            start_y = canvas_y + y_offset
+            end_x = canvas_x + quarter_width
+            end_y = canvas_y + y_offset
+
+            print(f"Drawing line {i + 1}/5: from ({start_x}, {start_y}) to ({end_x}, {end_y})")
+
+            # Move to start position
+            pyautogui.moveTo(start_x, start_y)
+            time.sleep(0.1)
+
+            # Draw the line
+            pyautogui.mouseDown(button='left')
+            pyautogui.dragTo(end_x, end_y, self.settings[Bot.DELAY], button='left')
+            pyautogui.mouseUp()
+
+            # Small delay between lines
+            time.sleep(0.2)
+
+        print("Simple test draw completed!")
+        self.drawing = False
+        return 'success'
+
     def get_cached_status(self, image_path, flags=0, mode=LAYERED):
         """Check if valid cached computation exists"""
         cache_file = self.get_cache_filename(image_path, flags, mode)
