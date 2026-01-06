@@ -39,6 +39,22 @@ from tkinter.ttk import (
     Entry
 )
 
+
+def is_free(func):
+    """
+    Decorator that only executes a function when the bot is not busy by checking the
+    `self.busy` flag. Keeps decorator at module scope to avoid descriptor/type issues.
+    """
+
+    def decorator(self):
+        if self.busy:
+            self.tlabel['text'] = "Cannot perform action. Currently busy..."
+        else:
+            self.busy = True
+            func(self)
+
+    return decorator
+
 class Window:
     _SLIDER_TOOLTIPS = (
         # 'The confidence factor affects the bot\'s accuracy to find its tools. ' +
@@ -166,9 +182,9 @@ class Window:
             buttons.append(b)
         buttons[0]['command'] = self.setup
         # buttons[1]['command'] = self.test
-        buttons[1]['command'] = self._precompute_thread
-        buttons[2]['command'] = self._test_draw_thread
-        buttons[3]['command'] = self._start_draw_thread
+        buttons[1]['command'] = self.start_precompute_thread
+        buttons[2]['command'] = self.start_test_draw_thread
+        buttons[3]['command'] = self.start_draw_thread
 
         self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
         self._teclbl.grid(column=0, row=4, columnspan=2, sticky='w', padx=5, pady=5)
@@ -670,22 +686,7 @@ class Window:
         except Exception:
             pass
 
-    def is_free(func):
-        '''
-        Decorator that only executes a function when the bot is not busy by checking the self.busy flag.
-        Useful for when you do not want some functions to interefere with each other.
-        Tasks that use this decorator SHOULD set self.busy to False when they finish! Failure to do so
-        will prevent other processes marked with this decorator from starting.
-        '''
-
-        def decorator(self):
-            if self.busy:
-                self.tlabel['text'] = "Cannot perform action. Currently busy..."
-            else:
-                self.busy = True
-                func(self)
-
-        return decorator
+    pass
 
     def _set_busy(self, val):
         self.busy = val
@@ -805,13 +806,15 @@ class Window:
         self._set_busy(False)
 
     @is_free
-    def _precompute_thread(self):
-        self._precompute_thread = Thread(target=self.precompute)
-        self._precompute_thread.start()
+    def start_precompute_thread(self):
+        # Use a distinct attribute name for the Thread object to avoid
+        # colliding with the method name (static type checkers complain).
+        self._precompute_thread_obj = Thread(target=self.precompute)
+        self._precompute_thread_obj.start()
         self._manage_precompute_thread()
 
     def _manage_precompute_thread(self):
-        if self._precompute_thread.is_alive() and self.busy:
+        if getattr(self, '_precompute_thread_obj', None) is not None and self._precompute_thread_obj.is_alive() and self.busy:
             self._root.after(500, self._manage_precompute_thread)
             self.tlabel['text'] = f"Pre-computing: {self.bot.progress:.2f}%"
         elif self.busy:
@@ -838,14 +841,14 @@ class Window:
             self._set_busy(False)
 
     @is_free
-    def _test_draw_thread(self):
-        self._test_draw_thread = Thread(target=self.test_draw)
-        self._test_draw_thread.start()
+    def start_test_draw_thread(self):
+        self._test_draw_thread_obj = Thread(target=self.test_draw)
+        self._test_draw_thread_obj.start()
         self._manage_test_draw_thread()
 
     def _manage_test_draw_thread(self):
         # Display progress updates every half a second
-        if self._test_draw_thread.is_alive() and self.busy:
+        if getattr(self, '_test_draw_thread_obj', None) is not None and self._test_draw_thread_obj.is_alive() and self.busy:
             self._root.after(500, self._manage_test_draw_thread)
             self.tlabel['text'] = f"Test drawing: {self.bot.progress:.2f}%"
         elif self.busy:
@@ -854,7 +857,8 @@ class Window:
             self._set_busy(False)
 
     @is_free
-    def _start_draw_thread(self):
+    def start_draw_thread(self):
+        # `_draw_thread` is the actual Thread object used elsewhere; keep that name.
         self._draw_thread = Thread(target=self.start)
         self._draw_thread.start()
         self._manage_draw_thread()
