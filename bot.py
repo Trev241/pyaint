@@ -14,7 +14,7 @@ from exceptions import (
 from PIL import Image
 
 class Palette:
-    def __init__(self, colors_pos=None, box=None, rows=None, columns=None):
+    def __init__(self, colors_pos=None, box=None, rows=None, columns=None, valid_positions=None, manual_centers=None):
         if colors_pos is not None:
             self.colors_pos = colors_pos
             self.colors = colors_pos.keys()
@@ -32,20 +32,42 @@ class Palette:
         self._csizey = int(box[3] // rows)  # type: ignore[operator,union-attr]
 
         pix = pyautogui.screenshot(region=box).load()
-        x, y = self._csizex // 2, self._csizey // 2
-        xend = columns * self._csizex
-
+        
         # Obtain RGB values of palette colors along with their coordinates
         # COLOR LAYOUT    :    ((r, g, b) : (x, y))
         self.colors_pos = dict()
         self.colors = set()
+        
+        # If valid_positions is None, assume all positions are valid
+        if valid_positions is None:
+            valid_positions = set(range(columns * rows))
+        
+        # If manual_centers is None, use automatic center calculation
+        if manual_centers is None:
+            manual_centers = {}
+        
         for i in range(columns * rows):
+            # Skip invalid positions
+            if i not in valid_positions:
+                continue
+            
+            # Use manual center if provided, otherwise calculate automatic center
+            if i in manual_centers:
+                # Use manually picked center coordinates (relative to palette box)
+                center_x, center_y = manual_centers[i]
+                # Convert to absolute screen coordinates
+                x = center_x
+                y = center_y
+            else:
+                # Calculate automatic center of the grid cell
+                row = i // columns
+                col = i % columns
+                x = col * self._csizex + self._csizex // 2
+                y = row * self._csizey + self._csizey // 2
+            
             col = (pix[x, y][:3])
             self.colors_pos[col] = (box[0] + x, box[1] + y)
             self.colors.add(col)
-
-            x = (x + self._csizex) % xend
-            y = y + (self._csizey if (i + 1) % columns == 0 else 0)
 
     def nearest_color(self, query):
         return min(self.colors, key=lambda color: Palette.dist(color, query))
@@ -111,20 +133,20 @@ class Bot:
         pyautogui.PAUSE = 0.0
         pyautogui.MINIMUM_DURATION = 0.01
 
-    def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None) -> Palette:
+    def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None, valid_positions=None, manual_centers=None) -> Palette:
 
         # pbox = pyautogui.locateOnScreen(Bot.RESOURCES[0], confidence=self.settings[Bot.CONF])
 
-        # Previously, the pbox was located using screenshots, this functionality is being phased out in favour of another method.
+        # Previously, pbox was located using screenshots, this functionality is being phased out in favour of another method.
         # pyautogui's box format is (topleftx, toplefty, width, height). Likewise, palette expects and operates on this legacy format.
-        # Therefore, pbox must be adjusted to fit the required format
+        # pbox should already be in (left, top, width, height) format when passed in
 
         try:
             if colors_pos is not None:
                 self._palette = Palette(colors_pos=colors_pos)
             elif pbox is not None and prows is not None and pcols is not None:
-                pbox_adj = pbox[0], pbox[1], pbox[2] - pbox[0], pbox[3] - pbox[1]
-                self._palette = Palette(box=pbox_adj, rows=prows, columns=pcols)
+                # pbox should already be in correct format (left, top, width, height), pass through directly
+                self._palette = Palette(box=pbox, rows=prows, columns=pcols, valid_positions=valid_positions, manual_centers=manual_centers)
             else:
                 raise ValueError('Invalid parameters for palette initialization')
         except Exception as e:

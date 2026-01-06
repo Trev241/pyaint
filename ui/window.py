@@ -638,14 +638,45 @@ class Window:
 
             # Try to load old setup data (Palette, Canvas, Custom Colors) if available
             try:
-                if 'Palette' in self.tools and self.tools['Palette'].get('color_coords'):
-                    self.bot.init_palette(
-                        # Converting string key into tuple
-                        colors_pos={
-                            tuple(map(int, k[1:-1].split(', '))): tuple(v)
-                            for k, v in self.tools['Palette']['color_coords'].items()
-                        }
-                    )
+                if 'Palette' in self.tools:
+                    palette_config = self.tools['Palette']
+                    
+                    # If we have valid_positions, use them to reconstruct the palette
+                    # This handles the case where user has manually edited color positions
+                    if (palette_config.get('box') and 
+                        palette_config.get('rows') and 
+                        palette_config.get('cols') and 
+                        palette_config.get('valid_positions')):
+                        
+                        pbox = palette_config['box']
+                        prows = palette_config['rows']
+                        pcols = palette_config['cols']
+                        valid_positions = palette_config['valid_positions']
+                        
+                        # Load manual centers if available
+                        manual_centers = None
+                        if palette_config.get('manual_centers'):
+                            manual_centers = {int(k): tuple(v) for k, v in palette_config['manual_centers'].items()}
+                        
+                        # Reconstruct palette from box with valid positions and manual centers
+                        pbox_adj = (pbox[0], pbox[1], pbox[2] - pbox[0], pbox[3] - pbox[1])
+                        self.bot.init_palette(
+                            pbox=pbox_adj,
+                            prows=prows,
+                            pcols=pcols,
+                            valid_positions=set(valid_positions),
+                            manual_centers=manual_centers
+                        )
+                    # Otherwise use saved color_coords if available
+                    elif palette_config.get('color_coords'):
+                        self.bot.init_palette(
+                            # Converting string key into tuple
+                            colors_pos={
+                                tuple(map(int, k[1:-1].split(', '))): tuple(v)
+                                for k, v in palette_config['color_coords'].items()
+                            }
+                        )
+                
                 if 'Canvas' in self.tools and self.tools['Canvas'].get('box'):
                     self.bot.init_canvas(self.tools['Canvas']['box'])
                 if 'Custom Colors' in self.tools and self.tools['Custom Colors'].get('box'):

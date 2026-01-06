@@ -7,12 +7,16 @@ from PIL import (
     ImageGrab
 )
 from pynput.mouse import Listener
+from pynput import keyboard
 from tkinter import (
     Button, 
     Toplevel, 
     messagebox, 
     font, 
-    END
+    END,
+    Canvas,
+    Scrollbar,
+    Label as tkLabel  # Import tkinter.Label for color control
 )
 from tkinter.ttk import (
     LabelFrame, 
@@ -99,7 +103,11 @@ class SetupWindow:
                     mv[name] = iv
                 self._mod_vars[k] = mv
             else:
-                Button(settings_frame, text='Preview', command=lambda n=k : self._set_preview(n)).grid(column=2, columnspan=2, row=0, sticky='ew', padx=5, pady=5)
+                Button(settings_frame, text='Preview', command=lambda n=k : self._set_preview(n)).grid(column=2, columnspan=1, row=0, sticky='ew', padx=2, pady=5)
+                
+                # Add Manual Color Selection button for Palette
+                if k == 'Palette':
+                    Button(settings_frame, text='Edit Colors', command=lambda n=k, t=v : self._start_manual_color_selection(n, t)).grid(column=3, columnspan=1, row=0, sticky='ew', padx=2, pady=5)
 
             if k == 'Palette':
                 settings_frame.rowconfigure(1, weight=1, uniform='row')
@@ -177,6 +185,517 @@ class SetupWindow:
             self._listener.start()
             self._root.iconify()
             self.parent.iconify()
+    
+    def _start_manual_color_selection(self, name, tool):
+        """Start manual color selection for palette grid"""
+        self._current_tool = tool
+        self._tool_name = name
+        
+        if self._tool_name != 'Palette':
+            messagebox.showerror(self.title, 'Manual color selection is only available for Palette!')
+            return
+        
+        # Check if palette has been captured
+        if not tool.get('box'):
+            messagebox.showerror(self.title, 'Please initialize the palette first (click Initialize)!')
+            return
+        
+        self.rows = tool['rows']
+        self.cols = tool['cols']
+        box = tool['box']
+        
+        # Ensure palette_box coordinates are in correct order (left, top, right, bottom)
+        if len(box) == 4:
+            left = min(box[0], box[2])
+            top = min(box[1], box[3])
+            right = max(box[0], box[2])
+            bottom = max(box[1], box[3])
+            self.palette_box = (left, top, right, bottom)
+        else:
+            self.palette_box = box
+        
+        # Open color selection window
+        self._open_color_selection_window()
+    
+    def _open_color_selection_window(self):
+        """Open window for manually selecting valid palette colors"""
+        # Create a new Toplevel window for color selection
+        self._color_sel_window = Toplevel(self._root)
+        self._color_sel_window.title('Select Valid Palette Colors')
+        self._color_sel_window.geometry('900x700+100+100')
+        
+        # Center the window
+        self._color_sel_window.update_idletasks()
+        sw = self._color_sel_window.winfo_screenwidth()
+        sh = self._color_sel_window.winfo_screenheight()
+        w, h = 900, 700
+        x = (sw - w) // 2
+        y = (sh - h) // 2
+        self._color_sel_window.geometry(f'{w}x{h}+{x}+{y}')
+        
+        # Configure grid layout
+        self._color_sel_window.columnconfigure(0, weight=1)
+        self._color_sel_window.rowconfigure(0, weight=0)  # Instructions and mode
+        self._color_sel_window.rowconfigure(1, weight=1)  # Grid
+        
+        # Mode selection
+        self._pick_centers_mode = False  # False = Toggle mode, True = Pick centers mode
+        self._manual_centers = {}  # Store manually picked centers {index: (x, y)}
+        
+        # Load existing manual centers if available
+        if self._current_tool.get('manual_centers'):
+            self._manual_centers = {int(k): tuple(v) for k, v in self._current_tool['manual_centers'].items()}
+        
+        # Create grid buttons
+        self._grid_buttons = {}
+        
+        # Load existing valid_positions if available, otherwise assume all are valid
+        if self._current_tool.get('valid_positions'):
+            self._valid_positions = set(self._current_tool['valid_positions'])
+        else:
+            self._valid_positions = set(range(self.rows * self.cols))
+        
+        # Instructions
+        instructions = Label(
+            self._color_sel_window,
+            text='Click on grid cells to toggle them. Green = Valid, Red = Invalid. Use "Pick Centers" mode to set exact center points.',
+            wraplength=870,
+            justify='left'
+        )
+        instructions.grid(column=0, row=0, padx=10, pady=10, sticky='ew')
+        
+        # Mode buttons
+        mode_frame = Frame(self._color_sel_window)
+        mode_frame.grid(column=0, row=0, padx=10, pady=5, sticky='e')
+        
+        self._mode_btn_toggle = Button(mode_frame, text='Toggle Valid/Invalid', command=self._set_toggle_mode)
+        self._mode_btn_toggle.pack(side='left', padx=5)
+        
+        self._mode_btn_pick = Button(mode_frame, text='Pick Centers', command=self._set_pick_centers_mode)
+        self._mode_btn_pick.pack(side='left', padx=5)
+        
+        # Scrollable frame for grid
+        canvas = Canvas(self._color_sel_window)
+        scrollbar = Scrollbar(self._color_sel_window, orient='vertical', command=canvas.yview)
+        scrollable_frame = Frame(canvas)
+        
+        scrollable_frame.bind(
+            '<Configure>',
+            lambda e: canvas.configure(scrollregion=canvas.bbox('all'))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.grid(column=0, row=1, sticky='nsew', padx=10, pady=10)
+        scrollbar.grid(column=1, row=1, sticky='ns', pady=10)
+        
+        # Create grid cells
+        self._grid_buttons = {}
+        # Note: self._valid_positions is already loaded above from config
+        
+        # Load palette preview image
+        try:
+            palette_img = Image.open(self._current_tool['preview'])
+            self._palette_img_tk = ImageTk.PhotoImage(palette_img)
+            
+            # Display palette image as reference
+            img_label = Label(scrollable_frame, image=self._palette_img_tk)
+            img_label.grid(column=0, row=0, columnspan=self.cols, padx=5, pady=5)
+            
+            current_row = 1
+        except:
+            current_row = 0
+            self._palette_img_tk = None
+        
+        # Create clickable grid cells
+        for i in range(self.rows * self.cols):
+            row = i // self.cols
+            col = i % self.cols
+            
+            # Use tkLabel (tkinter.Label) for better color control (can change background)
+            lbl = tkLabel(
+                scrollable_frame,
+                text=f'{i+1}',
+                width=8,
+                relief='raised',
+                borderwidth=2,
+                cursor='hand2'
+            )
+            lbl.bind('<Button-1>', lambda e, idx=i: self._toggle_grid_cell(idx))
+            # Set initial color based on valid/invalid state
+            if i in self._valid_positions:
+                lbl.config(bg='lightgreen')
+            else:
+                lbl.config(bg='mistyrose')
+            lbl.grid(column=col, row=current_row + row, padx=2, pady=2)
+            self._grid_buttons[i] = lbl
+        
+        # Done button
+        done_frame = Frame(self._color_sel_window)
+        done_frame.grid(column=0, row=2, padx=10, pady=10, sticky='ew')
+        
+        Button(
+            done_frame,
+            text='Done',
+            command=self._on_color_selection_done
+        ).pack(side='left', padx=5)
+        
+        Button(
+            done_frame,
+            text='Auto-Estimate Centers',
+            command=self._auto_estimate_centers
+        ).pack(side='left', padx=5)
+        
+        Button(
+            done_frame,
+            text='Select All',
+            command=self._select_all_colors
+        ).pack(side='left', padx=5)
+        
+        Button(
+            done_frame,
+            text='Deselect All',
+            command=self._deselect_all_colors
+        ).pack(side='left', padx=5)
+        
+        Button(
+            done_frame,
+            text='Cancel',
+            command=lambda: self._color_sel_window.destroy()
+        ).pack(side='left', padx=5)
+        
+        # Bind ESC key to cancel picking on the parent window (works even when color window is minimized)
+        self.parent.bind('<Escape>', lambda e: self._on_escape_press(e))
+    
+    def _toggle_grid_cell(self, index):
+        """Toggle a grid cell between valid and invalid"""
+        if index in self._valid_positions:
+            self._valid_positions.remove(index)
+            self._grid_buttons[index].config(bg='mistyrose')
+        else:
+            self._valid_positions.add(index)
+            self._grid_buttons[index].config(bg='lightgreen')
+    
+    def _select_all_colors(self):
+        """Select all grid cells as valid"""
+        self._valid_positions = set(range(self.rows * self.cols))
+        for i, btn in self._grid_buttons.items():
+            btn.config(bg='lightgreen')
+    
+    def _deselect_all_colors(self):
+        """Deselect all grid cells"""
+        self._valid_positions = set()
+        for i, btn in self._grid_buttons.items():
+            btn.config(bg='mistyrose')
+    
+    def _set_toggle_mode(self):
+        """Set mode to toggle valid/invalid cells"""
+        self._pick_centers_mode = False
+        self._manual_centers = {}  # Clear manual centers when switching modes
+        # Update instructions
+        for widget in self._color_sel_window.winfo_children():
+            try:
+                if isinstance(widget, Label) and 'text' in str(widget.cget('text')):
+                    widget.config(text='Click on grid cells to toggle them. Green = Valid, Red = Invalid. Click "Done" when finished.')
+            except:
+                pass
+        # Update grid to show valid/invalid toggle AND rebind click handler
+        for i, lbl in self._grid_buttons.items():
+            if i in self._valid_positions:
+                lbl.config(bg='lightgreen', cursor='hand2', text=f'{i+1}')
+            else:
+                lbl.config(bg='mistyrose', cursor='hand2', text=f'{i+1}')
+            # Rebind click handler to toggle mode function
+            lbl.unbind('<Button-1>')
+            lbl.bind('<Button-1>', lambda e, idx=i: self._toggle_grid_cell(idx))
+    
+    def _set_pick_centers_mode(self):
+        """Set mode to pick exact center points for each color"""
+        if not self._valid_positions:
+            messagebox.showwarning(self.title, 'Please mark at least one color as valid first!')
+            return
+        
+        self._pick_centers_mode = True
+        self._manual_centers = {}  # Reset manual centers
+        # Clear existing manual centers when entering pick mode
+        for i in list(self._manual_centers.keys()):
+            del self._manual_centers[i]
+        
+        # Update instructions
+        for widget in self._color_sel_window.winfo_children():
+            try:
+                if isinstance(widget, Label) and 'text' in str(widget.cget('text')):
+                    widget.config(text='Click on a color cell, then click the center point on your palette. System will automatically move to the next color. Press ESC to stop at any time. Yellow = Has center, White = No center yet.')
+            except:
+                pass
+        
+        # Update grid to show center picking status
+        for i, lbl in self._grid_buttons.items():
+            if i in self._manual_centers:
+                lbl.config(bg='yellow', text='✓')
+            else:
+                lbl.config(bg='white', text=f'{i+1}')
+            lbl.unbind('<Button-1>')
+            lbl.bind('<Button-1>', lambda e, idx=i: self._pick_center(idx))
+    
+    def _pick_center(self, index):
+        """Pick a center point for a specific color cell"""
+        if index not in self._valid_positions:
+            messagebox.showwarning(self.title, 'Cannot pick center for invalid cell!')
+            return
+        
+        # Wait for mouse click to get center coordinates
+        self._coords = []
+        self._clicks = 0
+        self._required_clicks = 1
+        self._current_picking_index = index
+        
+        # Start listening for mouse click (no confirmation dialog for continuous picking)
+        print(f'Picking center for color {index + 1}... Press ESC to stop.')
+        self._listener = Listener(on_click=self._on_center_pick_click)
+        self._listener.start()
+        
+        # Start global keyboard listener for ESC key
+        self._key_listener = keyboard.Listener(on_press=self._on_key_press)
+        self._key_listener.start()
+        
+        self._color_sel_window.iconify()
+    
+    def _on_key_press(self, key):
+        """Handle keyboard press events"""
+        try:
+            # Check if ESC key is pressed
+            if key == keyboard.Key.esc:
+                if self._pick_centers_mode and hasattr(self, '_listener'):
+                    # Stop the mouse listener and keyboard listener
+                    try:
+                        self._listener.stop()
+                    except:
+                        pass
+                    try:
+                        self._key_listener.stop()
+                    except:
+                        pass
+                    self._color_sel_window.deiconify()
+                    print('Center picking cancelled by ESC key')
+        except AttributeError:
+            pass  # Ignore special keys that don't have char attribute
+    
+    def _auto_estimate_centers(self):
+        """Automatically estimate centers for all valid colors"""
+        if not self._valid_positions:
+            messagebox.showwarning(self.title, 'Please mark at least one color as valid first!')
+            return
+        
+        # Calculate cell dimensions
+        palette_w = self.palette_box[2] - self.palette_box[0]
+        palette_h = self.palette_box[3] - self.palette_box[1]
+        cell_w = palette_w // self.cols
+        cell_h = palette_h // self.rows
+        
+        # Estimate centers for all valid positions
+        for i in self._valid_positions:
+            row = i // self.cols
+            col = i % self.cols
+            
+            # Calculate center relative to palette box
+            center_x = col * cell_w + cell_w // 2
+            center_y = row * cell_h + cell_h // 2
+            
+            self._manual_centers[i] = (center_x, center_y)
+            
+            # Update the grid cell to show it has a center (show both number and checkmark)
+            if i in self._grid_buttons:
+                self._grid_buttons[i].config(bg='yellow', text=f'{i+1} ✓')
+        
+        # Show visual overlay of estimated centers on screen
+        self._show_centers_overlay()
+        
+        # Update instructions to show estimated centers
+        for widget in self._color_sel_window.winfo_children():
+            try:
+                if isinstance(widget, Label) and 'text' in str(widget.cget('text')):
+                    widget.config(text='Centers auto-estimated (yellow = estimated). Click "Done" to accept or manually adjust by switching to Pick Centers mode.')
+            except:
+                pass
+        
+        print(f'Auto-estimated centers for {len(self._manual_centers)} colors')
+    
+    def _show_centers_overlay(self):
+        """Show overlay circles on screen at estimated center positions"""
+        from tkinter import Toplevel, Canvas
+        import time
+        
+        # Create overlay window positioned exactly over palette
+        palette_x = self.palette_box[0]
+        palette_y = self.palette_box[1]
+        palette_w = self.palette_box[2] - self.palette_box[0]
+        palette_h = self.palette_box[3] - self.palette_box[1]
+        
+        overlay = Toplevel()
+        overlay.overrideredirect(True)  # Remove window decorations
+        overlay.attributes('-topmost', True)  # Keep on top
+        overlay.attributes('-alpha', 0.9)  # Slightly transparent
+        overlay.config(bg='white')  # White background to make red circles visible
+        overlay.geometry(f'{palette_w}x{palette_h}+{palette_x}+{palette_y}')
+        
+        # Create canvas
+        canvas = Canvas(overlay, bg='white', highlightthickness=0)
+        canvas.pack(fill='both', expand=True)
+        
+        # Draw circles at each estimated center position
+        for i in sorted(self._manual_centers.keys()):
+            center_x, center_y = self._manual_centers[i]
+            # Circle radius (slightly larger than typical palette color)
+            radius = 15
+            
+            # Draw red circle at center with white fill to block out underlying color
+            canvas.create_oval(
+                center_x - radius, center_y - radius,
+                center_x + radius, center_y + radius,
+                outline='red',
+                fill='white',
+                width=3
+            )
+            
+            # Draw crosshair for precision
+            canvas.create_line(
+                center_x - 5, center_y,
+                center_x + 5, center_y,
+                fill='red', width=2
+            )
+            canvas.create_line(
+                center_x, center_y - 5,
+                center_x, center_y + 5,
+                fill='red', width=2
+            )
+            
+            # Add label showing color number
+            canvas.create_text(
+                center_x, center_y - radius - 10,
+                text=str(i + 1),
+                fill='red',
+                font=('Arial', 12, 'bold')
+            )
+        
+        # Update window
+        overlay.update()
+        
+        # Show for 3 seconds then close
+        self._root.after(3000, lambda: overlay.destroy())
+        print('Showing estimated centers overlay for 3 seconds...')
+        
+        # Show info dialog after overlay closes
+        self._root.after(3100, lambda: messagebox.showinfo(
+            self.title, 
+            f'Auto-estimated centers for {len(self._manual_centers)} valid colors!\n\n'
+            f'Red circles showed estimated positions on your palette.\n'
+            f'Yellow cells in the grid show estimated centers.\n\n'
+            f'You can still manually adjust by clicking "Pick Centers" to pick specific centers.'
+        ))
+    
+    def _on_escape_press(self, event):
+        """Handle ESC key press to cancel picking"""
+        if self._pick_centers_mode and hasattr(self, '_listener'):
+            # Stop the listener and cancel picking
+            try:
+                self._listener.stop()
+            except:
+                pass  # Ignore errors when stopping
+            self._color_sel_window.deiconify()
+            print('Center picking cancelled by ESC key')
+    
+    def _on_center_pick_click(self, x, y, _, pressed):
+        """Handle click for picking center point"""
+        if pressed:
+            self._root.bell()
+            print(x, y)
+            self._clicks += 1
+            self._coords += x, y
+            
+            if self._clicks == self._required_clicks:
+                # Store the picked center coordinates (relative to palette box)
+                center_x = self._coords[0] - self.palette_box[0]
+                center_y = self._coords[1] - self.palette_box[1]
+                self._manual_centers[self._current_picking_index] = (center_x, center_y)
+                
+                # Update the grid cell to show it has a center
+                if self._current_picking_index in self._grid_buttons:
+                    self._grid_buttons[self._current_picking_index].config(bg='yellow', text='✓')
+                
+                print(f'Picked center for color {self._current_picking_index + 1}: ({center_x}, {center_y})')
+                
+                # Find next valid color that doesn't have a center yet
+                next_index = None
+                for i in sorted(self._valid_positions):
+                    if i > self._current_picking_index and i not in self._manual_centers:
+                        next_index = i
+                        break
+                
+                if next_index is not None:
+                    # Continue to next color automatically
+                    self._current_picking_index = next_index
+                    self._clicks = 0
+                    self._coords = []
+                    # Don't show messagebox, just continue picking
+                    print(f'Continuing to color {next_index + 1}...')
+                else:
+                    # All valid colors have centers
+                    self._listener.stop()
+                    # Also stop the keyboard listener
+                    try:
+                        self._key_listener.stop()
+                    except:
+                        pass
+                    self._color_sel_window.deiconify()
+                    messagebox.showinfo(self.title, 'All valid colors have been assigned centers!\n\nClick "Done" to save or adjust centers.')
+    
+    def _on_color_selection_done(self):
+        """Handle completion of manual color selection"""
+        if not self._valid_positions:
+            messagebox.showwarning(
+                self.title,
+                'You must select at least one valid color!'
+            )
+            return
+        
+        # Store valid positions in tool config
+        self._current_tool['valid_positions'] = list(self._valid_positions)
+        
+        # Reinitialize palette with valid positions and manual centers
+        try:
+            pbox_adj = (self.palette_box[0], self.palette_box[1], 
+                        self.palette_box[2] - self.palette_box[0], 
+                        self.palette_box[3] - self.palette_box[1])
+            
+            # Pass manual_centers if in pick centers mode and centers were picked
+            manual_centers = self._manual_centers if self._pick_centers_mode and self._manual_centers else None
+            
+            p = self.bot.init_palette(
+                pbox=pbox_adj,
+                prows=self.rows,
+                pcols=self.cols,
+                valid_positions=self._valid_positions,
+                manual_centers=manual_centers
+            )
+            
+            # Update tool data
+            self._current_tool['color_coords'] = {str(k): v for k, v in p.colors_pos.items()}
+            self._current_tool['manual_centers'] = {str(k): v for k, v in self._manual_centers.items()} if self._manual_centers else {}
+            self._current_tool['status'] = True
+            self._statuses[self._tool_name].configure(text='INITIALIZED', background='green')
+            
+            messagebox.showinfo(
+                self.title,
+                f'Palette updated with {len(self._valid_positions)} valid colors out of {self.rows * self.cols} total positions.'
+            )
+            
+        except Exception as e:
+            messagebox.showerror(self.title, f'Error updating palette: {str(e)}')
+        
+        # Close the selection window
+        self._color_sel_window.destroy()
             
 
     def _on_click(self, x, y, _, pressed):
@@ -233,7 +752,7 @@ class SetupWindow:
                 self._root.deiconify()
 
     def _validate_dimensions(self, value):
-        return re.fullmatch('\d*', value) is not None
+        return re.fullmatch(r'\d*', value) is not None
 
     def _on_invalid_dimensions(self):
         self._root.bell()
