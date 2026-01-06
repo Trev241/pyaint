@@ -87,8 +87,8 @@ class SetupWindow:
             # Instead, do "lambda t=tool : self._start_listening(t)" which will pass the tool of the current iteration for every new callback.
             # (Note that t here stores the current tool as a default argument)
             Button(settings_frame, text='Initialize', command=lambda n=k, t=v : self._start_listening(n, t)).grid(column=0, columnspan=2, row=0, sticky='ew', padx=5, pady=5)
-            # For New Layer, show modifier checkboxes instead of a preview button
-            if k == 'New Layer':
+            # For New Layer and Color Button, show modifier checkboxes instead of a preview button
+            if k == 'New Layer' or k == 'Color Button':
                 # Create modifier checkboxes (CTRL, ALT, SHIFT)
                 from tkinter import Checkbutton, IntVar
                 self._mod_vars = getattr(self, '_mod_vars', {})
@@ -124,8 +124,8 @@ class SetupWindow:
                 vcmd = (self._root.register(self._validate_dimensions), '%P')
                 ivcmd = (self._root.register(self._on_invalid_dimensions),)
                 self._erows.config(
-                    validate='all', 
-                    validatecommand=vcmd, 
+                    validate='all',
+                    validatecommand=vcmd,
                     invalidcommand=ivcmd
                 )
                 self._erows.bind('<FocusOut>', self._on_update_dimensions)
@@ -137,6 +137,25 @@ class SetupWindow:
                 )
                 self._ecols.bind('<FocusOut>', self._on_update_dimensions)
                 self._ecols.bind('<Return>', self._on_update_dimensions)
+
+            elif k == 'Color Button':
+                settings_frame.rowconfigure(1, weight=1, uniform='row')
+
+                Label(settings_frame, text='Delay (s)').grid(column=0, row=1, padx=5, pady=5)
+                self._edelay = Entry(settings_frame, width=8)
+                self._edelay.grid(column=1, row=1, padx=5, pady=5)
+
+                delay_value = v.get('delay', 0.1)
+                self._edelay.insert(0, str(delay_value))
+                delay_vcmd = (self._root.register(self._validate_delay), '%P')
+                delay_ivcmd = (self._root.register(self._on_invalid_delay),)
+                self._edelay.config(
+                    validate='all',
+                    validatecommand=delay_vcmd,
+                    invalidcommand=delay_ivcmd
+                )
+                self._edelay.bind('<FocusOut>', self._on_update_delay)
+                self._edelay.bind('<Return>', self._on_update_delay)
 
             settings_frame.grid(column=2, row=idt, sticky='nsew')
         return frame
@@ -177,8 +196,8 @@ class SetupWindow:
 
         self._coords = []
         self._clicks = 0
-        # Determine number of clicks required (New Layer uses single-click)
-        self._required_clicks = 1 if self._tool_name == 'New Layer' else 2
+        # Determine number of clicks required (New Layer and Color Button use single-click)
+        self._required_clicks = 1 if self._tool_name in ('New Layer', 'Color Button') else 2
         prompt = 'Click the location of the button.' if self._required_clicks == 1 else 'Click on the UPPER LEFT and LOWER RIGHT corners of the tool.'
         if messagebox.askokcancel(self.title, prompt) == True:
             self._listener = Listener(on_click=self._on_click)
@@ -251,7 +270,9 @@ class SetupWindow:
         
         # Load existing valid_positions if available, otherwise assume all are valid
         if self._current_tool.get('valid_positions'):
-            self._valid_positions = set(self._current_tool['valid_positions'])
+            # Filter to only include positions within current grid bounds
+            max_position = self.rows * self.cols - 1
+            self._valid_positions = {pos for pos in self._current_tool['valid_positions'] if pos <= max_position}
         else:
             self._valid_positions = set(range(self.rows * self.cols))
         
@@ -543,14 +564,21 @@ class SetupWindow:
         # Clear existing manual centers
         self._manual_centers = {}
         
-        # Determine number of rows with valid positions
+        # Determine number of rows and columns with valid positions
         rows_with_valid = {i // self.cols for i in self._valid_positions}
+        cols_with_valid = {i % self.cols for i in self._valid_positions}
         num_valid_rows = len(rows_with_valid)
+        num_valid_cols = len(cols_with_valid)
         
-        # Determine which mode to use based on row count
-        if num_valid_rows == 1:
+        # Determine which mode to use based on row AND column count
+        if num_valid_cols == 1 and num_valid_rows >= 2:
+            # Single column, multiple rows - use single_column mode
+            self._precision_mode = 'single_column'
+        elif num_valid_rows == 1 and num_valid_cols >= 2:
+            # Single row, multiple columns - use 1_row mode
             self._precision_mode = '1_row'
-        elif num_valid_rows >= 2:
+        elif num_valid_rows >= 2 and num_valid_cols >= 2:
+            # Multiple rows and columns - use multi_row mode
             self._precision_mode = 'multi_row'
         else:
             messagebox.showwarning(self.title, 'No valid rows found!')
@@ -558,27 +586,43 @@ class SetupWindow:
         
         # Get instructions for this mode
         instructions = {
+            'single_column': [
+                ('Click on CENTER of FIRST color box in the FIRST row.', 'first_row_first_col'),
+                ('Click on CENTER of FIRST color box in the SECOND row.', 'second_row_first_col'),
+                ('Click on CENTER of FIRST color box in the LAST row.', 'last_row_first_col')
+            ],
             '1_row': [
                 ('Click on CENTER of FIRST color box (leftmost) in the row.', 'first_col'),
                 ('Click on CENTER of SECOND color box in the row.', 'second_col'),
                 ('Click on CENTER of LAST color box (rightmost) in the row.', 'last_col')
             ],
-            'multi_row': [
-                ('Click on CENTER of FIRST color box (leftmost) in the FIRST row.', 'first_row_first_col'),
-                ('Click on CENTER of SECOND color box in the FIRST row.', 'first_row_second_col'),
-                ('Click on CENTER of LAST color box (rightmost) in the FIRST row.', 'first_row_last_col'),
-                ('Click on CENTER of FIRST color box in the SECOND row.', 'second_row_first_col'),
-                ('Click on CENTER of FIRST color box (leftmost) in the LAST row.', 'last_row_first_col'),
-                ('Click on CENTER of LAST color box (rightmost) in the LAST row.', 'last_row_last_col')
-            ]
+            'multi_row': []
         }
+        
+        # Dynamically generate multi_row instructions based on valid row count
+        if self._precision_mode == 'multi_row':
+            # First row points
+            instructions['multi_row'].append(('Click on CENTER of FIRST color box (leftmost) in the FIRST row.', 'first_row_first_col'))
+            instructions['multi_row'].append(('Click on CENTER of SECOND color box in the FIRST row.', 'first_row_second_col'))
+            instructions['multi_row'].append(('Click on CENTER of LAST color box (rightmost) in the FIRST row.', 'first_row_last_col'))
+            
+            # Row points - only add second_row_first_col if there are more than 2 rows
+            if num_valid_rows > 2:
+                instructions['multi_row'].append(('Click on CENTER of FIRST color box in the SECOND row.', 'second_row_first_col'))
+            
+            # Last row points
+            instructions['multi_row'].append(('Click on CENTER of FIRST color box (leftmost) in the LAST row.', 'last_row_first_col'))
+            instructions['multi_row'].append(('Click on CENTER of LAST color box (rightmost) in the LAST row.', 'last_row_last_col'))
         
         # Start the precision estimation process
         self._precision_points = []
         self._precision_step = 0
         
+        # Store instructions as instance variable for access in click handler
+        self._precision_instructions = instructions[self._precision_mode]
+        
         # Show all instructions in one dialog
-        self._show_precision_dialog(instructions[self._precision_mode])
+        self._show_precision_dialog(self._precision_instructions)
     
     def _show_precision_dialog(self, instructions_list):
         """Show precision estimation instructions - all at once"""
@@ -613,6 +657,11 @@ class SetupWindow:
     def _show_precision_instruction(self):
         """Show instruction for next point to pick"""
         instructions = {
+            'single_column': [
+                ('Click on CENTER of FIRST color box in the FIRST row.', 'first_row_first_col'),
+                ('Click on CENTER of FIRST color box in the SECOND row.', 'second_row_first_col'),
+                ('Click on CENTER of FIRST color box in the LAST row.', 'last_row_first_col')
+            ],
             '1_row': [
                 ('Click on CENTER of FIRST color box (leftmost) in the row.', 'first_col'),
                 ('Click on CENTER of SECOND color box in the row.', 'second_col'),
@@ -657,18 +706,26 @@ class SetupWindow:
                     'coords': (center_x, center_y)
                 })
                 
-                print(f'Picked point {self._current_point_type}: ({center_x}, {center_y})')
+                # DEBUG: Log detailed information
+                print(f'[DEBUG] Screen click: ({x}, {y})')
+                print(f'[DEBUG] Palette box: {self.palette_box}')
+                print(f'[DEBUG] Relative center: ({center_x}, {center_y})')
+                print(f'[DEBUG] Point type: {self._current_point_type}')
                 
                 # Move to next step
                 self._precision_step += 1
                 
                 # Check if we have all required points
-                instructions = {
-                    '1_row': 3,  # 3 points for 1-row mode
-                    'multi_row': 6  # 6 points for multi-row mode
-                }
+                # Get the instruction list to determine required point count
+                if self._precision_mode == 'single_column':
+                    required_points = 3
+                elif self._precision_mode == '1_row':
+                    required_points = 3
+                else:  # multi_row
+                    # Get the dynamically generated instruction count
+                    required_points = len(self._precision_instructions)
                 
-                if self._precision_step >= instructions[self._precision_mode]:
+                if self._precision_step >= required_points:
                     # All points collected, calculate centers
                     self._listener.stop()
                     self._calculate_precision_centers()
@@ -677,28 +734,78 @@ class SetupWindow:
                     self._clicks = 0
                     self._coords = []
                     # Set point type for next step
-                    if self._precision_mode == '1_row':
+                    if self._precision_mode == 'single_column':
+                        point_types = ['first_row_first_col', 'second_row_first_col', 'last_row_first_col']
+                    elif self._precision_mode == '1_row':
                         point_types = ['first_col', 'second_col', 'last_col']
                     else:
-                        point_types = ['first_row_first_col', 'first_row_second_col', 'first_row_last_col', 
-                                     'second_row_first_col', 'last_row_first_col', 'last_row_last_col']
+                        # Build point types from dynamically generated instructions
+                        point_types = [pt for _, pt in self._precision_instructions]
                     self._current_point_type = point_types[self._precision_step]
                     print(f'Waiting for next click: {self._current_point_type}')
     
     def _calculate_precision_centers(self):
         """Calculate all centers based on precision estimate reference points"""
         try:
+            # Get palette dimensions for clamping coordinates to valid range
+            palette_w = self.palette_box[2] - self.palette_box[0]
+            palette_h = self.palette_box[3] - self.palette_box[1]
+            
             points_dict = {p['type']: p['coords'] for p in self._precision_points}
             
-            if self._precision_mode == '1_row':
+            if self._precision_mode == 'single_column':
+                # Extract reference points
+                first_row_first_col = points_dict['first_row_first_col']
+                second_row_first_col = points_dict['second_row_first_col']
+                last_row_first_col = points_dict['last_row_first_col']
+                
+                # Find first and last row indices with valid positions
+                rows_with_valid = sorted(list({i // self.cols for i in self._valid_positions}))
+                first_valid_row = rows_with_valid[0]
+                last_valid_row = rows_with_valid[-1]
+                
+                # Calculate row spacing from first row to last row
+                total_row_distance = last_row_first_col[1] - first_row_first_col[1]
+                num_row_gaps = last_valid_row - first_valid_row
+                row_spacing = total_row_distance / num_row_gaps if num_row_gaps > 0 else 0
+                
+                # Validate row spacing using second row if available
+                if len(rows_with_valid) >= 2:
+                    second_row_distance = second_row_first_col[1] - first_row_first_col[1]
+                    expected_second_row_distance = row_spacing if first_valid_row + 1 == rows_with_valid[1] else row_spacing * (rows_with_valid[1] - first_valid_row)
+                    # Use average if close, otherwise use direct measurement
+                    if abs(second_row_distance - expected_second_row_distance) < 10:
+                        avg_row_spacing = (row_spacing + second_row_distance) / (1 + (rows_with_valid[1] - first_valid_row))
+                    else:
+                        avg_row_spacing = row_spacing
+                else:
+                    avg_row_spacing = row_spacing
+                
+                # X position is the same for all in single column
+                x_pos = first_row_first_col[0]
+                
+                # Calculate centers for all valid positions
+                for i in self._valid_positions:
+                    row_idx = i // self.cols
+                    center_x = x_pos
+                    center_y = first_row_first_col[1] + (row_idx - first_valid_row) * avg_row_spacing
+                    # Clamp coordinates to valid range to prevent index out of bounds
+                    center_x = max(0, min(center_x, palette_w - 1))
+                    center_y = max(0, min(center_y, palette_h - 1))
+                    self._manual_centers[i] = (center_x, center_y)
+                
+            elif self._precision_mode == '1_row':
                 # Calculate horizontal spacing
                 first_col = points_dict['first_col']
                 second_col = points_dict['second_col']
                 last_col = points_dict['last_col']
                 
+                # Get sorted valid column indices
+                cols_with_valid = sorted(list({i % self.cols for i in self._valid_positions}))
+                
                 # Calculate spacing between columns
                 col_spacing = second_col[0] - first_col[0]
-                col_spacing2 = (last_col[0] - first_col[0]) / (self.cols - 1)
+                col_spacing2 = (last_col[0] - first_col[0]) / (len(cols_with_valid) - 1)
                 
                 # Use average of the two measurements for better accuracy
                 avg_col_spacing = (col_spacing + col_spacing2) / 2
@@ -709,8 +816,16 @@ class SetupWindow:
                 # Calculate centers for all valid positions
                 for i in self._valid_positions:
                     col = i % self.cols
-                    center_x = first_col[0] + col * avg_col_spacing
+                    
+                    # Find position of this column in valid columns
+                    col_pos = cols_with_valid.index(col)
+                    
+                    center_x = first_col[0] + col_pos * avg_col_spacing
                     center_y = y_pos
+                    # Clamp coordinates to valid range to prevent index out of bounds
+                    center_x = max(0, min(center_x, palette_w - 1))
+                    center_y = max(0, min(center_y, palette_h - 1))
+                    
                     self._manual_centers[i] = (center_x, center_y)
                 
             elif self._precision_mode == 'multi_row':
@@ -718,13 +833,20 @@ class SetupWindow:
                 first_row_first_col = points_dict['first_row_first_col']
                 first_row_second_col = points_dict['first_row_second_col']
                 first_row_last_col = points_dict['first_row_last_col']
-                second_row_first_col = points_dict['second_row_first_col']
                 last_row_first_col = points_dict['last_row_first_col']
                 last_row_last_col = points_dict['last_row_last_col']
                 
+                # second_row_first_col may not be collected if there are only 2 rows
+                second_row_first_col = points_dict.get('second_row_first_col', last_row_first_col)
+                
+                # Get sorted valid column indices
+                cols_with_valid = sorted(list({i % self.cols for i in self._valid_positions}))
+                first_valid_col = cols_with_valid[0]
+                last_valid_col = cols_with_valid[-1]
+                
                 # Calculate horizontal spacing from first row
                 col_spacing1 = first_row_second_col[0] - first_row_first_col[0]
-                col_spacing2 = (first_row_last_col[0] - first_row_first_col[0]) / (self.cols - 1)
+                col_spacing2 = (first_row_last_col[0] - first_row_first_col[0]) / (len(cols_with_valid) - 1)
                 avg_col_spacing = (col_spacing1 + col_spacing2) / 2
                 
                 # Find first and last row indices with valid positions
@@ -754,11 +876,22 @@ class SetupWindow:
                     row_idx = i // self.cols
                     col = i % self.cols
                     
+                    # Find position of this column in valid columns
+                    col_pos = cols_with_valid.index(col)
+                    
                     # Calculate Y position based on row index
                     center_y = first_row_first_col[1] + (row_idx - first_valid_row) * avg_row_spacing
                     
-                    # Calculate X position based on column
-                    center_x = first_row_first_col[0] + col * avg_col_spacing
+                    # Calculate X position based on column position in valid columns
+                    center_x = first_row_first_col[0] + col_pos * avg_col_spacing
+                    
+                    # DEBUG: Log first center calculation
+                    if i == min(self._valid_positions):
+                        print(f'[DEBUG] First valid position: {i}')
+                        print(f'[DEBUG] Row: {row_idx}, Col: {col}, Col pos: {col_pos}')
+                        print(f'[DEBUG] first_row_first_col: {first_row_first_col}')
+                        print(f'[DEBUG] avg_col_spacing: {avg_col_spacing}, avg_row_spacing: {avg_row_spacing}')
+                        print(f'[DEBUG] Calculated center for pos {i}: ({center_x}, {center_y})')
                     
                     self._manual_centers[i] = (center_x, center_y)
             
@@ -801,7 +934,9 @@ class SetupWindow:
         self._precision_points = []
         self._precision_step = 0
         self._manual_centers = {}
-        self._color_sel_window.deiconify()
+        # Check if window still exists before deiconifying
+        if hasattr(self, '_color_sel_window') and self._color_sel_window.winfo_exists():
+            self._color_sel_window.deiconify()
         print('Precision estimate cancelled')
     
     def _show_centers_overlay(self):
@@ -827,20 +962,21 @@ class SetupWindow:
         canvas = Canvas(overlay, bg='white', highlightthickness=0)
         canvas.pack(fill='both', expand=True)
         
-        # Draw crosshairs at each estimated center position
+        # Draw black dots at each estimated center position
         for i in sorted(self._manual_centers.keys()):
             center_x, center_y = self._manual_centers[i]
             
-            # Draw red crosshair for precision
-            canvas.create_line(
-                center_x - 8, center_y,
-                center_x + 8, center_y,
-                fill='red', width=3
-            )
-            canvas.create_line(
-                center_x, center_y - 8,
-                center_x, center_y + 8,
-                fill='red', width=3
+            # DEBUG: Log drawing coordinates
+            if i == min(self._manual_centers.keys()):
+                print(f'[DEBUG] Drawing first dot at canvas pos: ({center_x}, {center_y})')
+                print(f'[DEBUG] Overlay window position: ({palette_x}, {palette_y})')
+                print(f'[DEBUG] Expected screen position: ({palette_x + center_x}, {palette_y + center_y})')
+            
+            # Draw black dot (filled circle)
+            canvas.create_oval(
+                center_x - 6, center_y - 6,
+                center_x + 6, center_y + 6,
+                fill='black', outline='black'
             )
             
             # Add label showing color number
@@ -854,12 +990,12 @@ class SetupWindow:
         # Update window
         overlay.update()
         
-        # Show for 3 seconds then close
-        self._root.after(3000, lambda: overlay.destroy())
-        print('Showing estimated centers overlay for 3 seconds...')
+        # Show for 5 seconds then close
+        self._root.after(5000, lambda: overlay.destroy())
+        print('Showing estimated centers overlay for 5 seconds...')
         
         # Show info dialog after overlay closes
-        self._root.after(3100, lambda: messagebox.showinfo(
+        self._root.after(5100, lambda: messagebox.showinfo(
             self.title, 
             f'Auto-estimated centers for {len(self._manual_centers)} valid colors!\n\n'
             f'Red circles showed estimated positions on your palette.\n'
@@ -893,20 +1029,15 @@ class SetupWindow:
         canvas = Canvas(overlay, bg='white', highlightthickness=0)
         canvas.pack(fill='both', expand=True)
         
-        # Draw crosshairs at each custom center position
+        # Draw black dots at each custom center position
         for i in sorted(self._manual_centers.keys()):
             center_x, center_y = self._manual_centers[i]
             
-            # Draw blue crosshair for precision
-            canvas.create_line(
-                center_x - 8, center_y,
-                center_x + 8, center_y,
-                fill='blue', width=3
-            )
-            canvas.create_line(
-                center_x, center_y - 8,
-                center_x, center_y + 8,
-                fill='blue', width=3
+            # Draw black dot (filled circle)
+            canvas.create_oval(
+                center_x - 6, center_y - 6,
+                center_x + 6, center_y + 6,
+                fill='black', outline='black'
             )
             
             # Add label showing color number
@@ -920,12 +1051,12 @@ class SetupWindow:
         # Update window
         overlay.update()
         
-        # Show for 3 seconds then close
-        self._root.after(3000, lambda: overlay.destroy())
-        print('Showing custom centers overlay for 3 seconds...')
+        # Show for 5 seconds then close
+        self._root.after(5000, lambda: overlay.destroy())
+        print('Showing custom centers overlay for 5 seconds...')
         
         # Show info dialog after overlay closes
-        self._root.after(3100, lambda: messagebox.showinfo(
+        self._root.after(5100, lambda: messagebox.showinfo(
             self.title, 
             f'Displaying {len(self._manual_centers)} custom centers!\n\n'
             f'Blue circles showed your manually picked positions on your palette.\n'
@@ -1099,6 +1230,44 @@ class SetupWindow:
         if event.widget.get() == '':
             event.widget.delete(0, END)
             event.widget.insert(0, '1')
+
+    def _validate_delay(self, value):
+        """Validate delay input: must be a number between 0.01 and 5.0"""
+        if value == '':
+            return True  # Allow empty during editing
+        try:
+            num = float(value)
+            return 0.01 <= num <= 5.0
+        except ValueError:
+            return False
+
+    def _on_invalid_delay(self):
+        """Handle invalid delay input"""
+        self._root.bell()
+
+    def _on_update_delay(self, event):
+        """Update delay value and validate on focus out or return"""
+        try:
+            value = event.widget.get()
+            if value == '':
+                # Default to 0.1 if empty
+                event.widget.delete(0, END)
+                event.widget.insert(0, '0.1')
+                clamped = 0.1
+            else:
+                num = float(value)
+                # Clamp to valid range
+                clamped = max(0.01, min(5.0, num))
+                if clamped != num:
+                    event.widget.delete(0, END)
+                    event.widget.insert(0, str(clamped))
+            # Update tools dict with delay value
+            self.tools['Color Button']['delay'] = clamped
+        except ValueError:
+            # If invalid, reset to default
+            event.widget.delete(0, END)
+            event.widget.insert(0, '0.1')
+            self.tools['Color Button']['delay'] = 0.1
 
     def _on_modifier_toggle(self, tool_name, modifier_name, intvar):
         # Update the stored tools dict modifiers for the given tool

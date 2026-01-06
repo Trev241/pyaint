@@ -223,22 +223,36 @@ class Window:
                 self._optlabl.append(Label(self._cframe, text=f"{o[0]}: {int(o[1])}", font=Window.TITLE_FONT))
             else:
                 self._optlabl.append(Label(self._cframe, text=f"{o[0]}: {o[1]:.2f}", font=Window.TITLE_FONT))
-        self._optslid = [
-            Scale(
-                self._cframe,
-                from_=self._options[i][2],
-                to=self._options[i][3],
-                variable=self._optvars[i],
-                command=lambda val, index=i : self._on_slider_move(index, val)
-            ) for i in range(size)
-        ]
         
+        # Create sliders for all options except Delay (index 0)
+        self._optslid = []
         for i in range(size):
-            # self._optslid[i].bind('<ButtonRelease-1>', self._on_slider_move)
-            self._optslid[i].set(self._options[i][1])
-            self._optslid[i].set(defaults[i])
+            if i == 0:  # Skip Delay - will use Entry field instead
+                self._optslid.append(None)
+            else:
+                self._optslid.append(Scale(
+                    self._cframe,
+                    from_=self._options[i][2],
+                    to=self._options[i][3],
+                    variable=self._optvars[i],
+                    command=lambda val, index=i : self._on_slider_move(index, val)
+                ))
+        
+        # Delay Entry field (replaces slider for index 0)
+        self._delay_var = StringVar()
+        self._delay_entry = Entry(self._cframe, textvariable=self._delay_var, width=10)
+        self._delay_entry.bind('<Return>', self._on_delay_entry_change)
+        self._delay_entry.bind('<FocusOut>', self._on_delay_entry_change)
+        
+        # Grid all widgets
+        for i in range(size):
             self._optlabl[i].grid(column=0, row=(i * 2) + curr_row, columnspan=2, padx=5, pady=5, sticky='w')
-            self._optslid[i].grid(column=0, row=(i * 2) + curr_row + 1, columnspan=2,  padx=5, sticky='ew')
+            if i == 0:  # Delay - use Entry field
+                self._delay_entry.grid(column=0, row=(i * 2) + curr_row + 1, columnspan=2, padx=5, pady=5, sticky='ew')
+            else:  # Other options - use sliders
+                self._optslid[i].set(self._options[i][1])
+                self._optslid[i].set(defaults[i])
+                self._optslid[i].grid(column=0, row=(i * 2) + curr_row + 1, columnspan=2, padx=5, sticky='ew')
         curr_row += size * 2
         
         self._misclbl = Label(self._cframe, text='Misc Settings', font=Window.TITLE_FONT)
@@ -261,6 +275,14 @@ class Window:
         self._newlayer_cb = Checkbutton(self._cframe, text='Enable New Layer', variable=self._newlayer_var,
             command=self._on_newlayer_toggle)
         self._newlayer_cb.grid(column=1, row=curr_row, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        # Color Button option
+        Label(self._cframe, text='Color Button', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._colorbutton_var = IntVar()
+        self._colorbutton_cb = Checkbutton(self._cframe, text='Enable Color Button', variable=self._colorbutton_var,
+            command=self._on_colorbutton_toggle)
+        self._colorbutton_cb.grid(column=1, row=curr_row, padx=5, pady=5, sticky='w')
         curr_row += 1
 
         # Pause Key Setting
@@ -510,7 +532,70 @@ class Window:
         except Exception as e:
             print(f"Failed to save config: {e}")
 
+    def _on_colorbutton_toggle(self):
+        enabled = bool(self._colorbutton_var.get())
+        # Update bot state and tools dict
+        self.bot.color_button['enabled'] = enabled
+        if 'Color Button' not in self.tools:
+            self.tools['Color Button'] = {'status': False, 'coords': None, 'enabled': False, 'delay': 0.1, 'modifiers': {'ctrl': False, 'alt': False, 'shift': False}}
+        self.tools['Color Button']['enabled'] = enabled
+        try:
+            if not getattr(self, '_initializing', False):
+                with open(self._config_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
+                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
+        except Exception as e:
+            print(f"Failed to save config: {e}")
+
+    def _on_delay_entry_change(self, event=None):
+        """Handle changes to the delay entry field with validation"""
+        try:
+            val_str = self._delay_var.get().strip()
+            if not val_str:
+                return  # Empty input, don't update
+            
+            val = float(val_str)
+            
+            # Validate range: 0.01 to 10.0
+            if val < 0.01:
+                val = 0.01
+                self._delay_var.set(str(val))
+            elif val > 10.0:
+                val = 10.0
+                self._delay_var.set(str(val))
+            
+            # Update bot settings
+            self.bot.settings[0] = round(val, 3)
+            self._optlabl[0]['text'] = f"{self._options[0][0]}: {val:.2f}"
+            
+            # Save drawing settings to config
+            if 'drawing_settings' not in self.tools:
+                self.tools['drawing_settings'] = {}
+            self.tools['drawing_settings']['delay'] = self.bot.settings[0]
+            self.tools['drawing_settings']['pixel_size'] = self.bot.settings[1]
+            self.tools['drawing_settings']['precision'] = self.bot.settings[2]
+            self.tools['drawing_settings']['jump_delay'] = self.bot.settings[3]
+            
+            try:
+                if not getattr(self, '_initializing', False):
+                    with open(self._config_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
+                    print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
+            except Exception as e:
+                print(f"Failed to save config: {e}")
+            
+            self.tlabel['text'] = Window._SLIDER_TOOLTIPS[0]
+            
+        except ValueError:
+            # Invalid input, revert to current bot setting
+            self._delay_var.set(str(self.bot.settings[0]))
+            self.tlabel['text'] = 'Invalid delay value. Please enter a number between 0.01 and 10.0'
+
     def _on_slider_move(self, index, val):
+        # Skip delay (index 0) since it uses an entry field now
+        if index == 0:
+            return
+            
         val = float(val)
         if index == 1:  # Pixel Size - force to integer
             val = int(round(val))
@@ -602,14 +687,17 @@ class Window:
                     settings.get('precision', 0.9),
                     settings.get('jump_delay', 0.5)
                 ]
-                # Update UI sliders
+                # Update UI - delay uses entry field, others use sliders
                 for i, val in enumerate(self.bot.settings):
-                    if i == 1:  # Pixel Size - force to integer
+                    if i == 0:  # Delay - use entry field
+                        self._delay_var.set(str(val))
+                        self._optlabl[0]['text'] = f"{self._options[0][0]}: {val:.2f}"
+                    elif i == 1:  # Pixel Size - force to integer
                         val = int(val)
-                    self._optvars[i].set(val)
-                    if i == 1:  # Pixel Size - show as integer
+                        self._optvars[i].set(val)
                         self._optlabl[i]['text'] = f"{self._options[i][0]}: {val}"
-                    else:
+                    else:  # Other options - use sliders
+                        self._optvars[i].set(val)
                         self._optlabl[i]['text'] = f"{self._options[i][0]}: {val:.2f}"
 
             # Load saved drawing options
@@ -719,6 +807,29 @@ class Window:
         except Exception:
             pass
 
+        # Apply Color Button settings to bot if present
+        try:
+            cb = self.tools.get('Color Button')
+            if cb:
+                # coords may be stored as list
+                coords = cb.get('coords')
+                if isinstance(coords, list) and len(coords) >= 2:
+                    self.bot.color_button['coords'] = (int(coords[0]), int(coords[1]))
+                elif isinstance(coords, tuple):
+                    self.bot.color_button['coords'] = coords
+                self.bot.color_button['enabled'] = bool(cb.get('enabled', False))
+                self.bot.color_button['delay'] = float(cb.get('delay', 0.1))
+                mods = cb.get('modifiers', {})
+                self.bot.color_button['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
+                self.bot.color_button['modifiers']['alt'] = bool(mods.get('alt', False))
+                self.bot.color_button['modifiers']['shift'] = bool(mods.get('shift', False))
+                # Update UI checkbox
+                self._colorbutton_var.set(1 if self.bot.color_button['enabled'] else 0)
+                # Enable checkbox only if Color Button is configured (status: true)
+                self._colorbutton_cb.config(state='normal' if cb.get('status', False) else 'disabled')
+        except Exception:
+            pass
+
     pass
 
     def _set_busy(self, val):
@@ -756,13 +867,24 @@ class Window:
                     'alt': False,
                     'shift': False
                 }
+            },
+            'Color Button': {
+                'status': False,
+                'coords': None,
+                'enabled': False,
+                'delay': 0.1,
+                'modifiers': {
+                    'ctrl': False,
+                    'alt': False,
+                    'shift': False
+                }
             }
         }
 
         # Build a dedicated setup_tools mapping (only the tools) so the
         # SetupWindow doesn't iterate non-tool keys (like drawing_settings).
         setup_tools = {}
-        for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer']:
+        for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer', 'Color Button']:
             existing = self.tools.get(tool_name, {})
             merged = default_tools[tool_name].copy()
             merged.update(existing if isinstance(existing, dict) else {})
@@ -795,6 +917,30 @@ class Window:
                 # Update main UI checkbox to reflect new state
                 try:
                     self._newlayer_var.set(1 if self.bot.new_layer['enabled'] else 0)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # If Color Button was configured during setup, apply it to bot state
+        try:
+            cb = self.tools.get('Color Button')
+            if cb:
+                coords = cb.get('coords')
+                if isinstance(coords, list) and len(coords) >= 2:
+                    self.bot.color_button['coords'] = (int(coords[0]), int(coords[1]))
+                elif isinstance(coords, tuple):
+                    self.bot.color_button['coords'] = coords
+                self.bot.color_button['enabled'] = bool(cb.get('enabled', False))
+                self.bot.color_button['delay'] = float(cb.get('delay', 0.1))
+                mods = cb.get('modifiers', {})
+                self.bot.color_button['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
+                self.bot.color_button['modifiers']['alt'] = bool(mods.get('alt', False))
+                self.bot.color_button['modifiers']['shift'] = bool(mods.get('shift', False))
+                # Update main UI checkbox to reflect new state
+                try:
+                    self._colorbutton_var.set(1 if self.bot.color_button['enabled'] else 0)
+                    # Enable checkbox only if Color Button is configured (status: true)
+                    self._colorbutton_cb.config(state='normal' if cb.get('status', False) else 'disabled')
                 except Exception:
                     pass
         except Exception:

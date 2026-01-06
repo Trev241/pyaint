@@ -65,6 +65,9 @@ class Palette:
                 x = col * self._csizex + self._csizex // 2
                 y = row * self._csizey + self._csizey // 2
             
+            # Clamp coordinates to valid range to prevent index out of bounds
+            x = max(0, min(x, box[2] - 1))
+            y = max(0, min(y, box[3] - 1))
             col = (pix[x, y][:3])
             self.colors_pos[col] = (box[0] + x, box[1] + y)
             self.colors.add(col)
@@ -119,6 +122,19 @@ class Bot:
             'enabled': False,
             'coords': None,           # (x, y)
             'modifiers': {
+                'ctrl': False,
+                'alt': False,
+                'shift': False
+            }
+        }
+
+        # Color Button Mode state
+        self.color_button = {
+            'status': False,          # whether the feature is configured
+            'coords': None,           # [x, y] or null - the location to click first
+            'enabled': False,         # whether the feature is active
+            'delay': 0.1,             # delay in seconds (0.01 to 5.0)
+            'modifiers': {            # optional modifier keys
                 'ctrl': False,
                 'alt': False,
                 'shift': False
@@ -396,6 +412,67 @@ class Bot:
 
             except Exception as e:
                 print(f"[NewLayer] Error during new layer creation: {e}")
+                # Ensure modifiers are released even if there's an error
+                try:
+                    pyautogui.keyUp('shift')
+                    pyautogui.keyUp('alt')
+                    pyautogui.keyUp('ctrl')
+                except:
+                    pass
+
+            # If Color Button Mode is enabled, click the color button with modifiers before palette selection
+            try:
+                cb = self.color_button
+                if cb.get('enabled') and cb.get('coords'):
+                    cx, cy = cb['coords']
+                    print(f"[ColorButton] attempting click at {(cx, cy)} with mods={cb.get('modifiers')}, delay={cb.get('delay')}")
+
+                    # Track which modifiers were pressed so we can release them in reverse order
+                    pressed_modifiers = []
+
+                    # Press modifiers immediately before the click
+                    modifier_keys = [('ctrl', 'ctrl'), ('alt', 'alt'), ('shift', 'shift')]
+                    for mod_key, pygui_key in modifier_keys:
+                        if cb['modifiers'].get(mod_key):
+                            pyautogui.keyDown(pygui_key)
+                            pressed_modifiers.append(pygui_key)
+                            print(f"[ColorButton] pressed modifier: {pygui_key}")
+
+                    # Click the button with modifiers active
+                    print(f"[ColorButton] performing mouseDown at {(cx, cy)}")
+                    pyautogui.mouseDown(cx, cy, button='left')
+                    time.sleep(0.08)
+                    pyautogui.mouseUp(cx, cy, button='left')
+                    print(f"[ColorButton] mouse click performed at {(cx, cy)}")
+
+                    # Release modifiers immediately after the click with robust handling
+                    for pygui_key in reversed(pressed_modifiers):
+                        pyautogui.keyUp(pygui_key)
+                        print(f"[ColorButton] released modifier: {pygui_key}")
+                        time.sleep(0.05)  # Small delay to ensure each key release is registered
+
+                    # Brute-force release all modifiers as backup (in case tracked list missed any)
+                    try:
+                        pyautogui.keyUp('shift')
+                        time.sleep(0.05)
+                        pyautogui.keyUp('alt')
+                        time.sleep(0.05)
+                        pyautogui.keyUp('ctrl')
+                        time.sleep(0.05)
+                        print(f"[ColorButton] force-released all modifiers as backup")
+                    except:
+                        pass
+
+                    # Additional delay to ensure OS processes all key release events
+                    time.sleep(0.1)
+
+                    # Wait for the configured delay after clicking the color button
+                    delay = cb.get('delay', 0.1)
+                    print(f"[ColorButton] waiting {delay} seconds before palette selection...")
+                    time.sleep(delay)
+
+            except Exception as e:
+                print(f"[ColorButton] Error during color button click: {e}")
                 # Ensure modifiers are released even if there's an error
                 try:
                     pyautogui.keyUp('shift')
