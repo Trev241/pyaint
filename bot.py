@@ -390,7 +390,7 @@ class Bot:
                     pass
 
             if c in self._palette.colors:
-                pyautogui.click(self._palette.colors_pos[c], clicks=3, interval=.15)
+                pyautogui.click(self._palette.colors_pos[c])
             else:
                 try:
                     cc_box = self._custom_colors
@@ -555,7 +555,7 @@ class Bot:
             print(f"Switching to color {c} for test draw")
 
             if c in self._palette.colors:
-                pyautogui.click(self._palette.colors_pos[c], clicks=3, interval=.15)
+                pyautogui.click(self._palette.colors_pos[c])
             else:
                 try:
                     cc_box = self._custom_colors

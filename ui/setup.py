@@ -349,6 +349,12 @@ class SetupWindow:
         
         Button(
             done_frame,
+            text='Precision Estimate',
+            command=self._start_precision_estimate
+        ).pack(side='left', padx=5)
+        
+        Button(
+            done_frame,
             text='Show Custom Centers',
             command=self._show_custom_centers_overlay
         ).pack(side='left', padx=5)
@@ -527,6 +533,227 @@ class SetupWindow:
                 pass
         
         print(f'Auto-estimated centers for {len(self._manual_centers)} colors')
+    
+    def _start_precision_estimate(self):
+        """Start precision estimate mode using reference point selection"""
+        if not self._valid_positions:
+            messagebox.showwarning(self.title, 'Please mark at least one color as valid first!')
+            return
+        
+        # Clear existing manual centers
+        self._manual_centers = {}
+        
+        # Determine number of rows with valid positions
+        rows_with_valid = {i // self.cols for i in self._valid_positions}
+        num_valid_rows = len(rows_with_valid)
+        
+        # Determine which mode to use based on row count
+        if num_valid_rows == 1:
+            self._precision_mode = '1_row'
+        elif num_valid_rows >= 2:
+            self._precision_mode = 'multi_row'
+        else:
+            messagebox.showwarning(self.title, 'No valid rows found!')
+            return
+        
+        # Start the precision estimation process
+        self._precision_points = []
+        self._precision_step = 0
+        self._color_sel_window.iconify()
+        
+        # Show first instruction
+        self._show_precision_instruction()
+    
+    def _show_precision_dialog(self, instruction):
+        """Show precision estimation instruction dialog"""
+        result = messagebox.askokcancel('Precision Estimate - Step ' + str(self._precision_step + 1), instruction)
+        
+        if result:
+            # User confirmed - minimize window and start listening
+            self._color_sel_window.iconify()
+            
+            # Start listening for click
+            self._coords = []
+            self._clicks = 0
+            self._required_clicks = 1
+            self._listener = Listener(on_click=self._on_precision_pick_click)
+            self._listener.start()
+        else:
+            # User cancelled
+            self._cancel_precision_estimate()
+    
+    def _show_precision_instruction(self):
+        """Show instruction for next point to pick"""
+        instructions = {
+            '1_row': [
+                ('Click on CENTER of FIRST color box (leftmost) in the row.', 'first_col'),
+                ('Click on CENTER of SECOND color box in the row.', 'second_col'),
+                ('Click on CENTER of LAST color box (rightmost) in the row.', 'last_col')
+            ],
+            'multi_row': [
+                ('Click on CENTER of FIRST color box (leftmost) in the FIRST row.', 'first_row_first_col'),
+                ('Click on CENTER of SECOND color box in the FIRST row.', 'first_row_second_col'),
+                ('Click on CENTER of LAST color box (rightmost) in the FIRST row.', 'first_row_last_col'),
+                ('Click on CENTER of FIRST color box in the SECOND row.', 'second_row_first_col'),
+                ('Click on CENTER of FIRST color box (leftmost) in the LAST row.', 'last_row_first_col'),
+                ('Click on CENTER of LAST color box (rightmost) in the LAST row.', 'last_row_last_col')
+            ]
+        }
+        
+        if self._precision_step < len(instructions[self._precision_mode]):
+            instruction, point_type = instructions[self._precision_mode][self._precision_step]
+            self._current_point_type = point_type
+            
+            # Show the messagebox with proper parent and window management
+            self._color_sel_window.deiconify()
+            self._color_sel_window.lift()
+            self._root.after(50, lambda: self._show_precision_dialog(instruction))
+        else:
+            # All points collected, calculate centers
+            self._calculate_precision_centers()
+    
+    def _on_precision_pick_click(self, x, y, _, pressed):
+        """Handle click for precision estimate point selection"""
+        if pressed:
+            self._color_sel_window.bell()
+            print(x, y)
+            self._clicks += 1
+            self._coords += x, y
+            
+            if self._clicks == self._required_clicks:
+                # Store the picked point (relative to palette box)
+                center_x = self._coords[0] - self.palette_box[0]
+                center_y = self._coords[1] - self.palette_box[1]
+                self._precision_points.append({
+                    'type': self._current_point_type,
+                    'coords': (center_x, center_y)
+                })
+                
+                print(f'Picked point {self._current_point_type}: ({center_x}, {center_y})')
+                
+                # Move to next step
+                self._precision_step += 1
+                self._listener.stop()
+                self._show_precision_instruction()
+    
+    def _calculate_precision_centers(self):
+        """Calculate all centers based on precision estimate reference points"""
+        try:
+            points_dict = {p['type']: p['coords'] for p in self._precision_points}
+            
+            if self._precision_mode == '1_row':
+                # Calculate horizontal spacing
+                first_col = points_dict['first_col']
+                second_col = points_dict['second_col']
+                last_col = points_dict['last_col']
+                
+                # Calculate spacing between columns
+                col_spacing = second_col[0] - first_col[0]
+                col_spacing2 = (last_col[0] - first_col[0]) / (self.cols - 1)
+                
+                # Use average of the two measurements for better accuracy
+                avg_col_spacing = (col_spacing + col_spacing2) / 2
+                
+                # Y position is the same for all in single row
+                y_pos = first_col[1]
+                
+                # Calculate centers for all valid positions
+                for i in self._valid_positions:
+                    col = i % self.cols
+                    center_x = first_col[0] + col * avg_col_spacing
+                    center_y = y_pos
+                    self._manual_centers[i] = (center_x, center_y)
+                
+            elif self._precision_mode == 'multi_row':
+                # Extract reference points
+                first_row_first_col = points_dict['first_row_first_col']
+                first_row_second_col = points_dict['first_row_second_col']
+                first_row_last_col = points_dict['first_row_last_col']
+                second_row_first_col = points_dict['second_row_first_col']
+                last_row_first_col = points_dict['last_row_first_col']
+                last_row_last_col = points_dict['last_row_last_col']
+                
+                # Calculate horizontal spacing from first row
+                col_spacing1 = first_row_second_col[0] - first_row_first_col[0]
+                col_spacing2 = (first_row_last_col[0] - first_row_first_col[0]) / (self.cols - 1)
+                avg_col_spacing = (col_spacing1 + col_spacing2) / 2
+                
+                # Find first and last row indices with valid positions
+                rows_with_valid = sorted(list({i // self.cols for i in self._valid_positions}))
+                first_valid_row = rows_with_valid[0]
+                last_valid_row = rows_with_valid[-1]
+                
+                # Calculate row spacing from first row to last row
+                total_row_distance = last_row_first_col[1] - first_row_first_col[1]
+                num_row_gaps = last_valid_row - first_valid_row
+                row_spacing = total_row_distance / num_row_gaps if num_row_gaps > 0 else 0
+                
+                # Validate row spacing using second row if available
+                if len(rows_with_valid) >= 2:
+                    second_row_distance = second_row_first_col[1] - first_row_first_col[1]
+                    expected_second_row_distance = row_spacing if first_valid_row + 1 == rows_with_valid[1] else row_spacing * (rows_with_valid[1] - first_valid_row)
+                    # Use average if close, otherwise use the direct measurement
+                    if abs(second_row_distance - expected_second_row_distance) < 10:
+                        avg_row_spacing = (row_spacing + second_row_distance) / (1 + (rows_with_valid[1] - first_valid_row))
+                    else:
+                        avg_row_spacing = row_spacing
+                else:
+                    avg_row_spacing = row_spacing
+                
+                # Calculate centers for all valid positions
+                for i in self._valid_positions:
+                    row_idx = i // self.cols
+                    col = i % self.cols
+                    
+                    # Calculate Y position based on row index
+                    center_y = first_row_first_col[1] + (row_idx - first_valid_row) * avg_row_spacing
+                    
+                    # Calculate X position based on column
+                    center_x = first_row_first_col[0] + col * avg_col_spacing
+                    
+                    self._manual_centers[i] = (center_x, center_y)
+            
+            # Update grid to show estimated centers
+            for i, lbl in self._grid_buttons.items():
+                if i in self._manual_centers:
+                    lbl.config(bg='yellow', text=f'{i+1} ✓')
+                else:
+                    lbl.config(bg='mistyrose', text=f'{i+1}')
+            
+            # Show overlay of estimated centers
+            self._show_centers_overlay()
+            
+            # Show success message
+            messagebox.showinfo(
+                'Precision Estimate Complete',
+                f'Precision estimate completed for {len(self._manual_centers)} colors!\n\n'
+                f'Reference points collected: {len(self._precision_points)}\n'
+                f'Mode: {self._precision_mode}\n\n'
+                f'Yellow cells show estimated centers.\n'
+                f'Click "Done" to accept or manually adjust centers.'
+            )
+            
+            # Update instructions
+            for widget in self._color_sel_window.winfo_children():
+                try:
+                    if isinstance(widget, Label) and 'text' in str(widget.cget('text')):
+                        widget.config(text='Precision estimate complete (yellow = estimated). Click "Done" to accept or manually adjust by switching to Pick Centers mode.')
+                except:
+                    pass
+            
+            self._color_sel_window.deiconify()
+            
+        except Exception as e:
+            messagebox.showerror('Precision Estimate Error', f'Error calculating centers: {str(e)}')
+            self._cancel_precision_estimate()
+    
+    def _cancel_precision_estimate(self):
+        """Cancel precision estimate mode"""
+        self._precision_points = []
+        self._precision_step = 0
+        self._manual_centers = {}
+        self._color_sel_window.deiconify()
+        print('Precision estimate cancelled')
     
     def _show_centers_overlay(self):
         """Show overlay circles on screen at estimated center positions"""
