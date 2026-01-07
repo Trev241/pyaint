@@ -830,6 +830,24 @@ class Window:
         except Exception:
             pass
 
+        # Apply Color Button Okay settings to bot if present
+        try:
+            cbo = self.tools.get('Color Button Okay')
+            if cbo:
+                # coords may be stored as list
+                coords = cbo.get('coords')
+                if isinstance(coords, list) and len(coords) >= 2:
+                    self.bot.color_button_okay['coords'] = (int(coords[0]), int(coords[1]))
+                elif isinstance(coords, tuple):
+                    self.bot.color_button_okay['coords'] = coords
+                self.bot.color_button_okay['enabled'] = bool(cbo.get('enabled', False))
+                mods = cbo.get('modifiers', {})
+                self.bot.color_button_okay['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
+                self.bot.color_button_okay['modifiers']['alt'] = bool(mods.get('alt', False))
+                self.bot.color_button_okay['modifiers']['shift'] = bool(mods.get('shift', False))
+        except Exception:
+            pass
+
     pass
 
     def _set_busy(self, val):
@@ -878,13 +896,23 @@ class Window:
                     'alt': False,
                     'shift': False
                 }
+            },
+            'Color Button Okay': {
+                'status': False,
+                'coords': None,
+                'enabled': False,
+                'modifiers': {
+                    'ctrl': False,
+                    'alt': False,
+                    'shift': False
+                }
             }
         }
 
         # Build a dedicated setup_tools mapping (only the tools) so the
         # SetupWindow doesn't iterate non-tool keys (like drawing_settings).
         setup_tools = {}
-        for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer', 'Color Button']:
+        for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer', 'Color Button', 'Color Button Okay']:
             existing = self.tools.get(tool_name, {})
             merged = default_tools[tool_name].copy()
             merged.update(existing if isinstance(existing, dict) else {})
@@ -943,6 +971,23 @@ class Window:
                     self._colorbutton_cb.config(state='normal' if cb.get('status', False) else 'disabled')
                 except Exception:
                     pass
+        except Exception:
+            pass
+
+        # If Color Button Okay was configured during setup, apply it to bot state
+        try:
+            cbo = self.tools.get('Color Button Okay')
+            if cbo:
+                coords = cbo.get('coords')
+                if isinstance(coords, list) and len(coords) >= 2:
+                    self.bot.color_button_okay['coords'] = (int(coords[0]), int(coords[1]))
+                elif isinstance(coords, tuple):
+                    self.bot.color_button_okay['coords'] = coords
+                self.bot.color_button_okay['enabled'] = bool(cbo.get('enabled', False))
+                mods = cbo.get('modifiers', {})
+                self.bot.color_button_okay['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
+                self.bot.color_button_okay['modifiers']['alt'] = bool(mods.get('alt', False))
+                self.bot.color_button_okay['modifiers']['shift'] = bool(mods.get('shift', False))
         except Exception:
             pass
 

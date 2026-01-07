@@ -88,7 +88,7 @@ class SetupWindow:
             # (Note that t here stores the current tool as a default argument)
             Button(settings_frame, text='Initialize', command=lambda n=k, t=v : self._start_listening(n, t)).grid(column=0, columnspan=2, row=0, sticky='ew', padx=5, pady=5)
             # For New Layer and Color Button, show modifier checkboxes instead of a preview button
-            if k == 'New Layer' or k == 'Color Button':
+            if k == 'New Layer' or k == 'Color Button' or k == 'Color Button Okay':
                 # Create modifier checkboxes (CTRL, ALT, SHIFT)
                 from tkinter import Checkbutton, IntVar
                 self._mod_vars = getattr(self, '_mod_vars', {})
@@ -157,6 +157,18 @@ class SetupWindow:
                 self._edelay.bind('<FocusOut>', self._on_update_delay)
                 self._edelay.bind('<Return>', self._on_update_delay)
 
+            elif k == 'Color Button Okay':
+                settings_frame.rowconfigure(1, weight=1, uniform='row')
+
+                from tkinter import Checkbutton, IntVar
+                self._enable_vars = getattr(self, '_enable_vars', {})
+                ev = IntVar()
+                ev.set(1 if v.get('enabled', False) else 0)
+                cb = Checkbutton(settings_frame, text='Enable', variable=ev,
+                             command=lambda n=k, ev=ev: self._on_enable_toggle(n, ev))
+                cb.grid(column=0, row=1, columnspan=4, padx=5, pady=5, sticky='w')
+                self._enable_vars[k] = ev
+
             settings_frame.grid(column=2, row=idt, sticky='nsew')
         return frame
 
@@ -196,8 +208,8 @@ class SetupWindow:
 
         self._coords = []
         self._clicks = 0
-        # Determine number of clicks required (New Layer and Color Button use single-click)
-        self._required_clicks = 1 if self._tool_name in ('New Layer', 'Color Button') else 2
+        # Determine number of clicks required (New Layer, Color Button, and Color Button Okay use single-click)
+        self._required_clicks = 1 if self._tool_name in ('New Layer', 'Color Button', 'Color Button Okay') else 2
         prompt = 'Click the location of the button.' if self._required_clicks == 1 else 'Click on the UPPER LEFT and LOWER RIGHT corners of the tool.'
         if messagebox.askokcancel(self.title, prompt) == True:
             self._listener = Listener(on_click=self._on_click)
@@ -1184,9 +1196,9 @@ class SetupWindow:
                 if self._required_clicks == 2:
                     # Determining corner coordinates based on received input. ImageGrab.grab() always expects
                     # the first pair of coordinates to be above and on the left of the second pair
-                    top_left = min(self._coords[0], self._coords[2]), min(self._coords[1], self._coords[3])
-                    bot_right = max(self._coords[0], self._coords[2]), max(self._coords[1], self._coords[3])
-                    box = top_left + bot_right
+                    top_left = (min(self._coords[0], self._coords[2]), min(self._coords[1], self._coords[3]))
+                    bot_right = (max(self._coords[0], self._coords[2]), max(self._coords[1], self._coords[3]))
+                    box = (top_left[0], top_left[1], bot_right[0], bot_right[1])
                     print(f'Capturing box: {box}')
 
                     if self._tool_name == 'Palette':
@@ -1268,6 +1280,14 @@ class SetupWindow:
             event.widget.delete(0, END)
             event.widget.insert(0, '0.1')
             self.tools['Color Button']['delay'] = 0.1
+
+    def _on_enable_toggle(self, tool_name, intvar):
+        # Update stored tools dict enabled state for given tool
+        try:
+            if tool_name in self.tools:
+                self.tools[tool_name]['enabled'] = bool(intvar.get())
+        except Exception:
+            pass
 
     def _on_modifier_toggle(self, tool_name, modifier_name, intvar):
         # Update the stored tools dict modifiers for the given tool

@@ -141,6 +141,19 @@ class Bot:
             }
         }
 
+        # Color Button Okay Mode state (clicked AFTER color selection)
+        self.color_button_okay = {
+            'status': False,          # whether the feature is configured
+            'coords': None,           # [x, y] or null - the location to click
+            'enabled': False,         # whether the feature is active
+            'delay': 0.1,             # delay in seconds (0.01 to 5.0)
+            'modifiers': {            # optional modifier keys
+                'ctrl': False,
+                'alt': False,
+                'shift': False
+            }
+        }
+
         # Canvas and palette will be initialized later
         self._canvas = None
         self._palette = None
@@ -180,6 +193,68 @@ class Bot:
     def init_custom_colors(self, ccbox):
         # self._custom_colors = pyautogui.locateOnScreen(Bot.RESOURCES[2], confidence=self.settings[Bot.CONF])
         self._custom_colors = ccbox[0], ccbox[1], ccbox[2] - ccbox[0], ccbox[3] - ccbox[1]
+        
+        # Scan the custom colors spectrum to create a color-to-position map
+        # This allows clicking on specific colors in the spectrum instead of using keyboard input
+        self._spectrum_map = self._scan_spectrum(ccbox)
+        print(f"[Spectrum] Scanned {len(self._spectrum_map)} unique colors from custom colors spectrum")
+    
+    def _scan_spectrum(self, ccbox):
+        """
+        Scan the custom colors spectrum to create a color-to-position map.
+        The spectrum typically shows a gradient of colors, so we sample it
+        to find the closest match for any requested color.
+        """
+        # Get the box coordinates in (left, top, width, height) format
+        left, top, width, height = ccbox[0], ccbox[1], ccbox[2] - ccbox[0], ccbox[3] - ccbox[1]
+        
+        # Capture the spectrum region
+        spectrum_img = pyautogui.screenshot(region=(left, top, width, height))
+        pix = spectrum_img.load()
+        
+        # Sample the spectrum at regular intervals to build a color map
+        # Higher sampling = more accurate but slower
+        sample_step = 4  # Sample every 4th pixel
+        spectrum_map = {}
+        
+        print(f"[Spectrum] Scanning spectrum box: ({left}, {top}, {width}, {height})")
+        
+        for y in range(0, height, sample_step):
+            for x in range(0, width, sample_step):
+                try:
+                    # Get RGB color at this position
+                    r, g, b = pix[x, y][:3]
+                    color = (r, g, b)
+                    
+                    # Store the screen coordinates for this color
+                    screen_x = left + x
+                    screen_y = top + y
+                    spectrum_map[color] = (screen_x, screen_y)
+                except (IndexError, TypeError):
+                    # Skip invalid pixels
+                    continue
+        
+        print(f"[Spectrum] Created spectrum map with {len(spectrum_map)} color positions")
+        return spectrum_map
+    
+    def _find_nearest_spectrum_color(self, target_color):
+        """
+        Find the nearest color in the spectrum map to the target color.
+        Returns the screen coordinates to click.
+        """
+        if not hasattr(self, '_spectrum_map') or not self._spectrum_map:
+            return None
+        
+        # Find the color with minimum distance to target
+        nearest_color = min(
+            self._spectrum_map.keys(),
+            key=lambda c: Palette.dist(c, target_color)
+        )
+        
+        distance = Palette.dist(nearest_color, target_color)
+        print(f"[Spectrum] Target: {target_color}, Nearest found: {nearest_color}, Distance: {distance:.1f}")
+        
+        return self._spectrum_map[nearest_color]
     
     # def test(self):
     #     box = self._canvas
@@ -481,23 +556,106 @@ class Bot:
                 except:
                     pass
 
+            # DEBUG: Log color selection details
+            print(f"[DEBUG] Selecting color: {c}")
+            print(f"[DEBUG] Color in palette: {c in self._palette.colors}")
+            print(f"[DEBUG] Color Button enabled: {self.color_button.get('enabled', False)}")
+            print(f"[DEBUG] Custom colors box: {self._custom_colors}")
+            
             if c in self._palette.colors:
+                print(f"[DEBUG] Using palette click at: {self._palette.colors_pos[c]}")
                 pyautogui.click(self._palette.colors_pos[c])
             else:
-                try:
-                    cc_box = self._custom_colors
-                    pyautogui.click( (cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2 ), clicks=3, interval=.15)
-                except:
-                    raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
-                pyautogui.press('tab', presses=7, interval=.05)
-                for val in c:
-                    numbers = (d for d in str(val))
-                    for n in numbers:
-                        pyautogui.press(str(n))
+                # Try to find the color in the spectrum map
+                spectrum_pos = self._find_nearest_spectrum_color(c)
+                if spectrum_pos:
+                    print(f"[DEBUG] Using spectrum click at: {spectrum_pos}")
+                    pyautogui.click(spectrum_pos)
+                    # Wait for the application to register the color selection (use same delay as color button)
+                    delay = self.color_button.get('delay', 0.1)
+                    print(f"[DEBUG] Waiting {delay} seconds after spectrum click...")
+                    time.sleep(delay)
+                else:
+                    # Fallback to keyboard input method
+                    try:
+                        cc_box = self._custom_colors
+                        center_x = cc_box[0] + cc_box[2] // 2
+                        center_y = cc_box[1] + cc_box[3] // 2
+                        print(f"[DEBUG] Spectrum not available - clicking center of box at: ({center_x}, {center_y})")
+                        pyautogui.click((center_x, center_y), clicks=3, interval=.15)
+                    except:
+                        raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
+                    print(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
+                    pyautogui.press('tab', presses=7, interval=.05)
+                    for val in c:
+                        numbers = (d for d in str(val))
+                        for n in numbers:
+                            pyautogui.press(str(n))
+                        pyautogui.press('tab')
                     pyautogui.press('tab')
-                pyautogui.press('tab')
-                pyautogui.press('enter')
-                pyautogui.PAUSE = 0.0
+                    pyautogui.press('enter')
+                    pyautogui.PAUSE = 0.0
+
+            # If Color Button Okay Mode is enabled, click "Set Okay" button after color selection
+            try:
+                cbo = self.color_button_okay
+                if cbo.get('enabled') and cbo.get('coords'):
+                    cx, cy = cbo['coords']
+                    print(f"[ColorButtonOkay] attempting click at {(cx, cy)} with mods={cbo.get('modifiers')}")
+
+                    # Track which modifiers were pressed so we can release them in reverse order
+                    pressed_modifiers = []
+
+                    # Press modifiers immediately before the click
+                    modifier_keys = [('ctrl', 'ctrl'), ('alt', 'alt'), ('shift', 'shift')]
+                    for mod_key, pygui_key in modifier_keys:
+                        if cbo['modifiers'].get(mod_key):
+                            pyautogui.keyDown(pygui_key)
+                            pressed_modifiers.append(pygui_key)
+                            print(f"[ColorButtonOkay] pressed modifier: {pygui_key}")
+
+                    # Click the button with modifiers active
+                    print(f"[ColorButtonOkay] performing mouseDown at {(cx, cy)}")
+                    pyautogui.mouseDown(cx, cy, button='left')
+                    time.sleep(0.08)
+                    pyautogui.mouseUp(cx, cy, button='left')
+                    print(f"[ColorButtonOkay] mouse click performed at {(cx, cy)}")
+
+                    # Release modifiers immediately after the click with robust handling
+                    for pygui_key in reversed(pressed_modifiers):
+                        pyautogui.keyUp(pygui_key)
+                        print(f"[ColorButtonOkay] released modifier: {pygui_key}")
+                        time.sleep(0.05)  # Small delay to ensure each key release is registered
+
+                    # Brute-force release all modifiers as backup (in case tracked list missed any)
+                    try:
+                        pyautogui.keyUp('shift')
+                        time.sleep(0.05)
+                        pyautogui.keyUp('alt')
+                        time.sleep(0.05)
+                        pyautogui.keyUp('ctrl')
+                        time.sleep(0.05)
+                        print(f"[ColorButtonOkay] force-released all modifiers as backup")
+                    except:
+                        pass
+
+                    # Additional delay to ensure OS processes all key release events
+                    time.sleep(0.1)
+
+                    # Wait for the configured delay after clicking the "Set Okay" button (use same delay as Color Button)
+                    delay = self.color_button_okay.get('delay', 0.1)
+                    print(f"[ColorButtonOkay] waiting {delay} seconds before starting to draw...")
+                    time.sleep(delay)
+
+            except Exception as e:
+                print(f"[ColorButtonOkay] Error during color button okay click: {e}")
+                # Ensure modifiers are released even if there's an error
+                try:
+                    pyautogui.keyUp('shift')
+                    pyautogui.keyUp('alt')
+                    pyautogui.keyUp('ctrl')
+                except:
+                    pass
 
             for line_idx, line in enumerate(lines):
                 # Skip lines already drawn if resuming
@@ -674,20 +832,29 @@ class Bot:
             if c in self._palette.colors:
                 pyautogui.click(self._palette.colors_pos[c])
             else:
-                try:
-                    cc_box = self._custom_colors
-                    pyautogui.click((cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2), clicks=3, interval=.15)
-                except:
-                    raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
-                pyautogui.press('tab', presses=7, interval=.05)
-                for val in c:
-                    numbers = (d for d in str(val))
-                    for n in numbers:
-                        pyautogui.press(str(n))
+                # Try to find the color in the spectrum map
+                spectrum_pos = self._find_nearest_spectrum_color(c)
+                if spectrum_pos:
+                    pyautogui.click(spectrum_pos)
+                    # Wait for the application to register the color selection (use same delay as color button)
+                    delay = self.color_button.get('delay', 0.1)
+                    time.sleep(delay)
+                else:
+                    # Fallback to keyboard input method
+                    try:
+                        cc_box = self._custom_colors
+                        pyautogui.click((cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2), clicks=3, interval=.15)
+                    except:
+                        raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
+                    pyautogui.press('tab', presses=7, interval=.05)
+                    for val in c:
+                        numbers = (d for d in str(val))
+                        for n in numbers:
+                            pyautogui.press(str(n))
+                        pyautogui.press('tab')
                     pyautogui.press('tab')
-                pyautogui.press('tab')
-                pyautogui.press('enter')
-                pyautogui.PAUSE = 0.0
+                    pyautogui.press('enter')
+                    pyautogui.PAUSE = 0.0
 
             for line_idx, line in enumerate(lines):
                 if lines_drawn >= max_lines:
