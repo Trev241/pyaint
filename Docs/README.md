@@ -12,6 +12,7 @@ Welcome to the Pyaint documentation. Pyaint is an intelligent drawing automation
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
 - [Usage Guide](#usage-guide)
+- [Tutorial](./tutorial.md)
 - [Development Guide](#development-guide)
 
 ## Overview
