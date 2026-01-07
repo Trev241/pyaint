@@ -27,7 +27,7 @@ from tkinter.ttk import (
 )
 
 class SetupWindow:
-    def __init__(self, parent, bot, tools, on_complete, title='Child Window', w=700, h=600, x=5, y=5):
+    def __init__(self, parent, bot, tools, on_complete, title='Child Window', w=700, h=800, x=5, y=5):
         self._root = Toplevel(parent)
 
         self.title = title
