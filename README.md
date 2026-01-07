@@ -244,11 +244,3 @@ Suggestions and contributions are welcome. Please ensure compatibility with the 
 ## License
 
 This project is licensed under GNU General Public License v3.0 (GPL-3.0).
-
-## Credits
-
-This project is a fork of the original [pyaint](https://github.com/Trev241/pyaint) by Trev241. The original implementation provided the foundation for this enhanced version with additional features and improvements.
-
----
-
-*Pyaint - Bringing digital images to life through automated artistry*
