@@ -238,6 +238,9 @@ pyaint/
 └── requirements.txt     # Python dependencies
 ```
 
+### Original Videos
+You can watch the bot in action [here](https://youtu.be/qXfUc9KuVlg) and [here](https://youtu.be/kj0iqZkIG1k).
+
 ### Contributing
 Suggestions and contributions are welcome. Please ensure compatibility with the existing codebase and maintain the application's stability.
 
