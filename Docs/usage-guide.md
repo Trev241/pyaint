@@ -1,0 +1,342 @@
+# Pyaint Usage Guide
+
+This document provides step-by-step instructions for using Pyaint effectively.
+
+## Table of Contents
+
+- [Getting Started](#getting-started)
+- [Initial Setup](#initial-setup)
+- [Basic Drawing](#basic-drawing)
+- [Region-Based Redrawing](#region-based-redrawing)
+- [Advanced Features](#advanced-features)
+- [Keyboard Controls](#keyboard-controls)
+- [Tips and Best Practices](#tips-and-best-practices)
+
+## Getting Started
+
+### Installation
+
+1. **Clone or download** the repository
+2. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Run the application**:
+   ```bash
+   python main.py
+   ```
+
+**Requirements:**
+- Python 3.8 or higher (3.8 recommended)
+- Windows operating system
+- Drawing application (MS Paint, Clip Studio Paint, etc.) running
+
+## Initial Setup
+
+### First Launch
+
+When you first launch Pyaint, you'll see the main window with three panels:
+
+- **Control Panel** (left): Settings and action buttons
+- **Image Preview Panel** (right): Image loading and display
+- **Tooltip Panel** (bottom): Status messages and progress
+
+### Setup Process
+
+1. Click the **"Setup"** button in the Control Panel
+2. A Setup Window will appear with tools configuration
+
+### Initializing Tools
+
+You need to initialize three tools before drawing:
+
+#### 1. Palette
+
+The palette defines the available colors for drawing.
+
+**Steps:**
+1. Click **"Initialize"** next to Palette
+2. Click on the **upper-left corner** of your palette in your drawing application
+3. Click on the **lower-right corner** of your palette
+4. The system will scan the palette and capture all colors
+5. Status will change to **"INITIALIZED"** (green)
+
+**Configuration Options:**
+- **Rows/Columns**: Set the number of rows and columns in your palette grid
+- **Valid Positions**: (Advanced) Toggle which palette cells are valid
+- **Manual Centers**: (Advanced) Pick exact center points for precision
+- **Auto-Estimate**: (Advanced) Quickly calculate center points
+- **Precision Estimate**: (Advanced) Maximum accuracy using reference points
+
+#### 2. Canvas
+
+The canvas defines the drawing area.
+
+**Steps:**
+1. Click **"Initialize"** next to Canvas
+2. Click on the **upper-left corner** of your canvas in your drawing application
+3. Click on the **lower-right corner** of your canvas
+4. Status will change to **"INITIALIZED"** (green)
+
+#### 3. Custom Colors (Optional)
+
+The custom colors feature enables unlimited color options.
+
+**Steps:**
+1. Click **"Initialize"** next to Custom Colors
+2. Click on the **upper-left corner** of your custom colors area
+3. Click on the **lower-right corner** of your custom colors area
+4. Status will change to **"INITIALIZED"** (green)
+
+**When to Use:**
+- Your image has more colors than the palette provides
+- You need precise color matching
+
+### Configuring Drawing Settings
+
+In the Control Panel, adjust these settings:
+
+| Setting | Range | Description | Recommended |
+|----------|-------|-------------|--------------|
+| Delay | 0.01-10.0s | Stroke timing | 0.15s |
+| Pixel Size | 3-50 | Detail level | 12 |
+| Precision | 0.0-1.0 | Color accuracy | 0.9 |
+| Jump Delay | 0.0-2.0s | Cursor jump delay | 0.059s |
+
+**Tips:**
+- Start with default values and adjust based on test results
+- Higher precision = more accurate but slower
+- Larger pixel size = more detail but longer drawing time
+
+### Drawing Modes
+
+Choose your drawing mode from the dropdown:
+
+- **Slotted**: Fast processing, simple color-to-lines mapping
+- **Layered**: Better visual results with color frequency sorting (recommended)
+
+### Drawing Options
+
+Toggle these checkboxes as needed:
+
+- **Ignore White Pixels**: Skip drawing white areas (useful for white canvas)
+- **Use Custom Colors**: Enable advanced color mixing (slower)
+
+## Basic Drawing
+
+### Loading an Image
+
+1. **Enter a URL** in the Image Preview Panel
+2. Click **"Search"** to load the image
+3. OR click **"Open File"** to browse locally
+4. The image will appear in the preview panel
+
+**Supported Sources:**
+- Local files (PNG, JPG, BMP, etc.)
+- Remote URLs (direct image links)
+
+### Pre-computation (Optional)
+
+Pre-computing caches the image processing for faster subsequent runs.
+
+**Steps:**
+1. Load your image
+2. Click **"Pre-compute"** button
+3. Wait for processing to complete
+4. Estimated drawing time will be displayed
+
+**Benefits:**
+- Instant drawing on subsequent runs
+- Time estimation before drawing
+- Useful for images you'll draw multiple times
+
+### Test Drawing
+
+Before full drawing, test your brush settings:
+
+#### Simple Test Draw
+
+Quick 5-line calibration without color picking.
+
+**Steps:**
+1. Click **"Simple Test Draw"**
+2. Select your desired color in your painting application
+3. The bot will draw 5 horizontal lines at the canvas upper-left
+
+#### Test Draw
+
+Detailed calibration with color switching.
+
+**Steps:**
+1. Click **"Test Draw"**
+2. The bot will draw the first 20 lines with color changes
+3. Observe the output to verify:
+   - Colors are correct
+   - Lines are drawn smoothly
+   - Timing is appropriate
+
+**Use For:**
+- Verifying brush size settings
+- Testing color selection accuracy
+- Checking jump delay effectiveness
+
+### Full Drawing
+
+1. Click **"Start"** button
+2. The application will minimize
+3. Drawing will begin with progress updates
+4. Estimated time will be shown
+
+**During Drawing:**
+- Progress percentage displays in Tooltip Panel
+- Current color and stroke count shown
+- Time remaining estimate updates
+
+**Controls:**
+- **ESC**: Stop drawing immediately
+- **Pause Key** (default 'p'): Pause/resume drawing
+- Press pause key again to resume
+
+## Region-Based Redrawing
+
+Redraw only a specific area of an image without reprocessing the entire image.
+
+### Use Cases
+
+- **Fixing mistakes**: Redraw only the area with errors
+- **Adding details**: Add new elements to existing drawing
+- **Selective updates**: Modify specific regions without affecting others
+
+### Steps
+
+1. Load your image
+2. Click and drag on the image preview to select a region
+3. Click **"Redraw Region"** button
+4. Only the selected area will be drawn
+
+**Selection:**
+- Click upper-left corner, drag to lower-right corner
+- Selected region will be highlighted
+
+## Advanced Features
+
+### New Layer Automation
+
+Automatically create a new layer in your drawing application.
+
+**Setup:**
+1. Click **"Setup"** → Click **"Initialize"** next to New Layer
+2. Click the new layer button location in your application
+3. Configure modifier keys if needed (CTRL, ALT, SHIFT)
+4. Enable **"Enable New Layer"** checkbox in Control Panel
+
+**Behavior:**
+- Before each color change, bot clicks the new layer button
+- Modifier keys are held during the click
+- 0.75 second wait after click to ensure layer is ready
+
+### Color Button Automation
+
+Automatically click a color picker button to access custom colors.
+
+**Setup:**
+1. Click **"Setup"** → Click **"Initialize"** next to Color Button
+2. Click the color picker button location in your application
+3. Configure delay (time to wait after click)
+4. Configure modifier keys if needed
+5. Enable **"Enable Color Button"** checkbox in Control Panel
+
+**Behavior:**
+- Before each color change, bot clicks the color button
+- Waits configured delay for color picker to open
+- Selects color from spectrum or uses keyboard input
+
+### Color Button Okay
+
+Optional confirmation click after color selection.
+
+**Setup:**
+1. Click **"Setup"** → Click **"Initialize"** next to Color Button Okay
+2. Click the confirmation button location in your application
+3. Configure modifier keys if needed
+4. Enable **"Enable"** checkbox in Control Panel
+
+**Behavior:**
+- After color selection, clicks confirmation button
+- Waits configured delay before drawing
+
+## Keyboard Controls
+
+### Pause Key
+
+**Default:** 'p'
+
+**Setting:**
+1. Click in the **Pause Key** entry field in Control Panel
+2. Press any key (a-z, 0-9, function keys)
+3. The key name will be saved
+
+**Behavior:**
+- Press pause key during drawing: Toggle pause/resume
+- Press pause key when not drawing: Set as new pause key
+
+### ESC Key
+
+**Global hotkey** for emergency stop.
+
+**Behavior:**
+- Pressing ESC during drawing: Stops immediately
+- Pressing ESC during test: Stops test
+- Pressing ESC during setup: Cancels operation
+
+## Tips and Best Practices
+
+### Performance Optimization
+
+1. **Use Pre-compute** for images you'll draw multiple times
+2. **Adjust Pixel Size** based on desired detail vs. speed
+3. **Enable "Ignore White Pixels"** for images with large white areas
+4. **Use Layered Mode** for better visual results on complex images
+5. **Fine-tune Jump Delay** to prevent unintended strokes
+
+### Palette Setup Tips
+
+1. **Use Auto-Estimate** for quick initial setup on regular grids
+2. **Use Precision Estimate** for maximum accuracy on irregular palettes
+3. **Toggle Invalid Positions** to exclude broken or unused colors
+4. **Preview captured regions** to verify correct configuration
+5. **For Precision Estimate with multiple rows**, ensure you have at least 2 valid rows
+
+### Color Button Tips
+
+1. **Set appropriate delay** for your application's color picker opening time
+2. **Use modifier keys** if your application requires them to access color picker
+3. **Enable "Color Button Okay"** if your application requires clicking a confirmation button
+4. **Test color button configuration** with a simple test draw before starting a full drawing
+
+### Drawing Workflow
+
+1. **Load image** → **(Optional) Pre-compute** → **Test Draw** → **Start**
+2. **Monitor progress** via tooltip panel
+3. **Use pause/resume** to interrupt if needed
+4. **ESC to stop** if something goes wrong
+
+### Troubleshooting
+
+If you encounter issues:
+
+1. **Drawing not starting**: Ensure palette and canvas are initialized
+2. **Colors incorrect**: Check custom colors setup and precision settings
+3. **Slow performance**: Reduce pixel size or increase delay settings
+4. **Application not responding**: Use ESC to stop and restart
+
+For detailed troubleshooting, see [Troubleshooting Guide](./troubleshooting.md).
+
+## See Also
+
+- [README.md](../README.md)
+- [API Reference](./api.md)
+- [Configuration Guide](./configuration.md)
+- [Architecture](./architecture.md)
+- [Troubleshooting](./troubleshooting.md)

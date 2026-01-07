@@ -1,6 +1,6 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
+# VS Code Settings
+.vscode/
+
 *$py.class
 
 # C extensions
@@ -143,3 +143,6 @@ dmypy.json
 Thumbs.db
 /memory-bank
 .clinerules
+config.json
+/__pycache__
+/ui/__pycache__
