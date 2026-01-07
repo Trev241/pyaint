@@ -41,12 +41,25 @@ An intelligent drawing automation tool that converts images into precise mouse m
 - **Valid Positions Selection**: Toggle which palette colors are valid/invalid
 - **Auto-Estimate Centers**: Automatically calculate center points using grid-based estimation
 - **Precision Estimate**: Advanced center calculation using reference point selection for maximum accuracy
-  - **1 Row Mode**: Pick first box, second box, and last box of the row to calculate spacing
-  - **2+ Rows Mode**: Pick first row (1st, 2nd, last boxes), second row (1st box), and last row (1st, last boxes)
-  - **3+ Rows Mode**: Picks first row (1st, 2nd, last boxes), second row (1st box), last row (1st, last boxes)
+  - **Single Column Mode**: Pick first row (1st box), second row (1st box), and last row (1st box) to calculate vertical spacing
+  - **1 Row Mode**: Pick first box, second box, and last box of the row to calculate horizontal spacing
+  - **Multi-Row Mode**: Pick first row (1st, 2nd, last boxes), second row (1st box), and last row (1st, last boxes)
   - Automatically calculates spacing between boxes and rows for precise center estimation
 - **Grid-Based Configuration**: Visual grid for easy palette cell selection
 - **Preview Generation**: Visual preview of captured palette, canvas, and custom color regions
+
+### Custom Colors Spectrum Scanning
+- **Automatic Spectrum Mapping**: Scans the custom color spectrum to create a color-to-position map
+- **Intelligent Color Selection**: Automatically finds and clicks the nearest matching color on the spectrum
+- **High Precision**: Samples the spectrum at regular intervals for accurate color matching
+- **Full Spectrum Support**: Works with continuous color spectrums for unlimited color options
+
+### Color Button Features
+- **Color Button Click**: Automatically clicks the color button to open the color picker
+- **Color Button Okay**: Optional click to confirm color selection (can be enabled/disabled)
+- **Modifier Keys**: Configure CTRL, ALT, SHIFT modifiers for color button clicks
+- **Configurable Delay**: Set delay after color button click to allow the color picker to open
+- **Application Compatibility**: Supports applications that require clicking a button to access the color picker
 
 ### Additional Features
 - **New Layer Automation**: Automatic layer creation with keyboard modifier support (Ctrl, Alt, Shift)
@@ -84,7 +97,7 @@ An intelligent drawing automation tool that converts images into precise mouse m
 ### Initial Setup
 1. Launch the application
 2. Click **"Setup"** to configure your drawing environment
-3. Initialize the **Palette**, **Canvas**, and **Custom Colors** by clicking the corners as prompted
+3. Initialize **Palette**, **Canvas**, and **Custom Colors** by clicking the corners as prompted
 4. Configure palette dimensions (rows and columns) if needed
 5. Optionally use advanced palette features:
    - Toggle valid/invalid palette cells
@@ -94,7 +107,12 @@ An intelligent drawing automation tool that converts images into precise mouse m
      - Select 3-5 reference points based on your palette's row count
      - System calculates exact spacing between boxes and rows
      - Automatically estimates centers for all valid positions
-6. Configure your preferred settings using the control panel sliders
+6. Configure **Color Button** and **Color Button Okay** if your application requires clicking a button to access the color picker:
+   - Click the location of the color button
+   - Set optional modifier keys (CTRL, ALT, SHIFT) if needed
+   - Configure delay after color button click (allows time for the color picker to open)
+   - Enable/disable "Color Button Okay" to click the confirmation button after color selection
+7. Configure your preferred settings using the control panel sliders
 
 ### Basic Drawing
 1. Enter an image URL or select a local file
@@ -107,7 +125,7 @@ An intelligent drawing automation tool that converts images into precise mouse m
 1. Load your image
 2. Click and drag on the image preview to select a region
 3. Click **"Redraw Region"** to draw only the selected area
-4. Useful for fixing mistakes or adding details without full redraw
+4. Useful for fixing mistakes or adding details without a full redraw
 
 ### Controls
 - **ESC**: Stop current drawing operation
@@ -146,6 +164,12 @@ An intelligent drawing automation tool that converts images into precise mouse m
 - **Manual Centers**: Pick exact center points for each color
 - **Auto-Estimate**: Automatically calculate center positions
 
+### Color Button Configuration
+- **Color Button**: Location of the color picker button in your application
+- **Color Button Okay**: Location of the confirmation button (optional)
+- **Delay**: Time to wait after clicking color button before selecting color
+- **Modifiers**: CTRL, ALT, SHIFT keys to hold when clicking
+
 ## Architecture
 
 The application consists of three main components:
@@ -174,6 +198,7 @@ Configuration wizard for initializing palette, canvas, and custom color regions 
 - **Slow performance**: Reduce pixel size or increase delay settings
 - **Application not responding**: Use ESC to stop and restart
 - **Palette colors not selecting**: Verify valid positions are marked and centers are correctly picked
+- **Custom colors not working**: Ensure custom colors box is correctly configured and spectrum scanning has completed
 
 ### Performance Tips
 - Use **Pre-compute** for images you'll draw multiple times
@@ -189,6 +214,12 @@ Configuration wizard for initializing palette, canvas, and custom color regions 
 - Toggle invalid positions to exclude broken or unused colors
 - Preview captured regions to verify correct configuration
 - For Precision Estimate with multiple rows, ensure you have at least 2 valid rows for accurate row spacing calculation
+
+### Color Button Tips
+- Set appropriate delay for your application's color picker opening time
+- Use modifier keys if your application requires them to access the color picker
+- Enable "Color Button Okay" if your application requires clicking a confirmation button
+- Test color button configuration with a simple test draw before starting a full drawing
 
 ## Development
 
@@ -212,7 +243,7 @@ Suggestions and contributions are welcome. Please ensure compatibility with the 
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
+This project is licensed under GNU General Public License v3.0 (GPL-3.0).
 
 ## Credits
 
