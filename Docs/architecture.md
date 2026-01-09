@@ -1,506 +1,860 @@
 # Pyaint Architecture
 
-This document describes the system architecture, design patterns, and component relationships in Pyaint.
+Detailed system architecture and design decisions for Pyaint.
+
+## Table of Contents
+
+- [System Overview](#system-overview)
+- [Component Architecture](#component-architecture)
+- [Data Flow](#data-flow)
+- [Drawing Algorithms](#drawing-algorithms)
+- [State Management](#state-management)
+- [Threading Model](#threading-model)
+- [Configuration System](#configuration-system)
+- [Error Handling](#error-handling)
+- [Performance Considerations](#performance-considerations)
+
+---
 
 ## System Overview
 
-Pyaint is a Python-based GUI application that automates drawing by converting images into mouse movements. The system follows a modular architecture with clear separation of concerns:
+Pyaint is a desktop automation application that converts digital images into mouse movements for painting applications. The system uses a modular architecture with clear separation between the drawing engine, user interface, and configuration management.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Window (GUI)                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │ Control Panel │  │ Image Panel  │  │ Tooltip Panel │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                           │
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Bot (Drawing Engine)                   │
-│  ┌──────────────┐  ┌──────────────┐                     │
-│  │   Palette    │  │   Canvas     │                     │
-│  └──────────────┘  └──────────────┘                     │
-│  ┌──────────────┐                                        │
-│  │Custom Colors │                                        │
-│  └──────────────┘                                        │
-└─────────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-                    ┌──────────────┐
-                    │   Config     │
-                    │  (JSON)     │
-                    └──────────────┘
-```
+### Core Technologies
+
+- **Python 3.8+**: Primary language
+- **PyAutoGUI**: Mouse and keyboard automation
+- **Pillow (PIL)**: Image processing
+- **pynput**: Global keyboard monitoring
+- **tkinter**: GUI framework
+- **JSON**: Configuration and data persistence
+
+### Design Goals
+
+1. **Modularity**: Clear separation between bot logic and UI
+2. **Extensibility**: Easy to add new drawing features
+3. **Reliability**: Robust error handling and recovery
+4. **Performance**: Caching and optimized algorithms
+5. **User Experience**: Real-time feedback and intuitive controls
+
+---
 
 ## Component Architecture
 
-### Entry Point (`main.py`)
-
-The application entry point initializes the global keyboard listener and launches the main GUI window.
-
-**Responsibilities:**
-- Initialize [`Bot`](../bot.py:87) instance
-- Start [`Window`](../ui/window.py:58) GUI
-- Configure global keyboard listener for ESC (terminate) and pause key
-- Manage pynput keyboard listener lifecycle
-
-**Key Functions:**
-```python
-def on_pynput_key(key):
-    """Handle global keyboard events for pause/terminate"""
-    # ESC key: Set bot.terminate = True
-    # Pause key: Toggle bot.paused during drawing
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Main Application (main.py)              │
+│  ┌──────────────────────────────────────────────┐       │
+│  │    Global Keyboard Listener (pynput)     │       │
+│  └──────────────────────────────────────────────┘       │
+│  ┌──────────────────────────────────────────────┐       │
+│  │         Bot Instance                     │       │
+│  │  ┌────────────────────────────────┐         │       │
+│  │  │  Drawing Engine              │         │       │
+│  │  │  - process()               │         │       │
+│  │  │  - draw()                  │         │       │
+│  │  │  - calibrate_custom_colors() │         │       │
+│  │  └────────────────────────────────┘         │       │
+│  └──────────────────────────────────────────────┘       │
+│  ┌──────────────────────────────────────────────┐       │
+│  │         Window Instance (GUI)               │       │
+│  │  ┌────────────────────────────┐             │       │
+│  │  │  Control Panel          │             │       │
+│  │  │  - Settings controls     │             │       │
+│  │  │  - Action buttons        │             │       │
+│  │  └────────────────────────────┘             │       │
+│  │  ┌────────────────────────────┐             │       │
+│  │  │  Preview Panel          │             │       │
+│  │  │  - Image display        │             │       │
+│  │  │  - URL/file input       │             │       │
+│  │  └────────────────────────────┘             │       │
+│  │  ┌────────────────────────────┐             │       │
+│  │  │  Tooltip Panel          │             │       │
+│  │  │  - Status messages       │             │       │
+│  │  │  - Progress tracking     │             │       │
+│  │  └────────────────────────────┘             │       │
+│  └──────────────────────────────────────────────┘       │
+│                                                          │
+│  ┌──────────────────────────────────────────────┐       │
+│  │         SetupWindow (Configuration Wizard)  │       │
+│  │  ┌────────────────────────────┐             │       │
+│  │  │  Tool Configuration      │             │       │
+│  │  │  - Palette             │             │       │
+│  │  │  - Canvas              │             │       │
+│  │  │  - Custom Colors        │             │       │
+│  │  │  - New Layer           │             │       │
+│  │  │  - Color Button         │             │       │
+│  │  │  - Color Button Okay    │             │       │
+│  │  │  - Color Preview Spot   │             │       │
+│  │  └────────────────────────────┘             │       │
+│  │  ┌────────────────────────────┐             │       │
+│  │  │  Palette Features       │             │       │
+│  │  │  - Toggle valid/invalid │             │       │
+│  │  │  - Pick centers         │             │       │
+│  │  │  - Auto-estimate        │             │       │
+│  │  │  - Precision estimate    │             │       │
+│  │  │  - Select/Deselect all │             │       │
+│  │  └────────────────────────────┘             │       │
+│  └──────────────────────────────────────────────┘       │
+└─────────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+              ┌─────────────────────────┐
+              │   config.json         │
+              │   - Settings           │
+              │   - Tool configs       │
+              │   - Calibration data    │
+              └─────────────────────────┘
+                          │
+                          ▼
+              ┌─────────────────────────┐
+              │   cache/              │
+              │   - Precomputed cmap  │
+              │   - Image hash keys    │
+              └─────────────────────────┘
 ```
 
-### Bot Module (`bot.py`)
-
-The core drawing engine containing two main classes: [`Palette`](../bot.py:16) and [`Bot`](bot.py:87).
-
-#### Palette Class
-
-Handles color detection and matching from a screen region.
-
-**Design Pattern:** Builder Pattern
-
-The [`Palette`](../bot.py:16) class can be initialized in two ways:
-
-1. **Automatic Detection**: Scan a grid-based palette box
-2. **Manual Definition**: Use pre-defined color positions
-
-**Initialization Flow:**
-```
-┌─────────────────────────────────────────────────────────┐
-│  init_palette()                                   │
-│     │                                            │
-│     ├─ colors_pos provided? ────Yes──► Use positions  │
-│     │                                            │
-│     └─ No ──► Scan grid box                      │
-│           │                                       │
-│           ├─ valid_positions? ──► Skip invalid cells │
-│           │                                       │
-│           └─ manual_centers? ──► Use custom centers │
-│                                                   │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Key Attributes:**
-- `colors_pos` - Dictionary: `{(r, g, b): (x, y)}`
-- `colors` - Set of available RGB tuples
-- `box` - Palette bounding box (left, top, width, height)
-- `rows`, `columns` - Grid dimensions
-
-**Color Matching Algorithm:**
-```python
-def nearest_color(self, query):
-    """Find nearest palette color using squared Euclidean distance"""
-    return min(self.colors, key=lambda color: Palette.dist(color, query))
-
-@staticmethod
-def dist(colx, coly):
-    """Squared RGB distance (no sqrt for performance)"""
-    return sum((s - q) ** 2 for s, q in zip(colx, coly))
-```
-
-#### Bot Class
-
-Main drawing engine orchestrating image processing and mouse automation.
-
-**Design Pattern:** State Machine
-
-The [`Bot`](bot.py:87) class maintains multiple state flags:
-
-```python
-self.terminate = False    # Stop all operations
-self.paused = False       # Pause/resume state
-self.drawing = False      # Currently drawing flag
-```
-
-**Drawing State for Pause/Resume:**
-```python
-self.draw_state = {
-    'color_idx': 0,        # Current color index
-    'line_idx': 0,         # Current line index
-    'segment_idx': 0,       # Current stroke segment
-    'current_color': None,   # Saved color for resume
-    'cmap': None             # Saved coordinate map
-}
-```
-
-**Settings Array:**
-```python
-self.settings = [
-    DELAY,      # [0] Stroke timing (0.01-10.0s)
-    STEP,        # [1] Pixel size (3-50)
-    ACCURACY,    # [2] Color precision (0.0-1.0)
-    JUMP_DELAY   # [3] Cursor jump delay (0.0-2.0s)
-]
-```
-
-**Processing Pipeline:**
-```
-┌─────────────────────────────────────────────────────────┐
-│  Image Input                                      │
-│     │                                            │
-│     ▼                                            │
-│  process() / process_region()                    │
-│     │                                            │
-│     ├─ Load image (PIL)                          │
-│     ├─ Resize to canvas fit                         │
-│     ├─ Scan pixels (step size)                     │
-│     ├─ Map to palette colors                         │
-│     ├─ Generate line segments                        │
-│     └─ Return color map (cmap)                    │
-│                                                   │
-│     ▼                                            │
-│  draw()                                          │
-│     │                                            │
-│     ├─ For each color in cmap:                     │
-│     │   ├─ Select color (palette or custom)       │
-│     │   ├─ For each line segment:                │
-│     │   │   ├─ Move to start                    │
-│     │   │   ├─ Mouse down                          │
-│     │   │   ├─ Drag to end (with segments)        │
-│     │   │   └─ Mouse up                          │
-│     │   └─ Check pause/terminate                   │
-│     └─ Return status                              │
-└─────────────────────────────────────────────────────────┘
-```
-
-### UI Module
-
-The UI module provides the graphical interface using Tkinter.
-
-#### Window Class (`ui/window.py`)
-
-Main application window with three panels.
-
-**Panel Layout:**
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  ┌──────────────────┐  ┌──────────────────┐               │
-│  │  Control Panel  │  │  Image Panel    │               │
-│  │                 │  │                 │               │
-│  │  Setup          │  │  URL Entry      │               │
-│  │  Pre-compute   │  │  File Browser   │               │
-│  │  Test Draw      │  │  Preview Image   │               │
-│  │  Start          │  │                 │               │
-│  │  Settings       │  │                 │               │
-│  │  - Delay       │  │                 │               │
-│  │  - Pixel Size  │  │                 │               │
-│  │  - Precision    │  │                 │               │
-│  │  - Jump Delay   │  │                 │               │
-│  │  Options       │  │                 │               │
-│  │  Redraw Region │  │                 │               │
-│  └──────────────────┘  └──────────────────┘               │
-│  ┌────────────────────────────────────────────────────┐     │
-│  │           Tooltip Panel                    │     │
-│  │           Status messages                 │     │
-│  └────────────────────────────────────────────────────┘     │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-**Thread Management:**
-Long-running operations use separate threads to keep UI responsive:
-
-```python
-@is_free
-def start_draw_thread(self):
-    """Start drawing in background thread"""
-    self._draw_thread = Thread(target=self.start)
-    self._draw_thread.start()
-    self._manage_draw_thread()
-
-def _manage_draw_thread(self):
-    """Update progress while thread is alive"""
-    if self._draw_thread.is_alive() and self.busy:
-        self._root.after(500, self._manage_draw_thread)
-```
-
-**Busy State Management:**
-```python
-@is_free
-def setup(self):
-    """Decorator to prevent concurrent operations"""
-    if self.busy:
-        self.tlabel['text'] = "Cannot perform action. Currently busy..."
-    else:
-        self.busy = True
-        func(self)
-```
-
-#### SetupWindow Class (`ui/setup.py`)
-
-Configuration wizard for tool initialization with advanced palette features.
-
-**Features:**
-- Mouse-based region selection
-- Preview captured regions
-- Manual color selection with visual grid
-- Center point picking for precision
-- Auto-estimate centers using grid calculation
-- Precision estimate using reference points
-- Modifier key configuration (CTRL, ALT, SHIFT)
-
-**Color Selection Modes:**
-
-1. **Toggle Mode** - Click cells to mark valid/invalid
-2. **Pick Centers Mode** - Click exact center points
-3. **Auto-Estimate** - Grid-based center calculation
-4. **Precision Estimate** - Reference point calculation:
-   - Single Column Mode - Vertical palettes
-   - 1 Row Mode - Horizontal palettes
-   - Multi-Row Mode - Grid palettes
+---
 
 ## Data Flow
 
-### Configuration Flow
+### 1. Application Startup
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  config.json                                     │
-│     │                                            │
-│     ├─ Load on startup                           │
-│     ├─ Update on setting change                    │
-│     └─ Save on setup completion                   │
-└─────────────────────────────────────────────────────────┘
+main.py
+  │
+  ├─> Create Bot instance
+  │     ├─> Initialize settings
+  │     ├─> Initialize state (terminate, paused, drawing)
+  │     └─> Initialize tools (palette, canvas, custom_colors)
+  │
+  ├─> Start pynput keyboard listener
+  │     ├─> Monitor ESC key (set terminate flag)
+  │     └─> Monitor pause key (toggle paused flag)
+  │
+  └─> Create Window instance
+        ├─> Load configuration from config.json
+        ├─> Initialize UI components
+        └─> Enter mainloop
 ```
 
-### Image Processing Flow
+### 2. Tool Configuration Flow
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Image File                                      │
-│     │                                            │
-│     ▼                                            │
-│  Load (PIL)                                     │
-│     │                                            │
-│     ▼                                            │
-│  Resize to Canvas Fit                              │
-│     │                                            │
-│     ▼                                            │
-│  Scan Pixels (step size)                          │
-│     │                                            │
-│     ▼                                            │
-│  For Each Pixel:                                  │
-│     │                                            │
-│     ├─ Get RGB value                               │
-│     ├─ Find nearest palette color                    │
-│     ├─ Check color change                            │
-│     └─ Create line segment                          │
-│                                                   │
-│     ▼                                            │
-│  Color Map (cmap)                                 │
-│     {color: [(start, end), ...]}                   │
-└─────────────────────────────────────────────────────────┘
+User clicks "Setup"
+  │
+  ├─> SetupWindow opens
+  │
+  ├─> User selects tool and clicks "Initialize"
+  │     ├─> Window minimizes
+  │     ├─> pynput.mouse.Listener starts
+  │     ├─> User clicks on screen (1-2 points)
+  │     ├─> Screen capture via ImageGrab
+  │     ├─> Save preview image to assets/
+  │     ├─> Store coordinates in tools dict
+  │     ├─> Mark tool.status = True
+  │     └─> Window deiconifies
+  │
+  ├─> User can click "Preview" to view captured region
+  │
+  └─> User clicks "Done" -> SetupWindow closes
+        └─> Window.merge_tools() -> saves to config.json
 ```
 
-### Drawing Flow
+### 3. Color Calibration Flow
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Color Map (cmap)                                │
-│     │                                            │
-│     ▼                                            │
-│  For Each Color:                                   │
-│     │                                            │
-│     ├─ Check pause/terminate                        │
-│     ├─ Select color (palette click or spectrum)        │
-│     ├─ For Each Line:                              │
-│     │   ├─ Check jump distance > 5px               │
-│     │   │   └─ Add jump delay if needed           │
-│     │   ├─ Move to start position                  │
-│     │   ├─ Break into segments (2-10)              │
-│     │   ├─ Drag with delay distribution              │
-│     │   └─ Update progress                         │
-│     └─ Return status                               │
-└─────────────────────────────────────────────────────────┘
+User configures Custom Colors and Color Preview Spot
+  │
+  ├─> User sets Calibration Step Size (1-10)
+  │
+  ├─> User clicks "Run Calibration"
+  │     ├─> Background thread starts
+  │     ├─> Get Custom Colors box and Color Preview Spot coords
+  │     ├─> Press mouse down at spectrum start
+  │     ├─> Drag through entire spectrum (step_size intervals)
+  │     ├─> At each step: Capture 1x1 pixel from preview spot
+  │     ├─> Store RGB → (x, y) in color_calibration_map
+  │     ├─> Release mouse up
+  │     ├─> Save to color_calibration.json
+  │     └─> Report completion to UI
+  │
+  └─> During drawing:
+        ├─> For each color: Check calibration map first
+        ├─> If match within tolerance: Use calibrated position
+        └─> If no match: Use spectrum scan or keyboard input
 ```
 
-### Caching Flow
+### 4. Image Processing Flow
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Image + Settings                                 │
-│     │                                            │
-│     ▼                                            │
-│  Generate Cache Filename (MD5 hash)                 │
-│     cache/{img_hash}_{settings_hash}.json            │
-│     │                                            │
-│     ▼                                            │
-│  Check Cache Validity                             │
-│     │                                            │
-│     ├─ File exists?                                │
-│     ├─ Age < 24 hours?                             │
-│     ├─ Settings match?                              │
-│     └─ Canvas match?                               │
-│     │                                            │
-│     ├─ Yes ──► Load cached cmap                    │
-│     └─ No ──► Process image normally              │
-└─────────────────────────────────────────────────────────┘
+User loads image (URL or file)
+  │
+  ├─> Display in preview panel
+  │
+  ├─> User clicks "Pre-compute" or "Start"
+  │     ├─> Background thread starts
+  │     ├─> Load image with PIL
+  │     ├─> Calculate resize dimensions (fit canvas, maintain aspect)
+  │     ├─> Resize image
+  │     ├─> Scan pixels at step_size intervals
+  │     ├─> For each pixel:
+  │     │     ├─> Get RGB value
+  │     │     ├─> If IGNORE_WHITE and white: Skip
+  │     │     └─> Else: Map to palette color
+  │     │           ├─> If USE_CUSTOM_COLORS: Round to interval
+  │     │           └─> Else: nearest_color(palette)
+  │     │
+  │     ├─> Generate line segments (horizontal runs)
+  │     └─> Return cmap: {color: [line_segments]}
+  │
+  └─> If pre-compute: Save to cache/{hash}.json
 ```
 
-## Design Patterns
+### 5. Drawing Flow
 
-### Builder Pattern
-
-Used in [`Palette`](../bot.py:16) class for flexible initialization.
-
-**Benefits:**
-- Multiple initialization methods from single constructor
-- Clear separation of automatic and manual setup
-- Easy to extend with new configuration options
-
-### State Machine Pattern
-
-[`Bot`](bot.py:87) class uses state flags to control drawing flow.
-
-**States:**
-- `idle` - Not drawing
-- `drawing` - Actively drawing
-- `paused` - Drawing suspended
-- `terminated` - Drawing stopped
-
-**Transitions:**
 ```
-idle ──► drawing ──► paused ──► drawing
-  │            │          │
-  └────────────┴──────────┘
-                │
-                ▼
-           terminated
+User clicks "Start"
+  │
+  ├─> Check for valid cache
+  │     ├─> If exists: Load cached cmap
+  │     └─> Else: Call process() (live)
+  │
+  ├─> Calculate estimated drawing time
+  │     ├─> Sum all stroke delays
+  │     ├─> Add jump delays (> 5px movements)
+  │     └─> Add color switching overhead (~0.5s/color)
+  │
+  ├─> Show warning dialog (ESC, pause_key)
+  │
+  ├─> Window minimizes
+  │
+  ├─> Drawing thread starts
+  │     ├─> Reset state (terminate=False, paused=False)
+  │     ├─> For each color in cmap (sorted):
+  │     │     ├─> If New Layer enabled:
+  │     │     │     ├─> Press modifiers (CTRL/ALT/SHIFT)
+  │     │     │     ├─> Click new_layer coords
+  │     │     │     ├─> Release modifiers
+  │     │     │     └─> Wait 0.75s
+  │     │     ├─> If Color Button enabled:
+  │     │     │     ├─> Press modifiers
+  │     │     │     ├─> Click color_button coords
+  │     │     │     ├─> Release modifiers
+  │     │     │     └─> Wait delay (0.1-5.0s)
+  │     │     ├─> Select color:
+  │     │     │     ├─> If in palette: Click palette coords
+  │     │     │     ├─> Else if calibration: get_calibrated_color_position()
+  │     │     │     ├─> Else if spectrum: Find nearest spectrum color
+  │     │     │     └─> Else: Keyboard input (tab, RGB values, enter)
+  │     │     ├─> If Color Button Okay enabled:
+  │     │     │     ├─> Press modifiers
+  │     │     │     ├─> Click okay_button coords
+  │     │     │     ├─> Release modifiers
+  │     │     │     └─> Wait delay (0.1-5.0s)
+  │     │     └─> For each line segment:
+  │     │           ├─> Check jump distance (> 5px?)
+  │     │           │     ├─> If yes: Sleep(JUMP_DELAY)
+  │     │           │     └─> If no: Continue
+  │     │           ├─> Check if paused:
+  │     │           │     ├─> If yes: Wait (hold any modifiers)
+  │     │           │     └─> If no: Continue
+  │     │           ├─> If was_paused: Replay stroke
+  │     │           ├─> Move to start position
+  │     │           ├─> Mouse down
+  │     │           ├─> Segment line (2-10 segments based on length)
+  │     │           ├─> Sleep(delay / segments) between each
+  │     │           └─> Mouse up
+  │     │           └─> Update progress (strokes/total_strokes)
+  │     │
+  │     └─> Report actual vs estimated time
+  │
+  └─> Window deiconifies (restore, show results)
 ```
 
-### Decorator Pattern
+### 6. Pause/Resume Flow
 
-[`@is_free`](../ui/window.py:43) decorator prevents concurrent operations.
+```
+Drawing in progress
+  │
+  ├─> User presses pause_key (e.g., 'p')
+  │     ├─> Global pynput listener detects key
+  │     ├─> bot.paused = not bot.paused (toggle)
+  │     └─> Print "Pause toggled: True/False"
+  │
+  ├─> Drawing loop checks bot.paused
+  │     ├─> If paused:
+  │     │     ├─> Release any stuck modifiers (SHIFT, ALT, CTRL)
+  │     │     ├─> Wait (busy loop with 0.1s sleep)
+  │     │     └─> Continue waiting until not paused
+  │     │
+  │     └─> When resumed:
+  │           ├─> Set was_paused flag
+  │           └─> Replay current stroke for clean result
+  │
+  └─> User presses pause_key again to resume
+```
+
+---
+
+## Drawing Algorithms
+
+### Slotted Mode
+
+Simple, direct color-to-lines mapping without optimization.
+
+**Algorithm:**
+
+```python
+for each pixel in image:
+    if color != previous_color:
+        end_current_line()
+        start_new_line()
+    accumulate_pixels()
+```
+
+**Characteristics:**
+- **Lines**: Direct horizontal segments of same color
+- **Color Order**: Unchanged from scan order
+- **Complexity**: O(n) where n = pixel count
+- **Memory**: Minimal (only store line segments)
+- **Performance**: Fast, simple code path
+
+**Use Case:** Best for simple images or when speed is prioritized
+
+### Layered Mode
+
+Advanced color layering with frequency-based optimization.
+
+**Algorithm:**
+
+```python
+# Phase 1: Collect data
+for each pixel in image:
+    color = map_pixel_to_palette()
+    lines_by_row[row].append((color, segment))
+    color_freq[color] += segment_length
+
+# Phase 2: Sort by frequency
+sorted_colors = sort(colors, by=frequency, descending)
+
+# Phase 3: Merge and optimize
+for each color in sorted_colors:
+    for each row:
+        merge_adjacent_lines(color, lower_frequency_colors)
+        if merged_lines_are_exposed:
+            add_to_output(color, merged_lines)
+```
+
+**Characteristics:**
+- **Lines**: Merged segments of lower-frequency colors
+- **Color Order**: Frequency-based (most used first)
+- **Complexity**: O(n log n) due to sorting
+- **Memory**: Higher (stores per-row data)
+- **Performance**: Slower processing, better visual results
+
+**Optimizations:**
+- Fewer color switches (painter stays on one color longer)
+- Overpaint strategy (high-frequency colors paint over low-frequency)
+- Reduced mouse movements (merged segments)
+
+**Use Case:** Best for complex images or when quality is prioritized
+
+### Stroke Segmentation
+
+For smooth drawing, long lines are divided into segments.
+
+**Algorithm:**
+
+```python
+line_length = calculate_distance(start, end)
+segments = clamp(2, line_length / 10, 10)
+
+segment_delay = DELAY / segments
+
+for i in 1 to segments:
+    t = i / segments
+    next_pos = lerp(start, end, t)
+    move_to(next_pos)
+    sleep(segment_delay / segments)
+```
+
+**Rationale:**
+- **Precision**: Multiple small movements = smoother curves
+- **Responsiveness**: Shorter sleeps = more responsive control
+- **Balance**: 2-10 segments based on line length
+
+---
+
+## State Management
+
+### Bot State
+
+The `Bot` class maintains multiple state flags for control:
+
+| State | Type | Description | Scope |
+|-------|--------|-------------|--------|
+| `terminate` | bool | Stop all operations immediately | Global |
+| `paused` | bool | Pause/resume current drawing | Global |
+| `drawing` | bool | Actively executing draw() | Global |
+| `draw_state` | dict | Resume state for pause/recovery | Instance |
+
+### Draw State for Pause/Resume
+
+```python
+draw_state = {
+    'color_idx': int,        # Resume color index
+    'line_idx': int,         # Resume line index
+    'segment_idx': int,       # Resume segment index
+    'current_color': tuple,   # Saved active color
+    'was_paused': bool       # Flag for stroke replay
+}
+```
 
 **Usage:**
-```python
-@is_free
-def start_draw_thread(self):
-    # Only executes if not busy
-    self._draw_thread = Thread(target=self.start)
-    self._draw_thread.start()
+1. **Before draw**: Reset to `{0, 0, 0, None, False}`
+2. **During draw**: Update after each completed segment
+3. **On pause**: Save current state
+4. **On resume**: Continue from saved state + replay stroke
+
+### UI State
+
+The `Window` class maintains UI state:
+
+| State | Type | Description |
+|-------|--------|-------------|
+| `busy` | bool | Block concurrent operations |
+| `tools` | dict | All tool configurations |
+| `_initializing` | bool | Prevent saving during UI setup |
+
+### Setup State
+
+The `SetupWindow` class maintains configuration state:
+
+| State | Type | Description |
+|-------|--------|-------------|
+| `_valid_positions` | set | Valid palette cell indices |
+| `_manual_centers` | dict | Manually picked center points |
+| `_pick_centers_mode` | bool | Mode toggle flag |
+| `_precision_mode` | str | 'single_column', '1_row', 'multi_row' |
+| `_precision_points` | list | Reference points for estimation |
+| `_grid_buttons` | dict | Grid cell UI widgets |
+| `_mod_vars` | dict | Modifier key checkboxes |
+| `_enable_vars` | dict | Enable checkbox for Color Button Okay |
+
+---
+
+## Threading Model
+
+### Thread Types
+
+Pyaint uses multiple thread types for different operations:
+
+1. **Main Thread**: GUI mainloop (tkinter)
+2. **Keyboard Listener**: Global pynput thread (main.py)
+3. **Worker Threads**: Background operations
+
+### Worker Thread Operations
+
+| Operation | Entry Point | Manager | Updates |
+|-----------|--------------|---------|---------|
+| Pre-compute | `precompute()` | `_manage_precompute_thread()` | Progress % |
+| Test Draw | `test_draw()` | `_manage_test_draw_thread()` | Progress % |
+| Simple Test Draw | `simple_test_draw()` | `_manage_simple_test_draw_thread()` | Status |
+| Full Draw | `draw()` | `_manage_draw_thread()` | Progress % |
+| Calibration | `calibrate_custom_colors()` | `_manage_calibration_thread()` | Progress % |
+| Region Redraw | `redraw_region()` | `_manage_redraw_thread()` | Progress % |
+
+### Thread Safety
+
+**Shared State Access:**
+- **Read-only**: Settings, configuration (thread-safe)
+- **Write**: Flags (terminate, paused) - simple atomic operations
+- **Guarded**: UI updates via `root.after()` callback
+
+**Potential Issues:**
+- Race conditions on `bot.terminate` / `bot.paused`
+- Solution: These are boolean flags, atomic in Python
+- UI updates from non-main thread via `root.after()`
+
+### Thread Lifecycle
+
+```
+User action
+  │
+  ├─> Check busy flag
+  │     └─> If busy: Show error, return
+  │
+  ├─> Set busy = True
+  │
+  ├─> Create Thread(target=operation)
+  │
+  ├─> thread.start()
+  │
+  ├─> Manager thread starts (every 500ms via root.after())
+  │     ├─> Check thread.is_alive()
+  │     ├─> Update UI progress
+  │     └─> If done: Set busy = False
+  │
+  └─> Operation completes
+        └─> Thread exits naturally or returns
 ```
 
-### Observer Pattern
+---
 
-Progress updates via periodic polling:
+## Configuration System
 
-```python
-def _manage_draw_thread(self):
-    """Update progress every 500ms"""
-    if self._draw_thread.is_alive() and self.busy:
-        self._root.after(500, self._manage_draw_thread)
+### Configuration File
+
+**Location:** `config.json` (project root)
+
+**Format:** JSON
+
+**Persistence:**
+- Saved on: Tool configuration completion, setting changes
+- Loaded on: Application startup
+- Encoding: UTF-8 for international support
+
+### Configuration Sections
+
+#### Drawing Settings
+
+```json
+"drawing_settings": {
+    "delay": 0.15,        // Stroke timing (seconds)
+    "pixel_size": 12,       // Detail level
+    "precision": 0.9,        // Color accuracy
+    "jump_delay": 0.5        // Cursor jump delay (seconds)
+}
 ```
 
-## Key Algorithms
+#### Tool Configurations
 
-### Color Matching
+Each tool has:
+- `status`: bool - Is initialized?
+- `box` / `coords`: Screen coordinates
+- `preview`: Path to captured screenshot
+- `modifiers`: dict of CTRL/ALT/SHIFT flags
 
-**Squared Euclidean Distance:**
-```python
-dist(colx, coly) = Σ(colx[i] - coly[i])²
+Special tools:
+- Palette: rows, cols, color_coords, valid_positions, manual_centers
+- New Layer, Color Button: enabled, delay
+- Color Button Okay: enabled, delay
+
+#### User Preferences
+
+```json
+"drawing_options": {
+    "ignore_white_pixels": false,
+    "use_custom_colors": false
+},
+"pause_key": "p",
+"calibration_settings": {
+    "step_size": 2
+},
+"last_image_url": "https://..."
 ```
 
-Avoids square root for performance (order preservation).
+### Configuration Loading Flow
 
-### Line Generation
-
-**Slotted Mode:**
-- Simple color-to-lines mapping
-- Each horizontal run of same color = one line segment
-
-**Layered Mode:**
-1. Count color frequency (total pixel coverage)
-2. Sort colors by frequency (descending)
-3. Merge adjacent lines of lower-frequency colors
-4. Higher-frequency colors paint over lower-frequency ones
-
-**Benefits:**
-- Fewer color switches
-- Better visual results
-- Optimized for complex images
-
-### Custom Color Spectrum Scanning
-
-**Sampling Algorithm:**
-```python
-sample_step = 4  # Sample every 4th pixel
-for y in range(0, height, sample_step):
-    for x in range(0, width, sample_step):
-        r, g, b = pix[x, y][:3]
-        spectrum_map[(r, g, b)] = (screen_x, screen_y)
+```
+Window.__init__()
+  │
+  ├─> Set _initializing = True (prevent saves)
+  │
+  ├─> Load config.json
+  │     ├─> If file missing: Use defaults
+  │     ├─> If file corrupt: Show error, use defaults
+  │     └─> Parse JSON
+  │
+  ├─> Apply to bot:
+  │     ├─> bot.pause_key
+  │     ├─> bot.settings
+  │     ├─> bot.new_layer
+  │     ├─> bot.color_button
+  │     ├─> bot.color_button_okay
+  │     └─> bot.options
+  │
+  ├─> Apply to UI:
+  │     ├─> Drawing settings (delay, pixel_size, precision, jump_delay)
+  │     ├─> Drawing options (ignore_white, use_custom_colors)
+  │     ├─> Pause key entry
+  │     ├─> Calibration step entry
+  │     └─> Checkboxes
+  │
+  ├─> Load tool configs:
+  │     ├─> Palette (reconstruct from box/rows/cols)
+  │     ├─> Canvas
+  │     ├─> Custom Colors
+  │     ├─> New Layer
+  │     ├─> Color Button
+  │     ├─> Color Button Okay
+  │     └─> Color Preview Spot
+  │
+  └─> Set _initializing = False (enable saves)
 ```
 
-**Color Selection:**
-- Find nearest spectrum color using [`Palette.dist()`](../bot.py:78)
-- Click nearest position
-- Fallback to keyboard input if spectrum unavailable
+### Configuration Saving Flow
 
-## Performance Considerations
+```
+Setting changes
+  │
+  ├─> Check _initializing flag
+  │     └─> If True: Skip save (UI setup phase)
+  │
+  ├─> Update tools dict
+  │
+  ├─> Write to config.json
+  │     ├─> Serialize to JSON
+  │     ├─> Encode as UTF-8
+  │     └─> Atomic write
+  │
+  └─> Update UI status text
+```
 
-### Memory Efficiency
-
-- **Lazy Loading**: Palette colors loaded only when needed
-- **Caching**: Pre-computed results stored for reuse
-- **Streaming**: Image processed line-by-line, not pixel-by-pixel
-
-### Threading
-
-- **UI Thread**: Main GUI thread (Tkinter)
-- **Worker Threads**: Background processing (draw, pre-compute)
-- **Thread Safety**: State flags prevent race conditions
-
-### Optimization Strategies
-
-1. **Pre-computation**: Cache image processing for repeated drawings
-2. **Jump Delay**: Prevent rapid cursor movements from causing issues
-3. **Segmented Drawing**: Break long lines into smooth segments
-4. **Color Batching**: Process all lines of one color before switching
+---
 
 ## Error Handling
 
 ### Exception Hierarchy
 
 ```
-NoToolError (base)
-    ├── NoPaletteError
-    ├── NoCanvasError
-    └── NoCustomColorsError
-CorruptConfigError
+Exception (Python built-in)
+  │
+  ├── NoToolError (custom base)
+  │     ├── NoPaletteError
+  │     ├── NoCanvasError
+  │     └── NoCustomColorsError
+  │
+  └── CorruptConfigError (custom)
 ```
 
-### Recovery Strategies
+### Error Handling Strategy
 
-1. **Graceful Degradation**: Fall back to simpler methods on failure
-2. **State Cleanup**: Reset flags on errors
-3. **User Feedback**: Clear error messages via GUI
-4. **Retry Logic**: Allow re-attempt after configuration fix
+#### 1. Bot Layer
 
-## Extension Points
+**Where**: `bot.py`
 
-### Adding New Drawing Modes
+**Strategy**: Raise exceptions with descriptive messages
 
-1. Define mode constant in [`Bot`](../bot.py:87) class
-2. Add processing logic in [`process()`](bot.py:266) method
-3. Update [`load_config()`](ui/window.py:669) to load mode setting
+```python
+def init_palette(self, ...):
+    try:
+        palette = Palette(...)
+    except ValueError as e:
+        raise NoPaletteError(f'Palette initialization failed: {e}')
+```
 
-### Adding New Tools
+**Recovery**: Window catches and shows to user
 
-1. Add tool to [`tools`](../ui/window.py:110) dictionary
-2. Create UI controls in [`_init_cpanel()`](ui/window.py:145)
-3. Add initialization logic in [`_on_click()`](ui/setup.py:1182)
+#### 2. UI Layer
 
-### Adding Custom Color Features
+**Where**: `ui/window.py`, `ui/setup.py`
 
-1. Extend [`_scan_spectrum()`](bot.py:202) for new scanning methods
-2. Add fallback strategies for color selection
-3. Update [`draw()`](bot.py:397) to use new features
+**Strategy**: Try-catch with user feedback
 
-## See Also
+```python
+try:
+    result = bot.draw(cmap)
+except NoPaletteError:
+    messagebox.showerror('Palette not configured')
+except Exception as e:
+    messagebox.showerror(f'Drawing failed: {e}')
+finally:
+    self._set_busy(False)
+```
 
-- [API Reference](./api.md)
-- [Configuration Guide](./configuration.md)
-- [Usage Guide](./usage-guide.md)
+#### 3. Global Level
+
+**Where**: `main.py`
+
+**Strategy**: Graceful shutdown on critical errors
+
+```python
+try:
+    Window('pyaint', bot, ...)
+finally:
+    pynput_listener.stop()  # Cleanup
+```
+
+### User-Facing Errors
+
+| Error | Message | Resolution |
+|-------|---------|------------|
+| NoPaletteError | "Palette not initialized" | Run Setup |
+| NoCanvasError | "Canvas not initialized" | Run Setup |
+| NoCustomColorsError | "Custom colors not initialized" | Configure in Setup |
+| CorruptConfigError | "Config file missing or invalid" | Run Setup |
+
+---
+
+## Performance Considerations
+
+### 1. Image Processing
+
+**Complexity**: O(n) where n = pixel count
+
+**Optimizations:**
+- Nearest color memoization: Cache RGB → palette lookups
+- Vector distance calculation: Pre-compute palette colors
+- Interval-based scanning: Step size reduces pixel count
+
+### 2. Drawing Time
+
+**Components:**
+
+| Factor | Impact | Optimization |
+|--------|----------|--------------|
+| Stroke count | Linear | Larger pixel size = fewer strokes |
+| Color switches | ~0.5s each | Layered mode reduces switches |
+| Jump delays | Variable | Tune jump_delay setting |
+| Modifier keys | Negligible | Minimal overhead |
+| Segment delays | Per segment | Controlled by delay setting |
+
+**Approximation Formula:**
+
+```
+total_time = (strokes * delay) 
+           + (jumps * jump_delay)
+           + (colors * 0.5)
+           + (modifiers * 0.1)
+```
+
+### 3. Caching
+
+**Cache Hit Performance:**
+- Load time: ~0.01s (JSON parse)
+- Avoid: Image processing (1-30s depending on size)
+
+**Cache Miss Performance:**
+- Process time: 1-30s
+- Save time: ~0.1s (JSON write)
+
+**Cache Validation:**
+- Age check: < 24 hours
+- Settings match: Exact equality
+- Canvas check: Exact dimensions
+
+### 4. Memory Usage
+
+**Components:**
+
+| Component | Approx. Size | Notes |
+|-----------|-------------|-------|
+| Palette object | ~1 KB | Small grids |
+| Canvas box | 4 ints | Negligible |
+| Color calibration map | ~50-500 KB | Depends on step size |
+| Spectrum map | ~50-200 KB | Depends on spectrum size |
+| Coordinate map (cmap) | 100 KB - 10 MB | Image dependent |
+| Config JSON | ~1-5 KB | Tool configs |
+
+**Optimizations:**
+- Use generators where possible
+- Release large data structures after use
+- Cache invalidation strategy
+
+### 5. Threading Overhead
+
+**Thread creation**: ~1-5ms per thread
+
+**Context switching**: Minimal (Python GIL)
+
+**UI updates**: Every 500ms via `root.after()`
+
+**Synchronization**: Atomic boolean flags (no locks needed)
+
+---
+
+## Design Decisions
+
+### Why pynput for Keyboard?
+
+**Chosen**: `pynput` (global monitoring)
+
+**Alternatives Considered**:
+- `keyboard` library: Simpler but less reliable
+- `pyautogui.press()`: Requires focus, can't detect ESC
+- `tkinter` hotkeys: Limited to window focus
+
+**Decision**: `pynput` provides:
+- Global hotkey detection (even when minimized)
+- Low overhead
+- Multi-key support (modifiers)
+
+### Why JSON for Configuration?
+
+**Chosen**: JSON
+
+**Alternatives Considered**:
+- YAML: More readable, requires extra dependency
+- INI: Limited structure, no nested dicts
+- Pickle: Binary, not human-readable, security risk
+
+**Decision**: JSON provides:
+- Native Python support (no imports needed)
+- Human-readable
+- Standard format
+- Type-safe (schema can validate)
+
+### Why Separate Threading?
+
+**Chosen**: Background threads for long operations
+
+**Rationale**:
+- GUI responsiveness: Main thread never blocks
+- User feedback: Progress updates every 500ms
+- User control: ESC/pause detected via separate pynput thread
+
+**Alternative Rejected**:
+- Synchronous: Blocks GUI, poor UX
+- Multiprocessing: Overkill, complexity
+
+### Why MD5 for Cache Keys?
+
+**Chosen**: MD5 hash
+
+**Characteristics**:
+- Deterministic: Same file = same hash
+- Fast: O(n) with good distribution
+- Collision resistant: Very low probability
+
+**Implementation**:
+```python
+image_hash = hashlib.md5(image_data).hexdigest()[:8]
+settings_hash = hashlib.md5(settings_str).hexdigest()[:8]
+```
+
+### Why Two Drawing Modes?
+
+**Slotted**: Simple, fast
+- Direct mapping
+- No optimization
+- Good for: Simple images, speed priority
+
+**Layered**: Advanced, slower
+- Color layering
+- Frequency optimization
+- Good for: Complex images, quality priority
+
+**User Choice**: Mode dropdown in UI
+
+---
+
+## Future Extensions
+
+### Potential Improvements
+
+1. **Multi-threaded Drawing**: Parallel stroke execution (complex)
+2. **GPU Acceleration**: Use CUDA for image processing
+3. **Neural Upscaling**: Integrate with ESRGAN/SwinIR
+4. **Plugin System**: Custom drawing strategies
+5. **Cloud Sync**: Sync cache/settings across devices
+6. **Undo/Redo**: Bot-level undo system
+7. **Real-time Preview**: Overlay on canvas while drawing
+
+### Scalability Considerations
+
+- **4K+ Images**: Memory optimization needed
+- **Video Support**: Frame-by-frame processing
+- **Batch Processing**: Queue system for multiple images
+- **Network Bot**: Remote control via web interface

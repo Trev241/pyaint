@@ -1,716 +1,549 @@
-# Pyaint Troubleshooting
+# Pyaint Troubleshooting Guide
 
-This document provides solutions to common issues and problems you may encounter while using Pyaint.
+Common issues and solutions.
 
 ## Table of Contents
 
-- [Common Issues](#common-issues)
-- [Setup Problems](#setup-problems)
+- [Installation Issues](#installation-issues)
+- [Configuration Issues](#configuration-issues)
+- [Tool Configuration](#tool-configuration)
 - [Drawing Issues](#drawing-issues)
 - [Performance Issues](#performance-issues)
-- [Configuration Issues](#configuration-issues)
-- [Palette Issues](#palette-issues)
-- [Color Button Issues](#color-button-issues)
-- [Cache Issues](#cache-issues)
-
-## Common Issues
-
-### Drawing Not Starting
-
-**Symptoms:**
-- Clicking "Start" button has no effect
-- "Drawing not starting" error message appears
-- Setup window shows "NOT INITIALIZED" for palette or canvas
-
-**Causes:**
-- Palette not initialized
-- Canvas not initialized
-- Tools not configured
-
-**Solutions:**
-1. Click **"Setup"** button to open Setup Window
-2. Click **"Initialize"** for each tool:
-   - **Palette**: Click upper-left and lower-right corners of palette
-   - **Canvas**: Click upper-left and lower-right corners of canvas
-   - **Custom Colors**: Click upper-left and lower-right corners of custom colors box
-3. Ensure status shows **"INITIALIZED"** (green) for all tools
-4. Click **"Done"** to save setup
-
-**Prevention:**
-- Always run Setup after first launch
-- Verify all three tools (Palette, Canvas, Custom Colors) are initialized before drawing
+- [UI Issues](#ui-issues)
+- [Error Messages](#error-messages)
+- [FAQ](#faq)
 
 ---
 
-### Colors Incorrect
+## Installation Issues
 
-**Symptoms:**
-- Drawn image has wrong colors
-- Colors don't match the source image
-- Some colors are completely different from expected
+### Module Not Found Errors
 
-**Causes:**
-- Palette not properly configured
-- Wrong palette selected
-- Custom colors enabled but not configured correctly
-- Precision setting too low (reduces color variety)
+**Error:** `ModuleNotFoundError: No module named 'pyautogui'`
 
-**Solutions:**
-1. **Verify Palette Configuration:**
-   - Click "Setup" → "Preview" to see palette
-   - Ensure correct palette is selected
-   - Check rows/columns match your actual palette
+**Solution:**
+```bash
+pip install -r requirements.txt
+```
 
-2. **Check Custom Colors:**
-   - If using custom colors, verify custom colors box is configured
-   - Check console for "[Spectrum] Scanned" message
-   - Test with simple test draw to verify color selection
+### Permission Denied (Windows)
 
-3. **Adjust Precision Setting:**
-   - Increase precision for more accurate colors
-   - Try values between 0.85-0.95
-   - Re-process image after changing precision
+Run Command Prompt as Administrator, then:
+```bash
+pip install -r requirements.txt
+```
 
-4. **Reinitialize Palette:**
-   - Click "Setup" → "Initialize" to rescan palette
-   - This may fix corrupted color mappings
+### pynput Installation Fails
 
----
-
-### Slow Performance
-
-**Symptoms:**
-- Drawing takes much longer than expected
-- Cursor movements are sluggish
-- Application becomes unresponsive during drawing
-
-**Causes:**
-- Delay setting too high
-- Pixel size too small (more detail = more strokes)
-- Custom colors enabled (slower than palette)
-- Other applications consuming CPU
-- System resources limited
-
-**Solutions:**
-1. **Adjust Delay Setting:**
-   - Decrease delay (try 0.05-0.1 seconds)
-   - Lower values = faster drawing
-   - Balance between speed and reliability
-
-2. **Increase Pixel Size:**
-   - Larger pixel size = fewer strokes
-   - Try values between 10-20 for faster drawing
-   - Accept lower detail for speed
-
-3. **Disable Custom Colors:**
-   - Custom colors are slower than palette
-   - Disable if not needed for faster drawing
-
-4. **Close Other Applications:**
-   - Close browser, music players, etc.
-   - Free up CPU resources
-
-5. **Use Pre-compute:**
-   - Pre-compute once for repeated drawings
-   - Avoids reprocessing same image
-
-6. **Check System Resources:**
-   - Ensure adequate RAM available
-   - Close unnecessary background processes
-   - Check CPU usage in Task Manager
-
----
-
-### Drawing Too Fast / Missed Strokes
-
-**Symptoms:**
-- Drawing completes much faster than expected
-- Some strokes are missing
-- Lines appear incomplete
-
-**Causes:**
-- Delay setting too low
-- Jump delay too low
-- System too fast for application to keep up
-- Mouse acceleration causing issues
-
-**Solutions:**
-1. **Increase Delay Setting:**
-   - Try values between 0.2-0.5 seconds
-   - Gives application more time to register strokes
-
-2. **Increase Jump Delay:**
-   - Set to 0.1-0.2 seconds
-   - Prevents rapid cursor movements
-
-3. **Disable Mouse Acceleration:**
-   - In Windows: Control Panel → Mouse → Pointer Options
-   - Uncheck "Enhance pointer precision"
-   - Reduce pointer speed
-
-4. **Use Test Draw First:**
-   - Run test draw to verify brush settings
-   - Adjust based on test results
-
----
-
-### Application Not Responding
-
-**Symptoms:**
-- Application freezes during drawing
-- Cursor gets stuck
-- Drawing stops mid-way
-
-**Causes:**
-- Application overwhelmed by rapid input
-- Delay too low (too fast)
-- System resources exhausted
-- Application crash or hang
-
-**Solutions:**
-1. **Press ESC to Stop:**
-   - Immediately stops all drawing
-   - Allows application to recover
-
-2. **Increase Delay:**
-   - Slower input gives application more time
-   - Try values between 0.3-1.0 seconds
-
-3. **Restart Application:**
-   - Close and reopen application
-   - Clears any stuck states
-
-4. **Check Application Status:**
-   - Look for error messages in target application
-   - Verify application is still running
-
----
-
-## Setup Problems
-
-### Palette Not Initializing
-
-**Symptoms:**
-- "Palette not initialized" error
-- Setup shows "NOT INITIALIZED" (red status)
-- Clicking "Initialize" has no effect
-
-**Causes:**
-- Incorrect box coordinates
-- Rows/columns not set
-- Box format incorrect
-
-**Solutions:**
-1. **Verify Box Coordinates:**
-   - Ensure format is `(left, top, width, height)`
-   - Check that upper-left is actually top-left
-   - Width and height are positive values
-
-2. **Set Rows and Columns:**
-   - Count actual rows and columns in your palette
-   - Enter correct values before clicking "Initialize"
-
-3. **Check Preview:**
-   - Click "Preview" to see captured region
-   - Verify it matches your actual palette
-
-4. **Re-capture Box:**
-   - Click "Initialize" again
-   - Select corners carefully
-   - Upper-left first, then lower-right
-
----
-
-### Canvas Not Initializing
-
-**Symptoms:**
-- "Canvas not initialized" error
-- Setup shows "NOT INITIALIZED" (red status)
-
-**Solutions:**
-1. **Verify Box Coordinates:**
-   - Ensure format is `(x1, y1, x2, y2)`
-   - Check that x2 > x1 and y2 > y1
-
-2. **Check Preview:**
-   - Click "Preview" to see captured region
-   - Verify it matches your actual canvas
-
-3. **Re-capture Box:**
-   - Click "Initialize" again
-   - Select corners carefully
-
----
-
-### Custom Colors Not Initializing
-
-**Symptoms:**
-- "Custom colors not initialized" error
-- Setup shows "NOT INITIALIZED" (red status)
-
-**Solutions:**
-1. **Verify Box Coordinates:**
-   - Ensure format is `(x1, y1, x2, y2)`
-   - Check that box covers actual custom colors area
-
-2. **Check Preview:**
-   - Click "Preview" to see captured region
-   - Verify it matches your actual custom colors box
-
-3. **Re-capture Box:**
-   - Click "Initialize" again
-   - Select corners carefully
-
----
-
-## Drawing Issues
-
-### Drawing Stops Midway
-
-**Symptoms:**
-- Drawing stops unexpectedly
-- No error message
-- Progress stops updating
-
-**Causes:**
-- ESC key pressed accidentally
-- Application lost focus
-- System interrupt
-- Canvas moved or resized
-
-**Solutions:**
-1. **Check Keyboard State:**
-   - Ensure no keys are stuck
-   - Check if modifier keys are active
-   - Try pressing ESC again to stop cleanly
-
-2. **Resume Drawing:**
-   - Click "Start" again
-   - Bot should resume from saved state
-   - Check console for "Resuming with saved color" message
-
-3. **Verify Application State:**
-   - Ensure target application is still visible
-   - Check if canvas is still in correct position
-
----
-
-### Colors Switching Too Slowly
-
-**Symptoms:**
-- Drawing takes very long time
-- Frequent color changes
-- Each color switch has long delay
-
-**Causes:**
-- Color button delay too high
-- Color button okay enabled with delay
-- Application slow to open color picker
-- Custom colors enabled (slower than palette)
-
-**Solutions:**
-1. **Reduce Color Button Delay:**
-   - Set to 0.05-0.2 seconds
-   - Faster color switching
-
-2. **Disable Color Button Okay:**
-   - If not needed, disable this feature
-   - Reduces extra delay
-
-3. **Use Palette Colors Only:**
-   - Disable custom colors if not needed
-   - Palette clicks are much faster
-
-4. **Optimize Palette:**
-   - Use valid positions to skip unused colors
-   - Fewer colors = faster switching
-
----
-
-## Performance Issues
-
-### High CPU Usage
-
-**Symptoms:**
-- System becomes sluggish
-- Other applications slow down
-- Fan runs constantly
-
-**Causes:**
-- Pre-computation running in background
-- Drawing with very low delay
-- Multiple instances running
-- Custom colors scanning
-
-**Solutions:**
-1. **Wait for Pre-compute:**
-   - Let pre-computation finish before starting drawing
-   - Check console for completion message
-
-2. **Increase Delay:**
-   - Higher delay = less frequent updates
-   - Reduces CPU load
-
-3. **Close Unnecessary Applications:**
-   - Free up system resources
-
-4. **Use Layered Mode:**
-   - More efficient color switching than slotted mode
-
----
-
-### Memory Issues
-
-**Symptoms:**
-- Application crashes
-- "Out of memory" errors
-- System becomes unresponsive
-
-**Causes:**
-- Very large images
-- Low pixel size (too many coordinates)
-- Cache accumulation
-- Memory leaks in long-running sessions
-
-**Solutions:**
-1. **Increase Pixel Size:**
-   - Larger values = fewer coordinates
-   - Try 15-30 for large images
-
-2. **Clear Cache:**
-   - Delete `cache/` directory manually
-   - Cache rebuilds automatically on next run
-
-3. **Use Pre-compute:**
-   - Pre-computes once, then uses cache
-   - Avoids repeated processing
-
-4. **Restart Application:**
-   - Close and reopen between large drawings
-   - Clears memory
+**Solution:**
+```bash
+pip install pypiwin32
+pip install pynput
+```
 
 ---
 
 ## Configuration Issues
 
+### Config File Missing or Corrupt
+
+**Solution:**
+1. Delete `config.json`
+2. Restart Pyaint
+3. Reconfigure tools via "Setup"
+
+### Invalid JSON Error
+
+**Cause:** Manually edited `config.json` with syntax errors
+
+**Solution:**
+1. Validate JSON at jsonlint.com
+2. Fix errors (commas, quotes, braces)
+3. Or delete file and reconfigure
+
 ### Settings Not Saving
 
-**Symptoms:**
-- Settings revert to defaults on restart
-- Changes lost after closing application
-- `config.json` not updated
-
 **Causes:**
-- File permission issues
-- Application closed before saving
-- Disk full
-- Corrupted config file
+- Read-only file system
+- Insufficient permissions
+- Application crash
 
-**Solutions:**
-1. **Check File Permissions:**
-   - Ensure write access to `config.json`
-   - Run as administrator if needed
-
-2. **Verify Config File:**
-   - Open `config.json` in text editor
-   - Check for valid JSON syntax
-   - Verify settings are present
-
-3. **Manual Backup:**
-   - Copy `config.json` before making changes
-   - Restore if corruption occurs
-
-4. **Check Console Output:**
-   - Look for "Saved config to" messages
-   - Verify no error messages appear
+**Solution:**
+1. Check file permissions on `config.json`
+2. Ensure directory is writable
 
 ---
 
-### Invalid Config File
+## Tool Configuration
 
-**Symptoms:**
-- Application fails to start
-- "Config file missing or invalid" error
-- Default settings used instead
+### "Palette not initialized" Error
+
+**Solution:**
+1. Click "Setup" → "Palette"
+2. Click "Initialize"
+3. Follow prompts to click corners
+4. Click "Done"
+
+### "Canvas not initialized" Error
+
+**Solution:**
+1. Click "Setup" → "Canvas"
+2. Click "Initialize"
+3. Follow prompts
+4. Click "Done"
+
+### Palette Colors Not Matching
 
 **Causes:**
-- Corrupted JSON syntax
-- Missing required keys
-- Invalid data types
-- File deleted or moved
+- Misaligned palette box
+- Incorrect rows/columns
+- Invalid positions not set
 
 **Solutions:**
-1. **Restore from Backup:**
-   - Copy backup `config.json` back
-   - Replace corrupted file
 
-2. **Manual Recreation:**
-   - Delete corrupted file
-   - Run Setup to recreate configuration
-   - Application will create new config
+**Check Alignment:**
+1. Click "Setup" → "Palette" → "Preview"
+2. Verify grid matches actual palette
+3. Reinitialize if misaligned
 
-3. **Check JSON Syntax:**
-   - Use JSON validator (online or text editor)
-   - Ensure all brackets and commas are correct
-   - Verify all strings are quoted
+**Adjust Valid Positions:**
+1. Click "Setup" → "Palette" → "Manual Color Selection"
+2. Toggle cells as valid/invalid
+3. Click "Done"
+
+**Use Manual Centers:**
+1. Click "Set Pick Centers Mode"
+2. Click exact center of each color
+3. Click "Done"
+
+**Try Auto-Estimate:**
+1. Click "Auto-Estimate"
+2. Click "Show Centers Overlay" to verify
+
+### Canvas Position Offset
+
+**Symptom:** Drawing appears shifted on canvas
+
+**Solution:**
+1. Reinitialize canvas with correct corners
+2. Ensure upper-left is actual drawing area start
+3. Verify preview shows correct area
+
+### Custom Colors Not Working
+
+**Symptom:** "Use Custom Colors" enabled but not using spectrum
+
+**Solutions:**
+1. Configure Custom Colors tool in Setup
+2. Verify spectrum box is correct
+3. Check if using calibrated colors
 
 ---
 
-## Palette Issues
+## Drawing Issues
 
-### Palette Colors Not Selecting Correctly
-
-**Symptoms:**
-- Wrong colors are selected
-- Clicks miss the intended color
-- Offset from intended color
+### Drawing Won't Start
 
 **Causes:**
-- Manual centers not set correctly
-- Valid positions not marked
-- Palette box moved
-- Different resolution than when configured
+- Missing tools (palette, canvas)
+- Invalid cache
+- Image not loaded
 
 **Solutions:**
-1. **Use Manual Center Picking:**
-   - Click "Edit Colors" → "Pick Centers"
-   - Click exact center for each color cell
-   - Most accurate method
+1. Ensure palette and canvas are initialized
+2. Clear cache: delete files in `cache/` directory
+3. Load image first via URL or file path
 
-2. **Use Precision Estimate:**
-   - Click "Edit Colors" → "Precision Estimate"
-   - Follow on-screen instructions
-   - System calculates optimal spacing
+### Colors Are Wrong
 
-3. **Verify Valid Positions:**
-   - Ensure only used colors are marked as valid (green)
-   - Toggle invalid colors (red) to exclude them
+**Causes:**
+- Palette misconfigured
+- Precision too low
+- Using wrong color source
 
-4. **Reinitialize Palette:**
-   - Click "Initialize" to rescan with new settings
-   - This may fix offset issues
+**Solutions:**
+1. Reconfigure palette with Preview check
+2. Increase Precision setting
+3. Disable "Use Custom Colors" to use palette only
+4. Run calibration for custom colors
+
+### Drawing Too Slow
+
+**Causes:**
+- Low delay setting
+- Small pixel size
+- Many color switches
+- High jump delay
+
+**Solutions:**
+1. **Increase Delay** for faster response
+2. **Increase Pixel Size** for less detail (major speedup)
+3. Use **Slotted** mode (faster but less accurate)
+4. Enable **Ignore White Pixels** for images with white backgrounds
+5. **Decrease Jump Delay** (if no accidental strokes)
+
+### Drawing Too Fast / Missed Strokes
+
+**Causes:**
+- Delay too low for your system
+- System not responding fast enough
+
+**Solutions:**
+1. **Increase Delay** setting
+2. Close other applications to free resources
+3. **Increase Jump Delay** to prevent accidental strokes
+
+### Strokes Connecting Unintentionally
+
+**Symptom:** Lines appearing between separate strokes
+
+**Solution:**
+1. **Increase Jump Delay** (prevents rapid cursor movement)
+2. Check if painting app has "connect lines" feature enabled
+3. **Decrease Delay** slightly (faster stroke may help)
+
+### Drawing Wrong Size
+
+**Symptom:** Drawing appears too small/large on canvas
+
+**Solution:**
+1. Adjust **Pixel Size** setting
+2. **Decrease** for smaller pixels = larger image
+3. **Increase** for larger pixels = smaller image
+
+### Drawing Not Centered
+
+**Symptom:** Drawing appears in wrong canvas location
+
+**Solution:**
+1. Reinitialize canvas with correct bounds
+2. Ensure upper-left corner is correct
+3. Preview canvas area in Setup to verify
+
+### Drawing Gaps/Incomplete
+
+**Symptom:** Some areas missing or broken
+
+**Causes:**
+- Too low precision
+- Too high pixel size
+- White pixels ignored but shouldn't be
+
+**Solutions:**
+1. **Increase Precision** setting
+2. **Decrease Pixel Size** for more detail
+3. Disable "Ignore White Pixels" if needed
+
+### ESC Key Not Stopping Drawing
+
+**Symptom:** Pressing ESC doesn't stop drawing
+
+**Causes:**
+- Keyboard listener not running
+- ESC key mapping issue
+
+**Solutions:**
+1. Restart application
+2. Check console for errors
+3. Try pause key instead, then quit
 
 ---
 
-### Manual Centers Not Working
+## Performance Issues
 
-**Symptoms:**
-- Centers not being used
-- Clicks go to wrong positions
-- "Manual centers" setting ignored
+### High Memory Usage
+
+**Symptom:** Application using lots of RAM
 
 **Causes:**
-- Manual centers not saved in config
-- `manual_centers` dictionary empty or corrupted
-- Pick centers mode not activated
-- Valid positions not set
+- Large images
+- Small pixel size
+- High precision
 
 **Solutions:**
-1. **Verify Setup Completed:**
-   - Click "Done" after picking centers
-   - Check for "Palette updated" success message
+1. Use smaller images
+2. **Increase Pixel Size**
+3. **Decrease Precision**
+4. Delete old cache files
 
-2. **Check Config File:**
-   - Open `config.json`
-   - Verify `manual_centers` object exists
-   - Check it contains center coordinates
+### Processing Takes Too Long
 
-3. **Re-enter Pick Centers Mode:**
-   - Click "Edit Colors" → "Pick Centers" again
-   - System will use saved centers
+**Symptom:** Image processing takes minutes
 
-4. **Check Console:**
-   - Look for "Picked center for color X" messages
-   - Verify centers are being applied
+**Causes:**
+- Large image
+- Small pixel size
+- High precision
+- Slotted mode (slower than layered)
+
+**Solutions:**
+1. **Increase Pixel Size** (major impact)
+2. **Decrease Precision**
+3. Use **Layered** mode
+4. Pre-compute and cache image
+5. Use smaller/resized images
+
+### Caching Not Working
+
+**Symptom:** Pre-compute doesn't speed up subsequent runs
+
+**Causes:**
+- Settings changed
+- Canvas changed
+- Cache invalid (older than 24 hours)
+
+**Solutions:**
+1. Keep settings consistent
+2. Use same canvas configuration
+3. Clear old cache manually: delete `cache/*.json`
+4. Check cache directory exists
 
 ---
 
-## Color Button Issues
+## UI Issues
 
-### Color Button Not Clicking
+### Window Minimizes Unexpectedly
 
-**Symptoms:**
-- Color picker doesn't open
-- Palette colors used instead
-- Wrong color selected
+**Symptom:** Main window minimizes at wrong times
+
+**Solution:**
+1. This is normal during drawing
+2. Click taskbar icon to restore when drawing complete
+3. Use pause key to pause and restore window
+
+### Progress Not Updating
+
+**Symptom:** Progress bar stuck or not moving
 
 **Causes:**
-- Color button not enabled
-- Coords not configured
-- Application doesn't require color button click
-- Modifier keys not set correctly
+- Thread crash
+- Very slow operation
 
 **Solutions:**
-1. **Enable Color Button:**
-   - Check "Enable Color Button" checkbox in main window
-   - Verify checkbox is checked
+1. Wait longer (may be slow)
+2. Check console for errors
+3. Use ESC to stop if stuck
 
-2. **Configure Coords:**
-   - Click "Setup" → Initialize Color Button
-   - Click the color picker button location
+### Preview Image Not Showing
 
-3. **Set Delay Appropriately:**
-   - Adjust delay for your application
-   - Test with simple test draw first
+**Symptom:** Image URL/file loaded but not displayed
 
-4. **Check Modifiers:**
-   - Set CTRL/ALT/SHIFT if required
-   - Verify application responds to modifier keys
+**Causes:**
+- Invalid URL
+- Unsupported image format
+- Network error
+
+**Solutions:**
+1. Try local file instead of URL
+2. Use PNG/JPG format
+3. Check internet connection
+4. Verify URL is accessible in browser
+
+### Setup Window Issues
+
+**Symptom:** Setup window won't close/minimize properly
+
+**Solution:**
+1. Click "Done" button (don't close with X)
+2. If stuck, close application and restart
+
+### Mouse Clicks Not Registered
+
+**Symptom:** Clicking during Setup has no effect
+
+**Causes:**
+- Window not properly minimized
+- Mouse listener not active
+
+**Solutions:**
+1. Ensure Setup window is minimized (check taskbar)
+2. Restart application
+3. Check console for mouse listener errors
 
 ---
 
-### Color Button Okay Not Clicking
+## Error Messages
 
-**Symptoms:**
-- Color selection not confirmed
-- Drawing continues with wrong color
-- Color picker stays open
+### NoPaletteError
 
-**Causes:**
-- Color button okay not enabled
-- Coords not configured
-- Delay too short (picker doesn't have time to open)
+**Message:** "Palette not initialized"
 
-**Solutions:**
-1. **Enable Color Button Okay:**
-   - Check "Enable" checkbox in Setup Window
-   - Verify checkbox is checked
+**Solution:** Configure palette in Setup
 
-2. **Configure Coords:**
-   - Click "Setup" → Initialize Color Button Okay
-   - Click the confirmation button location
+### NoCanvasError
 
-3. **Increase Delay:**
-   - Give picker time to fully open
-   - Try values between 0.2-0.5 seconds
+**Message:** "Canvas not initialized"
 
----
+**Solution:** Configure canvas in Setup
 
-## Cache Issues
+### NoCustomColorsError
 
-### Cache Not Loading
+**Message:** "Custom colors not initialized"
 
-**Symptoms:**
-- "No cached computation" message
-- Image reprocessed every time
-- Slow startup for repeated drawings
+**Solution:** 
+- Either disable "Use Custom Colors"
+- Or configure Custom Colors tool in Setup
 
-**Causes:**
-- Cache file corrupted
-- Settings changed since cache was created
-- Canvas dimensions changed
-- Cache expired (>24 hours old)
+### CorruptConfigError
 
-**Solutions:**
-1. **Delete Cache Directory:**
-   - Delete `cache/` folder
-   - Next run will rebuild cache
+**Message:** "Config file missing or invalid"
 
-2. **Force Re-process:**
-   - Delete specific cache file
-   - Application will reprocess image
+**Solution:** Delete `config.json` and reconfigure
 
-3. **Check Cache Validity:**
-   - Look for "Cache file invalid" message
-   - Verify settings match current configuration
+### Generic Errors
 
-4. **Verify Image Hash:**
-   - Check console for image hash messages
-   - Ensure same image is being processed
+**If you encounter other errors:**
+
+1. Check console output for full error traceback
+2. Ensure all dependencies installed: `pip install -r requirements.txt`
+3. Check Python version (requires 3.8+)
+4. Try restarting application
+5. Report issue on GitHub with full error message
 
 ---
 
-### Cache Not Saving
+## FAQ
 
-**Symptoms:**
-- Pre-compute completes but no cache file created
-- "Failed to save config" error
-- Cache not found on next run
+### Q: What is the optimal delay setting?
 
-**Causes:**
-- No write permissions
-- Disk full
-- Cache directory doesn't exist
-- File path issues
+**A:** Start with 0.15 seconds. If strokes are being missed, increase it. If drawing is too slow, decrease it gradually.
 
-**Solutions:**
-1. **Check Directory Permissions:**
-   - Ensure `cache/` directory is writable
-   - Check parent directory permissions
+### Q: How do I know what pixel size to use?
 
-2. **Verify Disk Space:**
-   - Ensure adequate free space
-   - Clear unnecessary files if needed
+**A:** 
+- Start with 12-15 for balanced detail/speed
+- Increase (20-30) for faster, less detailed drawings
+- Decrease (5-8) for more detail but slower
 
-3. **Check Console:**
-   - Look for "Cache saved to" message
-   - Verify no error messages
+### Q: Should I use Slotted or Layered mode?
 
-4. **Manual Cache Directory Creation:**
-   - Create `cache/` directory manually
-   - Ensure it's in project root
+**A:**
+- **Slotted**: Simple images, speed priority
+- **Layered**: Complex images, quality priority (default)
+
+### Q: What is the difference between Delay and Jump Delay?
+
+**A:**
+- **Delay**: Duration of each brush stroke (always applied)
+- **Jump Delay**: Extra time when cursor jumps > 5px between strokes
+
+### Q: Why does drawing take so long?
+
+**A:** Time depends on:
+- Image size and complexity
+- Pixel size (smaller = longer)
+- Number of colors
+- Delay setting
+
+**To speed up:**
+- Increase pixel size
+- Decrease delay
+- Use pre-computation for repeated drawings
+
+### Q: Can I pause and resume drawing?
+
+**A:** Yes! Press your configured pause key (default: 'p') to pause. Press again to resume.
+
+### Q: What does pre-compute do?
+
+**A:** Pre-processes image and saves results to cache. Subsequent runs load from cache instead of reprocessing.
+
+### Q: How do I use color calibration?
+
+**A:**
+1. Configure Custom Colors tool
+2. Configure Color Preview Spot tool
+3. Set Calibration Step Size
+4. Click "Run Calibration"
+5. Results saved to `color_calibration.json`
+
+### Q: Why are some colors wrong even after calibration?
+
+**A:**
+- Increase calibration accuracy by decreasing step size
+- Check that Color Preview Spot is correctly positioned
+- Verify Custom Colors spectrum box is accurate
+- Try higher tolerance in calibration lookup
+
+### Q: Can I draw only part of an image?
+
+**A:** Yes! Use the "Redraw Region" feature:
+1. Load image
+2. Click and drag on preview to select area
+3. Click "Redraw Region"
+
+### Q: What are modifier keys used for?
+
+**A:** For tools that require keyboard shortcuts:
+- CTRL, ALT, SHIFT modifiers
+- Useful for applications where tools need key combinations
+- Configure in Setup tool configuration
+
+### Q: How do I reset all settings?
+
+**A:**
+1. Close Pyaint
+2. Delete `config.json`
+3. Restart
+4. Reconfigure tools via Setup
+
+### Q: Can I use Pyaint with any drawing application?
+
+**A:** Most should work:
+- MS Paint
+- Clip Studio Paint
+- Photoshop
+- Krita
+- GIMP
+- And many others
+
+**Requirements:**
+- Visible palette and canvas
+- Mouse-based color selection
+- (Optional) Custom color spectrum
+
+### Q: Why does the application need to minimize during drawing?
+
+**A:** To prevent interference with the drawing process and ensure accurate mouse positioning.
+
+### Q: Can I run Pyaint while using other applications?
+
+**A:** Yes, but:
+- Window will minimize during drawing
+- Don't move the drawing application
+- Don't interfere with mouse movements
+
+### Q: How do I improve color accuracy?
+
+**A:**
+1. Use **Manual Centers** for palette
+2. Run **Color Calibration** for custom colors
+3. **Increase Precision** setting
+4. Ensure palette/preview boxes are accurate
 
 ---
 
-## Debugging Tips
+## Getting Help
 
-### Enable Console Logging
+### Documentation
 
-The console provides detailed information about what's happening:
+- [API Reference](./api.md) - Detailed API docs
+- [Architecture](./architecture.md) - System architecture
+- [Configuration](./configuration.md) - Settings guide
+- [Usage Guide](./usage-guide.md) - Step-by-step instructions
 
-**Key Messages to Watch:**
-- `"Switching to color (r, g, b) - N lines"` - Color changes
-- `"Drawing stroke X/Y for color (r, g, b)" - Drawing progress
-- `"Large jump detected (X pixels) - adding delay"` - Jump delays
-- `"[Spectrum] Scanned X unique colors"` - Custom colors setup
-- `"Using cached computation"` - Cache usage
-- `"Cache file invalid, processing live..."` - Cache miss
+### Reporting Issues
 
-### Test Drawing
+When reporting issues, include:
+1. Full error message and traceback
+2. Your Python version
+3. Your operating system
+4. Steps to reproduce the issue
+5. Your `config.json` (with sensitive coords removed)
 
-Always test before full drawing:
+### Known Limitations
 
-1. **Simple Test Draw:**
-   - Quick 5-line test
-   - Verifies brush size
-   - No color picking
-
-2. **Test Draw:**
-   - First 20 lines with color switching
-   - Verifies palette selection
-   - Tests actual drawing behavior
-
-3. **Check Results:**
-   - Compare test output to expected
-   - Adjust settings based on test
-
-### Progress Monitoring
-
-Watch the progress messages:
-
-```
-Processing image: 25.50%
-Drawing stroke 10/100 for color (255, 0, 0)
-Total progress: 150/500 strokes - 2:30 remaining
-```
-
-**What to Check:**
-- Progress percentage increasing
-- Time remaining estimate decreasing
-- No long pauses without pause message
-
-### Getting Help
-
-If issues persist:
-
-1. Check [README.md](../README.md) for basic usage
-2. Review [Configuration Guide](./configuration.md) for settings
-3. Review [API Reference](./api.md) for technical details
-4. Review [Architecture](./architecture.md) for system design
-
-## See Also
-
-- [README.md](../README.md)
-- [API Reference](./api.md)
-- [Configuration Guide](./configuration.md)
-- [Architecture](./architecture.md)
+- Single-threaded drawing (no parallel processing)
+- Limited by system responsiveness
+- Keyboard input fallback for colors can be slow
+- Requires visible UI elements for automation

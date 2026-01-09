@@ -9,12 +9,13 @@ A comprehensive guide to using Pyaint - an intelligent drawing automation tool t
 3. [Getting Started](#getting-started)
 4. [Initial Setup](#initial-setup)
 5. [Advanced Palette Configuration](#advanced-palette-configuration)
-6. [Drawing Settings](#drawing-settings)
-7. [Drawing Workflow](#drawing-workflow)
-8. [Region-Based Redrawing](#region-based-redrawing)
-9. [Controls](#controls)
-10. [Tips & Best Practices](#tips--best-practices)
-11. [Troubleshooting](#troubleshooting)
+6. [Color Calibration](#color-calibration)
+7. [Drawing Settings](#drawing-settings)
+8. [Drawing Workflow](#drawing-workflow)
+9. [Region-Based Redrawing](#region-based-redrawing)
+10. [Controls](#controls)
+11. [Tips & Best Practices](#tips--best-practices)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -29,8 +30,11 @@ Pyaint is a Python-based automation tool designed to recreate digital images thr
 - **High-Precision Drawing**: Near-perfect color accuracy with customizable settings
 - **Real-time Progress**: Live tracking with estimated completion time
 - **Intelligent Caching**: Pre-compute image processing for instant subsequent runs
+- **Advanced Palette Features**: Manual center picking, valid position selection, precision estimation
 - **Pause/Resume**: Configurable hotkey for interruption and continuation
 - **Region-Based Redrawing**: Select specific image areas to redraw
+- **Color Calibration System**: Scan and save custom color mappings for improved accuracy
+- **Modifier Key Support**: Configure CTRL, ALT, SHIFT modifiers for tool clicks
 
 ---
 
@@ -38,12 +42,12 @@ Pyaint is a Python-based automation tool designed to recreate digital images thr
 
 ### Requirements
 
-- Python 3.8 or higher (3.8 recommended)
+- Python 3.8 or higher
 - Windows operating system
 
 ### Setup Steps
 
-1. Clone or download the repository
+1. Clone or download repository
 
 2. **Optional: Create a conda environment** (recommended for isolation):
    ```bash
@@ -56,68 +60,59 @@ Pyaint is a Python-based automation tool designed to recreate digital images thr
    pip install -r requirements.txt
    ```
 
-4. Run the application:
+4. Run application:
    ```bash
    python main.py
    ```
-
-<!-- IMAGE: Screenshot of terminal showing successful installation and running the application -->
 
 ---
 
 ## Getting Started
 
-When you first launch Pyaint, you'll see the main window with three panels:
+When you first launch Pyaint, you'll see a main window with three panels:
 
 1. **Control Panel** (left): Drawing settings and action buttons
 2. **Preview Panel** (right): Image loading and preview
 3. **Tooltip Panel** (bottom): Status messages and progress updates
 
-<!-- IMAGE: Screenshot of the main Pyaint window with all panels visible -->
-
-The application will prompt you to begin by pressing **"Setup"** to configure your drawing environment.
+The application will prompt you to begin by clicking **"Setup"** to configure your drawing environment.
 
 ---
 
 ## Initial Setup
 
-The Setup process configures the tools Pyaint needs to interact with your drawing application. Click the **"Setup"** button to open the Setup window.
+The Setup process configures tools Pyaint needs to interact with your drawing application. Click **"Setup"** button to open Setup window.
 
 ### Tools to Configure
 
 You need to configure the following tools:
 
-1. **Palette** - Your color palette in the drawing application
+1. **Palette** - Your color palette in your drawing application
 2. **Canvas** - The drawing area where images will be painted
 3. **Custom Colors** - The custom color spectrum (optional)
-4. **New Layer** - Button to create new layers (optional)
-5. **Color Button** - Button to open color picker (optional)
-6. **Color Button Okay** - Button to confirm color selection (optional)
+4. **Color Preview Spot** - Location where selected color appears (optional, for calibration)
+5. **New Layer** - Button to create new layers (optional)
+6. **Color Button** - Button to open color picker (optional)
+7. **Color Button Okay** - Button to confirm color selection (optional)
 
-<!-- IMAGE: Screenshot of the Setup window showing all tools -->
-
-### Configuring the Palette
+### Configuring Palette
 
 The Palette is essential - it tells Pyaint where your colors are located.
 
-1. Set the **Rows** and **Columns** for your palette grid
+1. Set **Rows** and **Columns** for your palette grid
 2. Click **"Initialize"**
 3. You'll be prompted to click on the **UPPER LEFT** and **LOWER RIGHT** corners of your palette
-4. The system will capture and scan the colors
-
-<!-- IMAGE: Screenshot showing the palette selection process with corners being clicked -->
+4. The system will capture and scan colors
 
 After initialization, you can click **"Preview"** to see the captured palette.
 
-### Configuring the Canvas
+### Configuring Canvas
 
-The Canvas defines where Pyaint will draw the image.
+The Canvas defines where Pyaint will draw your image.
 
 1. Click **"Initialize"** next to Canvas
 2. Click on the **UPPER LEFT** and **LOWER RIGHT** corners of your drawing area
 3. The canvas will be captured and saved
-
-<!-- IMAGE: Screenshot showing canvas selection -->
 
 ### Configuring Custom Colors (Optional)
 
@@ -127,7 +122,12 @@ Custom Colors allow for unlimited color options through a spectrum.
 2. Click on the **UPPER LEFT** and **LOWER RIGHT** corners of your custom color spectrum
 3. The system will scan the spectrum and create a color-to-position map
 
-<!-- IMAGE: Screenshot showing custom colors spectrum selection -->
+### Configuring Color Preview Spot (Optional for Calibration)
+
+Required for color calibration to capture RGB values.
+
+1. Click **"Initialize"** next to Color Preview Spot
+2. Click on the **exact spot** where your selected color appears when using the custom colors spectrum
 
 ### Configuring New Layer (Optional)
 
@@ -137,18 +137,14 @@ If your drawing application supports layers, you can configure Pyaint to automat
 2. Click on the **New Layer button** location in your application
 3. Optionally, select modifier keys (CTRL, ALT, SHIFT) if needed
 
-<!-- IMAGE: Screenshot showing New Layer button configuration -->
-
 ### Configuring Color Button (Optional)
 
 Some applications require clicking a button to access the color picker.
 
 1. Click **"Initialize"** next to Color Button
 2. Click on the **Color Button** location
-3. Set the **Delay** (time to wait for the color picker to open)
+3. Set the **Delay** (time to wait after click)
 4. Optionally, select modifier keys (CTRL, ALT, SHIFT) if needed
-
-<!-- IMAGE: Screenshot showing Color Button configuration -->
 
 ### Configuring Color Button Okay (Optional)
 
@@ -156,68 +152,111 @@ If your application requires confirming color selection:
 
 1. Click **"Initialize"** next to Color Button Okay
 2. Click on the **Okay/Confirm button** location
-3. Enable the checkbox to use this feature
-
-<!-- IMAGE: Screenshot showing Color Button Okay configuration -->
+3. Optionally, select modifier keys (CTRL, ALT, SHIFT) if needed
 
 ---
 
 ## Advanced Palette Configuration
 
-After initializing the palette, you can access advanced features by clicking **"Edit Colors"**.
+After initializing the palette, you can access advanced features by clicking **"Manual Color Selection"**.
 
 ### Toggle Valid/Invalid Colors
 
 Some palette colors may be broken or unused. You can mark them as invalid:
 
-1. Click **"Edit Colors"** to open the color selection window
+1. Click **"Manual Color Selection"** to open the color selection window
 2. Click on grid cells to toggle between **Valid (green)** and **Invalid (red)**
 3. Click **"Done"** when finished
-
-<!-- IMAGE: Screenshot showing the color selection window with some cells marked as invalid -->
 
 ### Pick Exact Center Points
 
 For maximum precision, you can manually pick the exact center point for each color:
 
-1. In the color selection window, click **"Pick Centers"**
+1. In the color selection window, click **"Set Pick Centers Mode"**
 2. Click on a color cell in the grid
 3. Click on the exact center point of that color on your palette
 4. The system automatically moves to the next color
 5. Press **ESC** to stop at any time
 
-<!-- IMAGE: Screenshot showing Pick Centers mode with center points being picked -->
-
 ### Auto-Estimate Centers
 
 For quick setup on regular palettes:
 
-1. Click **"Auto-Estimate Centers"**
+1. Click **"Auto-Estimate"**
 2. The system calculates center points using grid-based estimation
 3. An overlay shows the estimated positions for 5 seconds
 4. Yellow cells indicate colors with estimated centers
-
-<!-- IMAGE: Screenshot showing auto-estimated centers overlay on the palette -->
 
 ### Precision Estimate
 
 For maximum accuracy on irregular or complex palettes:
 
-1. Click **"Precision Estimate"**
+1. Click **"Start Precision Estimate"**
 2. The system detects your palette layout and provides instructions
 3. **Single Column Mode** (vertical palettes): Click first row (1st), second row (1st), last row (1st)
 4. **1 Row Mode** (horizontal palettes): Click first box, second box, last box
 5. **Multi-Row Mode** (grid palettes): Click first row (1st, 2nd, last), second row (1st), last row (1st, last)
 6. The system calculates exact spacing and estimates all centers
 
-<!-- IMAGE: Screenshot showing precision estimate instructions -->
+### Show Centers Overlay
 
 After precision estimation:
 - Yellow cells show estimated centers
+- Click **"Show Centers Overlay"** to verify
 - Click **"Done"** to accept
 - Click **"Pick Centers"** to manually adjust
 
-<!-- IMAGE: Screenshot showing completed precision estimate with yellow cells -->
+### Select All / Deselect All
+
+For batch operations:
+- Click **"Select All"** to mark all grid cells as valid
+- Click **"Deselect All"** to mark all grid cells as invalid
+
+---
+
+## Color Calibration
+
+Color calibration improves accuracy when using custom colors by creating a precise mapping of RGB values to spectrum positions.
+
+### When to Use
+
+- You want the most accurate colors possible
+- Your custom colors spectrum is complex
+- You're drawing multiple times with the same colors
+
+### Requirements
+
+- Custom Colors tool initialized
+- Color Preview Spot tool initialized
+- Calibration Step Size configured
+
+### Running Calibration
+
+**Steps:**
+1. Configure Custom Colors tool (spectrum area)
+2. Configure Color Preview Spot tool (preview location)
+3. Set **Calibration Step Size** (1-10, default: 2):
+   - Lower = more accurate but slower
+   - Higher = faster but less accurate
+4. Click **"Run Calibration"** button
+5. Wait for calibration to complete
+6. Calibration data saved to `color_calibration.json`
+
+**What Happens During Calibration:**
+1. Bot presses mouse down at spectrum start
+2. Bot drags through the entire spectrum
+3. At each step, captures RGB value from Preview Spot
+4. Creates mapping: RGB → (x, y) coordinates
+5. Releases mouse up
+6. Can be cancelled with ESC key
+
+### Using Calibrated Colors
+
+During drawing:
+1. Bot first checks calibration map for an exact match
+2. If match within tolerance: Uses the calibrated position
+3. If no match: Falls back to nearest spectrum color
+4. Calibration data is automatically loaded if `color_calibration.json` exists
 
 ---
 
@@ -234,17 +273,13 @@ Located in the Control Panel, these settings control drawing behavior:
 - **Recommendation**: Increase if your machine is slow and doesn't respond well to fast input
 - **Tip**: Lower values = faster drawing but may cause missed strokes on slow systems
 
-<!-- IMAGE: Screenshot showing Delay setting -->
-
 #### Pixel Size
 
 - **Range**: 3 - 50 pixels
-- **Purpose**: Controls detail level
+- **Purpose**: Controls the detail level
 - **Lower values**: More detail, longer draw time
 - **Higher values**: Less detail, faster drawing
 - **Note**: This does NOT affect your brush size - you must adjust that manually in your drawing app
-
-<!-- IMAGE: Screenshot showing Pixel Size slider -->
 
 #### Precision
 
@@ -252,18 +287,22 @@ Located in the Control Panel, these settings control drawing behavior:
 - **Purpose**: Controls custom color accuracy for each pixel
 - **Lower values**: Reduced color variety, faster processing
 - **Higher values**: Better color matching, slower processing
-- **Recommendation**: 0.9 for good balance
-
-<!-- IMAGE: Screenshot showing Precision slider -->
+- **Recommendation**: 0.9 for a good balance
 
 #### Jump Delay
 
 - **Range**: 0.0 - 2.0 seconds
-- **Purpose**: Adds delay when cursor jumps more than 5 pixels between strokes
+- **Purpose**: Adds delay when the cursor jumps more than 5 pixels between strokes
 - **Recommendation**: 0.5 seconds
 - **Tip**: Helps prevent unintended strokes from rapid cursor movement
 
-<!-- IMAGE: Screenshot showing Jump Delay slider -->
+#### Calibration Step
+
+- **Range**: 1 - 10
+- **Purpose**: Pixel step size for color calibration scanning
+- **Recommendation**: 2 for a good balance of accuracy and speed
+- **Lower**: More accurate but slower calibration
+- **Higher**: Faster but less accurate calibration
 
 ### Drawing Mode
 
@@ -283,9 +322,9 @@ Choose between two processing modes:
 - Fewer color switches
 - Optimized for complex images
 
-<!-- IMAGE: Screenshot showing Draw Mode dropdown -->
+### Drawing Options
 
-### Miscellaneous Settings
+Toggle these checkboxes as needed:
 
 #### Ignore White Pixels
 
@@ -293,15 +332,12 @@ Choose between two processing modes:
 - Useful when the canvas is white
 - Reduces drawing time significantly for images with large white areas
 
-<!-- IMAGE: Screenshot showing Ignore White Pixels checkbox -->
-
 #### Use Custom Colors
 
 - Enables advanced color mixing using the custom color spectrum
+- Requires Custom Colors tool to be configured
 - Considerably lengthens draw duration
 - Provides unlimited color options
-
-<!-- IMAGE: Screenshot showing Use Custom Colors checkbox -->
 
 #### Enable New Layer
 
@@ -309,23 +345,24 @@ Choose between two processing modes:
 - Requires New Layer to be configured in Setup
 - Supports modifier keys (CTRL, ALT, SHIFT)
 
-<!-- IMAGE: Screenshot showing Enable New Layer checkbox -->
-
 #### Enable Color Button
 
 - Automatically clicks the color button before selecting colors
 - Requires Color Button to be configured in Setup
-- Set delay to allow time for color picker to open
+- Set delay to allow time for the color picker to open
+- Supports modifier keys (CTRL, ALT, SHIFT)
 
-<!-- IMAGE: Screenshot showing Enable Color Button checkbox -->
+#### Enable Color Button Okay
+
+- Automatically clicks the confirmation button after color selection
+- Requires Color Button Okay to be configured in Setup
+- Supports modifier keys (CTRL, ALT, SHIFT)
 
 ### Pause Key
 
 - Configure any keyboard key to pause/resume drawing
 - Default: 'p'
 - Click in the Pause Key field and press your desired key
-
-<!-- IMAGE: Screenshot showing Pause Key field -->
 
 ---
 
@@ -337,19 +374,15 @@ You can load images in two ways:
 
 #### From URL
 
-1. Enter the image URL in the text field
+1. Enter an image URL in the text field
 2. Click **"Search"**
 3. The image will be downloaded and displayed in the preview
-
-<!-- IMAGE: Screenshot showing URL loading -->
 
 #### From File
 
 1. Click **"Open File"**
 2. Select an image from your computer
 3. The image will be displayed in the preview
-
-<!-- IMAGE: Screenshot showing file browser dialog -->
 
 ### Step 2: Pre-Compute (Optional)
 
@@ -360,11 +393,9 @@ For images you'll draw multiple times, pre-computing saves time:
 3. Estimated drawing time is displayed
 4. Future draws will use the cached data
 
-<!-- IMAGE: Screenshot showing pre-compute progress and completion message -->
+### Step 3: Test Drawing
 
-### Step 3: Test Draw
-
-Before the full drawing, test to calibrate your brush size:
+Before a full drawing, test to calibrate your brush size:
 
 #### Simple Test Draw
 
@@ -373,34 +404,27 @@ Before the full drawing, test to calibrate your brush size:
 3. No color picking occurs - use your currently selected color
 4. Adjust brush size in your drawing app based on the result
 
-<!-- IMAGE: Screenshot showing simple test draw result -->
-
 #### Test Draw
 
 1. Click **"Test Draw"**
-2. First 20 lines of the image will be drawn
+2. The first 20 lines of the image will be drawn
 3. Includes color switching
 4. Adjust brush size based on the test result
-
-<!-- IMAGE: Screenshot showing test draw result -->
 
 ### Step 4: Full Drawing
 
 1. Click **"Start"**
 2. A warning shows the controls (ESC to stop, pause key to pause/resume)
-3. The window minimizes
-4. Drawing begins with real-time progress tracking
-
-<!-- IMAGE: Screenshot showing drawing in progress with progress indicator -->
+3. Click "OK" to continue
+4. The window minimizes
+5. Drawing begins with real-time progress tracking
 
 ### Drawing Completion
 
 When drawing completes:
 - The window restores
-- Actual time vs estimated time is displayed
-- Success message is shown
-
-<!-- IMAGE: Screenshot showing completed drawing with time comparison -->
+- Actual time vs. estimated time is displayed
+- A success message is shown
 
 ---
 
@@ -411,20 +435,16 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 ### Select a Region
 
 1. Load your image
-2. Click **"Pick Region"** in the Redraw Region section
+2. Click **"Redraw Pick"** in the Redraw Region section
 3. Click on the **UPPER LEFT** corner of the area you want to redraw
 4. Click on the **LOWER RIGHT** corner of the area
 5. The selected region is displayed
 
-<!-- IMAGE: Screenshot showing region selection on the preview -->
-
-### Draw the Region
+### Draw Region
 
 1. After selecting a region, click **"Draw Region"**
 2. Only the selected area will be drawn
 3. Useful for fixing mistakes or adding details
-
-<!-- IMAGE: Screenshot showing region redraw in progress -->
 
 ---
 
@@ -436,8 +456,6 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 - **When to use**: To immediately stop any drawing operation
 - **Behavior**: Stops the bot and clears the termination flag
 
-<!-- IMAGE: Diagram showing ESC key usage -->
-
 ### Pause Key
 
 - **Function**: Pause and resume drawing
@@ -445,10 +463,8 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 - **When to use**: To temporarily pause drawing and resume later
 - **Behavior**: 
   - First press: Pauses drawing (saves current state)
-  - Second press: Resumes from exact interruption point
+  - Second press: Resumes from the exact interruption point
 - **Mid-Stroke Recovery**: Can resume even in the middle of a stroke
-
-<!-- IMAGE: Diagram showing pause/resume workflow -->
 
 ---
 
@@ -457,7 +473,7 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 ### Performance Optimization
 
 1. **Use Pre-Compute** for images you'll draw multiple times
-2. **Adjust Pixel Size** based on desired detail level
+2. **Adjust Pixel Size** based on the desired detail level
 3. **Enable "Ignore White Pixels"** for images with large white areas
 4. **Fine-tune Jump Delay** for optimal cursor movement
 5. **Use Layered mode** for better visual results
@@ -470,20 +486,29 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 3. **Use Pick Centers** for precise color selection on complex palettes
 4. **Toggle invalid positions** to exclude broken or unused colors
 5. **Preview captured regions** to verify correct configuration
+6. **Use Select All / Deselect All** for batch operations
+
+### Color Calibration Tips
+
+1. **Set appropriate step size**: Lower = more accurate, Higher = faster
+2. **Verify Preview Spot**: Ensure it shows the exact selected color
+3. **Check Spectrum Box**: Must cover the entire color spectrum
+4. **Test calibration** with a test draw before starting a full drawing
+5. **Reuse calibration**: Data saved to file can be used across sessions
 
 ### Color Button Tips
 
 1. **Set appropriate delay** for your application's color picker opening time
-2. **Use modifier keys** if your application requires them
-3. **Enable "Color Button Okay"** if your application requires confirmation
-4. **Test color button configuration** with a simple test draw before starting
+2. **Use modifier keys** if your application requires them to access the color picker
+3. **Enable "Color Button Okay"** if your application requires clicking a confirmation button
+4. **Test color button configuration** with a simple test draw before starting a full drawing
 
 ### Drawing Tips
 
 1. **Always test draw first** to calibrate brush size
-2. **Start with higher pixel size** for faster results, reduce if needed
+2. **Start with a higher pixel size** for faster results, reduce if needed
 3. **Use pause/resume** to take breaks during long drawings
-4. **Use region redraw** to fix mistakes without full redraw
+4. **Use region redraw** to fix mistakes without a full redraw
 5. **Monitor progress** to ensure drawing is proceeding correctly
 
 ---
@@ -499,9 +524,7 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 **Solutions**:
 - Ensure palette and canvas are properly initialized (status should be green)
 - Check that an image is loaded in the preview
-- Verify the image file is valid
-
-<!-- IMAGE: Screenshot showing properly initialized tools -->
+- Verify that the image file is valid
 
 #### Colors incorrect
 
@@ -512,8 +535,7 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 - Verify palette colors are correctly scanned
 - Increase Precision setting for better color matching
 - Ensure valid positions include all needed colors
-
-<!-- IMAGE: Screenshot comparing incorrect vs correct colors -->
+- Run color calibration for improved accuracy
 
 #### Slow performance
 
@@ -524,8 +546,7 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 - Increase Delay setting if strokes are being missed
 - Enable "Ignore White Pixels" for images with large white areas
 - Check if your system is under heavy load
-
-<!-- IMAGE: Screenshot showing performance settings -->
+- Use Slotted mode for faster processing
 
 #### Application not responding
 
@@ -533,11 +554,9 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 
 **Solutions**:
 - Use ESC to stop and restart
-- Increase Delay setting to give app more time
+- Increase Delay setting to give the app more time
 - Check if Jump Delay is too low
 - Verify your drawing app is compatible
-
-<!-- IMAGE: Screenshot showing app not responding -->
 
 #### Palette colors not selecting
 
@@ -548,8 +567,7 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 - Check that centers are correctly picked
 - Use Precision Estimate for better accuracy
 - Preview the palette to verify it was captured correctly
-
-<!-- IMAGE: Screenshot showing palette preview -->
+- Try manual center picking
 
 #### Custom colors not working
 
@@ -560,8 +578,6 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 - Verify "Use Custom Colors" checkbox is enabled
 - Check that spectrum scanning has completed
 - Preview the custom colors region
-
-<!-- IMAGE: Screenshot showing custom colors preview -->
 
 ### Error Messages
 
@@ -577,11 +593,17 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 
 **Solution**: Run Setup and initialize the Canvas
 
+#### "Custom colors not initialized"
+
+**Cause**: Custom Colors tool hasn't been configured but "Use Custom Colors" is enabled
+
+**Solution**: Either disable "Use Custom Colors" or configure the Custom Colors tool in Setup
+
 #### "No valid colors selected"
 
 **Cause**: All palette colors are marked as invalid
 
-**Solution**: In Edit Colors, mark at least one color as valid (green)
+**Solution**: In Manual Color Selection, mark at least one color as valid (green)
 
 #### "Config file missing or invalid"
 
@@ -597,10 +619,11 @@ Pyaint provides a powerful way to automate drawing in your favorite painting app
 
 1. Set up your drawing environment
 2. Configure advanced palette features for maximum accuracy
-3. Load and process images
-4. Draw with customizable settings
-5. Use pause/resume for long drawings
-6. Fix mistakes with region-based redrawing
+3. Set up color calibration for precise color matching
+4. Load and process images
+5. Draw with customizable settings
+6. Use pause/resume for long drawings
+7. Fix mistakes with region-based redrawing
 
 For more detailed information, refer to the API documentation and other guides in the Docs folder.
 
@@ -612,5 +635,4 @@ For more detailed information, refer to the API documentation and other guides i
 - [Architecture Documentation](./architecture.md) - System architecture details
 - [Configuration Guide](./configuration.md) - Configuration options
 - [Troubleshooting Guide](./troubleshooting.md) - Detailed troubleshooting
-
-<!-- IMAGE: Screenshot of the Docs folder contents -->
+- [Usage Guide](./usage-guide.md) - Step-by-step usage instructions

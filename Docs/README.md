@@ -11,7 +11,7 @@ Welcome to the Pyaint documentation. Pyaint is an intelligent drawing automation
   - [UI Module](#ui-module)
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
-- [Usage Guide](#usage-guide)
+- [Usage Guide](./usage-guide.md)
 - [Tutorial](./tutorial.md)
 - [Development Guide](#development-guide)
 
@@ -29,6 +29,8 @@ Pyaint is a Python-based automation tool designed to recreate digital images thr
 - **Advanced Palette Features**: Manual center picking, valid position selection, precision estimation
 - **Pause/Resume**: Configurable hotkey for interruption and continuation
 - **Region-Based Redrawing**: Select specific image areas to redraw
+- **Color Calibration System**: Scan and save custom color mappings for improved accuracy
+- **Modifier Key Support**: Configure CTRL, ALT, SHIFT modifiers for tool clicks
 
 ## Architecture
 
@@ -51,10 +53,11 @@ pyaint/
 ### Data Flow
 
 1. **Initialization**: User configures tools (palette, canvas, custom colors) via Setup Window
-2. **Image Loading**: User provides image URL or local file path
-3. **Processing**: Bot processes image into coordinate map (color → lines)
-4. **Drawing**: Bot executes mouse movements to recreate image
-5. **Caching**: Results can be cached for faster subsequent runs
+2. **Color Calibration** (optional): User runs calibration to scan custom color spectrum
+3. **Image Loading**: User provides image URL or local file path
+4. **Processing**: Bot processes image into coordinate map (color → lines)
+5. **Drawing**: Bot executes mouse movements to recreate image
+6. **Caching**: Results can be cached for faster subsequent runs
 
 ## Core Modules
 
@@ -100,10 +103,15 @@ Main drawing engine handling image processing and mouse automation.
 - [`init_canvas()`](bot.py:186) - Define canvas drawing area
 - [`init_custom_colors()`](bot.py:193) - Configure custom color spectrum
 
+##### Color Calibration
+- [`calibrate_custom_colors()`](bot.py:213) - Scan custom colors grid and create calibration map
+- [`save_color_calibration()`](bot.py:303) - Save calibration data to JSON file
+- [`load_color_calibration()`](bot.py:324) - Load calibration data from JSON file
+- [`get_calibrated_color_position()`](bot.py:347) - Find exact calibrated color with tolerance
+
 ##### Image Processing
 - [`process()`](bot.py:266) - Convert image to coordinate map
 - [`process_region()`](bot.py:1083) - Process specific image region
-- [`_scan_spectrum()`](bot.py:202) - Scan custom color spectrum for color mapping
 
 ##### Drawing
 - [`draw()`](bot.py:397) - Execute full drawing with pause/resume support
@@ -137,6 +145,7 @@ Main GUI interface providing real-time controls and progress monitoring.
 - Pixel Size (3-50) - Detail level
 - Precision (0.0-1.0) - Color accuracy
 - Jump Delay (0.0-2.0s) - Cursor movement optimization
+- Calibration Step Size (1-10) - Pixel step for color calibration scanning
 
 **Drawing Modes:**
 - Slotted - Fast processing, simple mapping
@@ -145,12 +154,13 @@ Main GUI interface providing real-time controls and progress monitoring.
 **Options:**
 - Ignore White Pixels - Skip white areas
 - Use Custom Colors - Enable advanced color mixing
-- New Layer - Automatic layer creation
-- Color Button - Click color picker button
-- Color Button Okay - Confirm color selection
+- Enable New Layer - Automatic layer creation
+- Enable Color Button - Click color picker button
+- Enable Color Button Okay - Click color confirmation button
 
 **Actions:**
 - Setup - Configure palette, canvas, custom colors
+- Run Calibration - Scan and save custom color calibration
 - Pre-compute - Cache image processing
 - Test Draw - Draw sample lines for calibration
 - Simple Test Draw - Quick 5-line test
@@ -169,6 +179,8 @@ Configuration wizard for initializing tools with advanced features.
 - Auto-estimate centers for quick setup
 - Precision estimate using reference points
 - Modifier key configuration (CTRL, ALT, SHIFT)
+- Select All / Deselect All buttons for batch color selection
+- Show Custom Centers overlay for manual center verification
 
 **Palette Configuration Modes:**
 1. **Toggle Mode** - Click cells to mark valid/invalid
@@ -248,6 +260,20 @@ Configuration is stored in [`config.json`](../config.json) with the following st
       "shift": false
     }
   },
+  "color_preview_spot": {
+    "name": "Color Preview Spot",
+    "status": true,
+    "coords": [x, y],
+    "enabled": false,
+    "modifiers": {
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    }
+  },
+  "calibration_settings": {
+    "step_size": 2
+  },
   "pause_key": "p",
   "drawing_options": {
     "ignore_white_pixels": false,
@@ -277,6 +303,10 @@ Create a new Bot instance with default settings.
 - `options` (int) - Drawing flags (IGNORE_WHITE | USE_CUSTOM_COLORS)
 - `drawing` (bool) - Currently drawing flag
 - `draw_state` (dict) - State for pause/resume recovery
+- `color_calibration_map` (dict) - Color calibration mappings
+- `new_layer` (dict) - New layer configuration
+- `color_button` (dict) - Color button configuration
+- `color_button_okay` (dict) - Color button okay configuration
 
 #### `init_palette(pbox, prows, pcols, valid_positions=None, manual_centers=None)`
 
@@ -309,7 +339,51 @@ Configure custom color spectrum.
 **Parameters:**
 - `ccbox` (tuple) - Custom colors box (x1, y1, x2, y2)
 
-**Raises:** [`NoCustomColorsError`](exceptions.py:13)
+**Side Effect:** Scans spectrum and creates `_spectrum_map` attribute
+
+#### `calibrate_custom_colors(grid_box, preview_point, step=2)`
+
+Scan custom colors grid and record RGB values shown in preview point.
+
+**Parameters:**
+- `grid_box` (tuple/list) - Color spectrum area [x1, y1, x2, y2] or dict
+- `preview_point` (tuple/list) - Preview point coordinates [x, y] or dict
+- `step` (int) - Pixel step size for scanning (default: 2)
+
+**Returns:** `dict` - Mapping of RGB tuples to (x, y) coordinates
+
+**Notes:**
+- Requires Custom Colors and Color Preview Spot tools to be configured
+- Scans entire spectrum by dragging slider through it
+- Can be cancelled with ESC key
+
+#### `save_color_calibration(filepath)`
+
+Save color calibration map to JSON file.
+
+**Parameters:**
+- `filepath` (str) - Path to JSON file
+
+**Returns:** `bool` - True on success, False on failure
+
+#### `load_color_calibration(filepath)`
+
+Load color calibration data from JSON file.
+
+**Parameters:**
+- `filepath` (str) - Path to JSON file
+
+**Returns:** `bool` - True on success, False on failure
+
+#### `get_calibrated_color_position(target_rgb, tolerance=20)`
+
+Find exact calibrated color position with tolerance before falling back to nearest.
+
+**Parameters:**
+- `target_rgb` (tuple) - Target RGB (r, g, b)
+- `tolerance` (int) - Maximum color difference for match (default: 20)
+
+**Returns:** `tuple` or `None` - (x, y) coordinates or None
 
 #### `process(file, flags=0, mode=LAYERED)`
 
@@ -322,45 +396,100 @@ Convert image to coordinate map.
 
 **Returns:** dict mapping colors to list of line coordinates
 
-#### `draw(cmap)`
+**Processing Steps:**
+1. Load image with PIL
+2. Resize to fit canvas (maintaining aspect ratio)
+3. Scan pixels at step size intervals
+4. Map each pixel to nearest palette color (or calibrated color)
+5. Generate line segments (horizontal runs of same color)
+6. In LAYERED mode: sort colors by frequency and merge lines
 
-Execute drawing from coordinate map.
+#### `process_region(file, region, flags=0, mode=LAYERED, canvas_target=None)`
+
+Process specific region of an image.
 
 **Parameters:**
-- `cmap` (dict) - Color map from [`process()`](bot.py:266)
+- `file` (str) - Path to image file
+- `region` (tuple) - Image region (x1, y1, x2, y2)
+- `flags` (int) - Drawing options
+- `mode` (str) - Processing mode
+- `canvas_target` (tuple, optional) - Target canvas area (x, y, w, h)
+
+**Returns:** dict - Color map for region
+
+#### `draw(cmap)`
+
+Execute full drawing from coordinate map with pause/resume support.
+
+**Parameters:**
+- `cmap` (dict) - Color map from [`process()`](#processself-file-flags0-modelayered)
 
 **Returns:** 'success', 'terminated', or 'paused'
 
 **Features:**
-- Pause/resume support
-- Progress tracking
-- Time estimation
-- Jump delay optimization
-- Stroke replay on resume
+- Progress tracking with time estimation
+- Jump delay for cursor movements > 5px
+- Stroke segmentation for smooth drawing
+- Pause/resume with state recovery
+- New layer support (if enabled)
+- Color button support (if enabled)
+- Color button okay support (if enabled)
+- Calibrated color selection (if available)
+
+**State Recovery:**
+```python
+self.draw_state = {
+    'color_idx': 0,        # Resume from this color
+    'line_idx': 0,         # Resume from this line
+    'segment_idx': 0,       # Resume from this segment
+    'current_color': None,   # Saved color for resume
+    'cmap': None             # Saved coordinate map
+}
+```
 
 #### `test_draw(cmap, max_lines=20)`
 
-Draw first N lines for calibration.
+Draw first N lines for brush calibration.
 
 **Parameters:**
 - `cmap` (dict) - Color map
-- `max_lines` (int) - Maximum lines to draw
+- `max_lines` (int) - Maximum lines to draw (default: 20)
 
 #### `simple_test_draw()`
 
 Draw 5 horizontal lines for quick brush calibration.
 
+**Features:**
+- No color picking
+- Lines drawn starting from canvas upper-left area, spaced by pixel size
+- Each line is 1/4 of canvas width
+
 #### `precompute(image_path, flags=0, mode=LAYERED)`
 
-Pre-process and cache image.
+Pre-process and cache image for faster subsequent runs.
 
-**Returns:** Cache file path
+**Parameters:**
+- `image_path` (str) - Path to image file
+- `flags` (int) - Drawing options
+- `mode` (str) - Processing mode
+
+**Returns:** str - Cache file path
+
+**Cache File:** `cache/{img_hash}_{settings_hash}.json`
 
 #### `estimate_drawing_time(cmap)`
 
-Calculate estimated drawing time.
+Calculate estimated drawing time based on coordinate data.
 
-**Returns:** Human-readable time string
+**Parameters:**
+- `cmap` (dict) - Color map
+
+**Returns:** str - Human-readable time string
+
+**Calculation:**
+- Sum of stroke delays
+- Jump delays for movements > 5px
+- Color switching overhead (~0.5s per color)
 
 ### Window API
 
@@ -380,6 +509,7 @@ Create main application window.
 - `start_test_draw_thread()` - Start test draw
 - `start_simple_test_draw_thread()` - Start simple test
 - `start_draw_thread()` - Start full drawing
+- `start_calibration_thread()` - Start color calibration process
 - `load_config()` - Load saved configuration
 - `_on_search_img()` - Load image from URL or file path
 
@@ -398,6 +528,19 @@ Create setup configuration window.
 - `w`, `h` (int) - Window dimensions
 - `x`, `y` (int) - Window position
 
+**Color Selection Methods:**
+- `_start_manual_color_selection(name, tool)` - Open manual color selection window
+- `_open_color_selection_window()` - Create color selection grid interface
+- `_toggle_grid_cell(index)` - Toggle a grid cell between valid and invalid
+- `_set_pick_centers_mode()` - Set mode to pick exact center points
+- `_pick_center(index)` - Pick a center point for a specific color cell
+- `_auto_estimate_centers()` - Automatically calculate center points
+- `_start_precision_estimate()` - Start precision estimate
+- `_show_centers_overlay()` - Display overlay circles showing estimated center positions
+- `_show_custom_centers_overlay()` - Display overlay circles showing manually picked center positions
+- `_select_all_colors()` - Mark all grid cells as valid
+- `_deselect_all_colors()` - Mark all grid cells as invalid
+
 ## Usage Guide
 
 ### Initial Setup
@@ -408,28 +551,32 @@ Create setup configuration window.
    - **Palette**: Click upper-left and lower-right corners
    - **Canvas**: Click upper-left and lower-right corners
    - **Custom Colors**: Click upper-left and lower-right corners
+   - **Color Preview Spot**: (optional) Click on the preview location
+   - **New Layer**: (optional) Click on new layer button
+   - **Color Button**: (optional) Click on color picker button
+   - **Color Button Okay**: (optional) Click on color confirmation button
 
-### Palette Configuration
+### Color Calibration (Optional)
 
-After capturing the palette box:
+For improved color accuracy with custom colors:
 
-1. Set **Rows** and **Columns** for your palette grid
-2. Click **"Initialize"** to scan colors
-3. Optional advanced features:
-   - **Edit Colors**: Open manual color selection window
-   - Toggle valid/invalid cells
-   - Pick exact center points for precision
-   - Auto-estimate centers for quick setup
-   - Use Precision Estimate for maximum accuracy
+1. Configure **Custom Colors** tool (spectrum area)
+2. Configure **Color Preview Spot** tool (preview location)
+3. Set **Calibration Step Size** (1-10, default: 2)
+4. Click **"Run Calibration"** button
+5. System scans the entire spectrum and maps RGB values to positions
+6. Calibration saved to `color_calibration.json`
+7. During drawing, bot uses exact calibrated colors instead of approximations
 
 ### Drawing Workflow
 
 1. Load image via URL or file browser
-2. (Optional) Click **"Pre-compute"** to cache processing
-3. Click **"Test Draw"** or **"Simple Test Draw"** to calibrate brush
-4. Adjust brush settings in your painting application
-5. Click **"Start"** to begin drawing
-6. Use **ESC** to stop or pause key to pause/resume
+2. (Optional) Run calibration for better color accuracy
+3. (Optional) Click **"Pre-compute"** to cache processing
+4. Click **"Test Draw"** or **"Simple Test Draw"** to calibrate brush
+5. Adjust brush settings in your painting application
+6. Click **"Start"** to begin drawing
+7. Use **ESC** to stop or pause key to pause/resume
 
 ### Region-Based Redrawing
 
@@ -494,6 +641,30 @@ Advanced color layering with frequency sorting:
 - Fewer color switches
 - Optimized for complex images
 
+### Color Calibration System
+
+When custom colors are enabled and calibration is available:
+
+1. System loads calibration data from `color_calibration.json`
+2. For each image color, looks for exact match within tolerance
+3. If exact match found, clicks the exact calibrated position
+4. If no exact match, falls back to nearest color with tolerance
+5. If calibration not available, uses spectrum scanning or keyboard input
+
+**Advantages:**
+- Precise color selection (prevents wrong color selection)
+- Tolerance-based matching (handles minor variations)
+- Faster than keyboard input fallback
+- Saved calibration can be reused across sessions
+
+**Calibration Process:**
+1. User specifies Custom Colors spectrum box
+2. User specifies Color Preview Spot (where selected color appears)
+3. Set calibration step size (lower = more accurate but slower)
+4. Run calibration - system drags slider through entire spectrum
+5. For each position, captures RGB from preview spot
+6. Saves mapping of RGB → (x, y) coordinates to JSON
+
 ### Custom Color Spectrum
 
 When custom colors are enabled:
@@ -501,8 +672,9 @@ When custom colors are enabled:
 1. System scans the custom color spectrum box
 2. Creates a color-to-position map by sampling pixels
 3. For each image color, finds nearest spectrum color
-4. Clicks the nearest position on spectrum
-5. Falls back to keyboard input if spectrum unavailable
+4. If calibration exists, uses calibrated exact match
+5. Clicks the nearest position on spectrum
+6. Falls back to keyboard input if spectrum unavailable
 
 ### Caching Strategy
 
@@ -544,6 +716,7 @@ Long-running operations use separate threads:
 - Test draw
 - Simple test draw
 - Full drawing
+- Color calibration
 
 Thread management via [`_manage_*_thread()`](ui/window.py:1041) methods.
 
@@ -565,6 +738,7 @@ Run tests before full drawing:
 ### Performance Optimization
 
 - Use pre-computation for repeated drawings
+- Run color calibration for better accuracy
 - Increase pixel size for faster drawing (less detail)
 - Adjust delay based on system responsiveness
 - Use jump delay to prevent unintended strokes

@@ -1,12 +1,13 @@
 # Pyaint Usage Guide
 
-This document provides step-by-step instructions for using Pyaint effectively.
+Step-by-step instructions for using Pyaint effectively.
 
 ## Table of Contents
 
 - [Getting Started](#getting-started)
 - [Initial Setup](#initial-setup)
 - [Basic Drawing](#basic-drawing)
+- [Color Calibration](#color-calibration)
 - [Region-Based Redrawing](#region-based-redrawing)
 - [Advanced Features](#advanced-features)
 - [Keyboard Controls](#keyboard-controls)
@@ -16,19 +17,19 @@ This document provides step-by-step instructions for using Pyaint effectively.
 
 ### Installation
 
-1. **Clone or download** the repository
+1. **Clone or download** repository
 2. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Run the application**:
+3. **Run application**:
    ```bash
    python main.py
    ```
 
 **Requirements:**
-- Python 3.8 or higher (3.8 recommended)
+- Python 3.8 or higher
 - Windows operating system
 - Drawing application (MS Paint, Clip Studio Paint, etc.) running
 
@@ -36,20 +37,20 @@ This document provides step-by-step instructions for using Pyaint effectively.
 
 ### First Launch
 
-When you first launch Pyaint, you'll see the main window with three panels:
+When you first launch Pyaint, you'll see a main window with three panels:
 
-- **Control Panel** (left): Settings and action buttons
+- **Control Panel** (left): Drawing settings and action buttons
 - **Image Preview Panel** (right): Image loading and display
-- **Tooltip Panel** (bottom): Status messages and progress
+- **Tooltip Panel** (bottom): Status messages and progress tracking
 
 ### Setup Process
 
-1. Click the **"Setup"** button in the Control Panel
+1. Click **"Setup"** button in Control Panel
 2. A Setup Window will appear with tools configuration
 
 ### Initializing Tools
 
-You need to initialize three tools before drawing:
+You need to initialize essential tools before drawing:
 
 #### 1. Palette
 
@@ -64,10 +65,10 @@ The palette defines the available colors for drawing.
 
 **Configuration Options:**
 - **Rows/Columns**: Set the number of rows and columns in your palette grid
-- **Valid Positions**: (Advanced) Toggle which palette cells are valid
-- **Manual Centers**: (Advanced) Pick exact center points for precision
-- **Auto-Estimate**: (Advanced) Quickly calculate center points
-- **Precision Estimate**: (Advanced) Maximum accuracy using reference points
+- **Valid Positions**: Toggle which palette cells are valid (advanced)
+- **Manual Centers**: Pick exact center points for precision (advanced)
+- **Auto-Estimate**: Quickly calculate center points (advanced)
+- **Precision Estimate**: Maximum accuracy using reference points (advanced)
 
 #### 2. Canvas
 
@@ -93,21 +94,35 @@ The custom colors feature enables unlimited color options.
 - Your image has more colors than the palette provides
 - You need precise color matching
 
+#### 4. Color Preview Spot (Optional for Calibration)
+
+Required for color calibration to capture RGB values.
+
+**Steps:**
+1. Click **"Initialize"** next to Color Preview Spot
+2. Click on the **exact spot** where your selected color appears when using the custom colors spectrum
+3. Status will change to **"INITIALIZED"** (green)
+
+**When to Use:**
+- When you want to run color calibration
+- For improved color accuracy with custom colors
+
 ### Configuring Drawing Settings
 
 In the Control Panel, adjust these settings:
 
 | Setting | Range | Description | Recommended |
-|----------|-------|-------------|--------------|
+|----------|--------|-------------|--------------|
 | Delay | 0.01-10.0s | Stroke timing | 0.15s |
 | Pixel Size | 3-50 | Detail level | 12 |
 | Precision | 0.0-1.0 | Color accuracy | 0.9 |
-| Jump Delay | 0.0-2.0s | Cursor jump delay | 0.059s |
+| Jump Delay | 0.0-2.0s | Cursor jump delay | 0.5s |
+| Calibration Step | 1-10 | Pixel step for calibration | 2 |
 
 **Tips:**
 - Start with default values and adjust based on test results
 - Higher precision = more accurate but slower
-- Larger pixel size = more detail but longer drawing time
+- Larger pixel size = less detail but faster drawing
 
 ### Drawing Modes
 
@@ -121,7 +136,10 @@ Choose your drawing mode from the dropdown:
 Toggle these checkboxes as needed:
 
 - **Ignore White Pixels**: Skip drawing white areas (useful for white canvas)
-- **Use Custom Colors**: Enable advanced color mixing (slower)
+- **Use Custom Colors**: Enable advanced color mixing (requires Custom Colors tool)
+- **Enable New Layer**: Automatically create new layers for each color
+- **Enable Color Button**: Click color picker button before selecting colors
+- **Enable Color Button Okay**: Click confirmation button after color selection
 
 ## Basic Drawing
 
@@ -143,7 +161,7 @@ Pre-computing caches the image processing for faster subsequent runs.
 **Steps:**
 1. Load your image
 2. Click **"Pre-compute"** button
-3. Wait for processing to complete
+3. Wait for processing to complete (progress will be shown)
 4. Estimated drawing time will be displayed
 
 **Benefits:**
@@ -153,16 +171,17 @@ Pre-computing caches the image processing for faster subsequent runs.
 
 ### Test Drawing
 
-Before full drawing, test your brush settings:
+Before a full drawing, test your brush settings:
 
 #### Simple Test Draw
 
 Quick 5-line calibration without color picking.
 
 **Steps:**
-1. Click **"Simple Test Draw"**
-2. Select your desired color in your painting application
+1. Select your desired color in your painting application
+2. Click **"Simple Test Draw"**
 3. The bot will draw 5 horizontal lines at the canvas upper-left
+4. Adjust your brush size in the painting application if needed
 
 #### Test Draw
 
@@ -184,9 +203,10 @@ Detailed calibration with color switching.
 ### Full Drawing
 
 1. Click **"Start"** button
-2. The application will minimize
-3. Drawing will begin with progress updates
-4. Estimated time will be shown
+2. A warning dialog will appear (ESC and pause key info)
+3. Click "OK" to continue
+4. The application will minimize
+5. Drawing will begin with progress updates
 
 **During Drawing:**
 - Progress percentage displays in Tooltip Panel
@@ -197,6 +217,49 @@ Detailed calibration with color switching.
 - **ESC**: Stop drawing immediately
 - **Pause Key** (default 'p'): Pause/resume drawing
 - Press pause key again to resume
+
+## Color Calibration
+
+Color calibration improves accuracy when using custom colors by creating a precise mapping of RGB values to spectrum positions.
+
+### When to Use
+
+- You want the most accurate colors possible
+- Your custom colors spectrum is complex
+- You're drawing multiple times with the same colors
+
+### Requirements
+
+- Custom Colors tool initialized
+- Color Preview Spot tool initialized
+- Calibration Step Size configured
+
+### Running Calibration
+
+**Steps:**
+1. Configure Custom Colors tool (spectrum area)
+2. Configure Color Preview Spot tool (preview location)
+3. Set **Calibration Step Size** (1-10, default: 2):
+   - Lower = more accurate but slower
+   - Higher = faster but less accurate
+4. Click **"Run Calibration"** button
+5. Wait for calibration to complete
+6. Calibration data saved to `color_calibration.json`
+
+**What Happens During Calibration:**
+1. Bot presses mouse down at spectrum start
+2. Bot drags through entire spectrum
+3. At each step, captures RGB value from Preview Spot
+4. Creates mapping: RGB → (x, y) coordinates
+5. Releases mouse up
+
+### Using Calibrated Colors
+
+During drawing:
+1. Bot first checks calibration map for exact match
+2. If match within tolerance: Uses calibrated position
+3. If no match: Falls back to nearest spectrum color
+4. Calibration data is automatically loaded if `color_calibration.json` exists
 
 ## Region-Based Redrawing
 
@@ -223,7 +286,7 @@ Redraw only a specific area of an image without reprocessing the entire image.
 
 ### New Layer Automation
 
-Automatically create a new layer in your drawing application.
+Automatically create a new layer in your drawing application for each color.
 
 **Setup:**
 1. Click **"Setup"** → Click **"Initialize"** next to New Layer
@@ -234,7 +297,7 @@ Automatically create a new layer in your drawing application.
 **Behavior:**
 - Before each color change, bot clicks the new layer button
 - Modifier keys are held during the click
-- 0.75 second wait after click to ensure layer is ready
+- Waits 0.75 seconds after the click to ensure the layer is ready
 
 ### Color Button Automation
 
@@ -243,13 +306,13 @@ Automatically click a color picker button to access custom colors.
 **Setup:**
 1. Click **"Setup"** → Click **"Initialize"** next to Color Button
 2. Click the color picker button location in your application
-3. Configure delay (time to wait after click)
-4. Configure modifier keys if needed
+3. Configure the delay (time to wait after click)
+4. Configure modifier keys if needed (CTRL, ALT, SHIFT)
 5. Enable **"Enable Color Button"** checkbox in Control Panel
 
 **Behavior:**
 - Before each color change, bot clicks the color button
-- Waits configured delay for color picker to open
+- Waits the configured delay for the color picker to open
 - Selects color from spectrum or uses keyboard input
 
 ### Color Button Okay
@@ -259,12 +322,12 @@ Optional confirmation click after color selection.
 **Setup:**
 1. Click **"Setup"** → Click **"Initialize"** next to Color Button Okay
 2. Click the confirmation button location in your application
-3. Configure modifier keys if needed
+3. Configure modifier keys if needed (CTRL, ALT, SHIFT)
 4. Enable **"Enable"** checkbox in Control Panel
 
 **Behavior:**
-- After color selection, clicks confirmation button
-- Waits configured delay before drawing
+- After color selection, clicks the confirmation button
+- Waits the configured delay before drawing
 
 ## Keyboard Controls
 
@@ -283,12 +346,13 @@ Optional confirmation click after color selection.
 
 ### ESC Key
 
-**Global hotkey** for emergency stop.
+Global hotkey for emergency stop.
 
 **Behavior:**
 - Pressing ESC during drawing: Stops immediately
 - Pressing ESC during test: Stops test
 - Pressing ESC during setup: Cancels operation
+- Pressing ESC during calibration: Stops calibration
 
 ## Tips and Best Practices
 
@@ -308,17 +372,25 @@ Optional confirmation click after color selection.
 4. **Preview captured regions** to verify correct configuration
 5. **For Precision Estimate with multiple rows**, ensure you have at least 2 valid rows
 
+### Color Calibration Tips
+
+1. **Set appropriate step size**: Lower = more accurate, Higher = faster
+2. **Verify Preview Spot**: Ensure it shows the exact selected color
+3. **Check Spectrum Box**: Must cover the entire color spectrum
+4. **Test calibration** with a test draw before starting full drawing
+5. **Reuse calibration**: Data saved to file can be used across sessions
+
 ### Color Button Tips
 
 1. **Set appropriate delay** for your application's color picker opening time
-2. **Use modifier keys** if your application requires them to access color picker
+2. **Use modifier keys** if your application requires them to access the color picker
 3. **Enable "Color Button Okay"** if your application requires clicking a confirmation button
 4. **Test color button configuration** with a simple test draw before starting a full drawing
 
 ### Drawing Workflow
 
 1. **Load image** → **(Optional) Pre-compute** → **Test Draw** → **Start**
-2. **Monitor progress** via tooltip panel
+2. **Monitor progress** via the tooltip panel
 3. **Use pause/resume** to interrupt if needed
 4. **ESC to stop** if something goes wrong
 

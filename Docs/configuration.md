@@ -1,586 +1,457 @@
 # Pyaint Configuration Guide
 
-This document explains the configuration options available in Pyaint and how to customize them.
+Complete guide to configuring Pyaint's settings and tools.
 
 ## Table of Contents
 
 - [Configuration File](#configuration-file)
 - [Drawing Settings](#drawing-settings)
-- [Drawing Modes](#drawing-modes)
-- [Drawing Options](#drawing-options)
-- [Palette Configuration](#palette-configuration)
-- [Canvas Configuration](#canvas-configuration)
-- [Custom Colors Configuration](#custom-colors-configuration)
-- [New Layer Configuration](#new-layer-configuration)
-- [Color Button Configuration](#color-button-configuration)
-- [Color Button Okay Configuration](#color-button-okay-configuration)
-- [Hotkeys](#hotkeys)
+- [Tool Configuration](#tool-configuration)
+- [Advanced Features](#advanced-features)
+- [Default Values](#default-values)
+
+---
 
 ## Configuration File
 
-Configuration is stored in [`config.json`](../config.json) in the project root directory.
+### File Location
 
-**File Location:** `pyaint/config.json`
+**Path:** `config.json` (in project root, same level as `main.py`)
 
-**Auto-save:** Settings are automatically saved when:
-- Drawing settings are changed
-- Drawing options are toggled
-- Setup is completed
-- Pause key is set
+**Format:** JSON (UTF-8 encoded)
 
-**Manual Editing:** You can edit [`config.json`](../config.json) directly with any text editor.
+**Loading:**
+- Automatic on application startup
+- Graceful fallback to defaults if missing/corrupt
+
+**Saving:**
+- Automatic on tool configuration completion
+- Automatic on drawing setting changes
+- Automatic on checkbox toggles
+
+### Configuration Structure
+
+```json
+{
+  "drawing_settings": {
+    "delay": 0.15,
+    "pixel_size": 12,
+    "precision": 0.9,
+    "jump_delay": 0.5
+  },
+  "drawing_options": {
+    "ignore_white_pixels": false,
+    "use_custom_colors": false
+  },
+  "pause_key": "p",
+  "calibration_settings": {
+    "step_size": 2
+  },
+  "Palette": {
+    "status": true,
+    "box": [x1, y1, x2, y2],
+    "rows": 6,
+    "cols": 8,
+    "color_coords": {
+      "(r,g,b)": [x, y]
+    },
+    "valid_positions": [0, 1, 2, ...],
+    "manual_centers": {
+      "0": [x, y]
+    },
+    "preview": "assets/Palette_preview.png"
+  },
+  "Canvas": {
+    "status": true,
+    "box": [x1, y1, x2, y2],
+    "preview": "assets/Canvas_preview.png"
+  },
+  "Custom Colors": {
+    "status": true,
+    "box": [x1, y1, x2, y2],
+    "preview": "assets/Custom Colors_preview.png"
+  },
+  "New Layer": {
+    "status": true,
+    "coords": [x, y],
+    "enabled": false,
+    "modifiers": {
+      "ctrl": false,
+      "alt": false,
+      "shift": true
+    }
+  },
+  "Color Button": {
+    "status": true,
+    "coords": [x, y],
+    "enabled": false,
+    "delay": 0.5,
+    "modifiers": {
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    }
+  },
+  "Color Button Okay": {
+    "status": true,
+    "coords": [x, y],
+    "enabled": false,
+    "modifiers": {
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    }
+  },
+  "color_preview_spot": {
+    "name": "Color Preview Spot",
+    "status": true,
+    "coords": [x, y],
+    "enabled": false,
+    "modifiers": {
+      "ctrl": false,
+      "alt": false,
+      "shift": false
+    }
+  },
+  "last_image_url": "https://..."
+}
+```
+
+---
 
 ## Drawing Settings
 
 ### Delay
 
-**Range:** 0.01 - 10.0 seconds  
-**Default:** 0.15 seconds  
-**Description:** Controls the timing delay for each stroke. Increase if your machine is slow and does not respond well to extremely fast input.
+**Range:** 0.01 - 10.0 seconds
+
+**Default:** 0.15
+
+**Description:** Controls the duration of each brush stroke.
+
+**UI Control:** Text entry field (not a slider)
+
+**When to Adjust:**
+- **Increase** if your machine is slow and doesn't respond well to fast input
+- **Decrease** for faster drawing (if your system can handle it)
 
 **Impact:**
-- Higher values = Slower drawing, more reliable
-- Lower values = Faster drawing, may cause missed strokes
+- Higher delay = slower drawing but more reliable
+- Lower delay = faster drawing but may miss strokes on slow systems
 
 ### Pixel Size
 
-**Range:** 3 - 50 pixels  
-**Default:** 12 pixels  
-**Description:** Controls the detail level of the drawing. Lower values create more detailed results but require longer drawing time.
+**Range:** 3 - 50 (integer)
+
+**Default:** 12
+
+**Description:** Controls the detail level of the drawing. This does NOT affect your brush size in the painting application.
+
+**UI Control:** Slider with integer display
+
+**When to Adjust:**
+- **Increase** for more detail (longer draw time)
+- **Decrease** for faster drawing (less detail)
 
 **Impact:**
-- Higher values = More detail, longer drawing time
-- Lower values = Less detail, faster drawing
+- Larger values = fewer pixels to process = faster
+- Smaller values = more detail = significantly longer draw time
 
 ### Precision
 
-**Range:** 0.0 - 1.0  
-**Default:** 0.896  
-**Description:** Affects custom color accuracy for each pixel. At lower values, color variety is greatly reduced. At 1.0 accuracy, every pixel will have perfect colors.
+**Range:** 0.0 - 1.0
+
+**Default:** 0.9
+
+**Description:** Controls color accuracy for custom colors. Higher values use more distinct colors.
+
+**UI Control:** Slider
+
+**When to Adjust:**
+- **Increase** for better color matching (slower processing)
+- **Decrease** for faster processing with fewer color variations
 
 **Impact:**
-- Higher values = More accurate colors, slower processing
-- Lower values = Fewer colors, faster processing
-
-**Recommendation:** 0.9 for most use cases
+- Higher precision = more accurate colors but slower
+- Lower precision = fewer colors but faster processing
+- Only applies when "Use Custom Colors" is enabled
 
 ### Jump Delay
 
-**Range:** 0.0 - 2.0 seconds  
-**Default:** 0.059 seconds  
-**Description:** Adds delay when cursor jumps more than 5 pixels between strokes. Helps prevent unintended strokes from rapid cursor movement.
+**Range:** 0.0 - 2.0 seconds
 
-**When Used:**
-- Large jumps between non-adjacent line segments
-- Cursor movements across canvas regions
+**Default:** 0.5
 
-## Drawing Modes
+**Description:** Adds delay when cursor jumps more than 5 pixels between strokes.
 
-### Slotted Mode
+**UI Control:** Slider
 
-**Description:** Simple color-to-lines mapping mode.
-
-**Behavior:**
-- Each horizontal run of the same color = one line segment
-- Colors are processed in order encountered
-- No color frequency sorting
-- Faster processing
-
-**Best For:**
-- Simple images
-- Faster processing requirements
-- Limited color palettes
-
-### Layered Mode
-
-**Description:** Advanced color layering with frequency sorting.
-
-**Behavior:**
-1. Count color frequency (total pixel coverage)
-2. Sort colors by frequency (most used first)
-3. Merge adjacent lines of lower-frequency colors
-4. Higher-frequency colors paint over lower-frequency ones
-
-**Best For:**
-- Complex images with many colors
-- Better visual results
-- Images with overlapping color regions
-
-## Drawing Options
-
-### Ignore White Pixels
-
-**Type:** Checkbox option  
-**Default:** `false`  
-**Description:** Skip drawing white pixels of an image. Useful when the canvas is white.
-
-**Use Case:**
-- Images with white backgrounds
-- To create transparent drawings
-- To reduce drawing time
-
-### Use Custom Colors
-
-**Type:** Checkbox option  
-**Default:** `false`  
-**Description:** Enable advanced color mixing using the custom colors spectrum.
+**When to Adjust:**
+- **Increase** to prevent unintended strokes from rapid cursor movement
+- **Decrease** for faster drawing on responsive systems
 
 **Impact:**
-- When enabled: Scans custom color spectrum for color matching
-- When disabled: Uses only palette colors
-- **Significantly** increases draw duration
+- Higher jump delay = fewer accidental strokes but slower
+- Lower jump delay = faster but risk of unintended strokes
 
-## Palette Configuration
+---
 
-### Status
+## Tool Configuration
 
-**Type:** Boolean  
-**Values:** `true` or `false`  
-**Description:** Indicates whether the palette has been initialized.
+### Palette
 
-### Box
+**Status:** Essential (required for drawing)
 
-**Type:** Array `[x1, y1, x2, y2]`  
-**Description:** Screen coordinates of the palette region.
+**Fields:**
 
-**Format:** Upper-left and lower-right corners.
+| Field | Type | Description |
+|--------|--------|-------------|
+| `status` | bool | True if initialized |
+| `box` | array | [x1, y1, x2, y2] screen coordinates |
+| `rows` | int | Number of rows in palette grid |
+| `cols` | int | Number of columns in palette grid |
+| `color_coords` | object | RGB → (x, y) mappings |
+| `valid_positions` | array | Indices of valid palette cells |
+| `manual_centers` | object | Manual center point overrides |
+| `preview` | string | Path to preview screenshot |
 
-### Rows / Columns
+**Advanced Features:**
+- **Valid Positions**: Toggle which palette cells are available
+- **Manual Centers**: Set exact center points for each color
+- **Auto-Estimate**: Calculate grid-based center points
+- **Precision Estimate**: Advanced calculation using reference points
 
-**Type:** Integer  
-**Description:** Define the palette grid dimensions.
+### Canvas
 
-**Example:** 7 columns × 37 rows = 259 colors
+**Status:** Essential (required for drawing)
 
-### Color Coords
+**Fields:**
 
-**Type:** Object  
-**Format:** `{"(r, g, b)": [x, y], ...}`  
-**Description:** Maps each RGB color to its screen coordinates.
+| Field | Type | Description |
+|--------|--------|-------------|
+| `status` | bool | True if initialized |
+| `box` | array | [x1, y1, x2, y2] screen coordinates |
+| `preview` | string | Path to preview screenshot |
 
-**Note:** Keys are strings because JSON doesn't support tuple keys.
+### Custom Colors
 
-### Valid Positions
+**Status:** Optional (required if "Use Custom Colors" enabled)
 
-**Type:** Array `[0, 1, 2, ...]`  
-**Description:** Indices of valid palette cells.
+**Fields:**
 
-**Use Case:**
-- Exclude broken or unused colors
-- Mark only the cells you want to use
+| Field | Type | Description |
+|--------|--------|-------------|
+| `status` | bool | True if initialized |
+| `box` | array | [x1, y1, x2, y2] spectrum coordinates |
+| `preview` | string | Path to preview screenshot |
 
-### Manual Centers
+**Behavior:**
+- Scans spectrum to create color map
+- Used when "Use Custom Colors" is enabled
+- Falls back to keyboard input if not configured
 
-**Type:** Object  
-**Format:** `{"0": [x, y], "1": [x, y], ...}`  
-**Description:** Exact center points for each palette cell.
+### Color Preview Spot
 
-**Use Case:**
-- Precise color selection on irregular palettes
-- Override automatic center calculation
+**Status:** Optional (required for color calibration)
 
-### Preview
+**Fields:**
 
-**Type:** String (path)  
-**Description:** Path to captured palette preview image.
+| Field | Type | Description |
+|--------|--------|-------------|
+| `name` | string | "Color Preview Spot" |
+| `status` | bool | True if initialized |
+| `coords` | array | [x, y] screen coordinates |
+| `enabled` | bool | Whether feature is active |
+| `modifiers` | object | CTRL/ALT/SHIFT key flags |
 
-## Canvas Configuration
+**Purpose:** Specifies where to capture RGB values during color calibration
 
-### Status
+### New Layer
 
-**Type:** Boolean  
-**Values:** `true` or `false`  
-**Description:** Indicates whether the canvas has been initialized.
+**Status:** Optional
 
-### Box
+**Fields:**
 
-**Type:** Array `[x1, y1, x2, y2]`  
-**Description:** Screen coordinates of the canvas drawing area.
+| Field | Type | Description |
+|--------|--------|-------------|
+| `status` | bool | True if initialized |
+| `coords` | array | [x, y] button coordinates |
+| `enabled` | bool | Whether to automatically create layers |
+| `modifiers` | object | CTRL/ALT/SHIFT key flags |
 
-**Format:** Upper-left and lower-right corners.
+**Behavior:**
+- If enabled: clicks new layer button before each color change
+- Waits 0.75 seconds after click for layer to be created
+- Supports modifier keys (useful if app requires keyboard shortcut)
 
-### Preview
+### Color Button
 
-**Type:** String (path)  
-**Description:** Path to captured canvas preview image.
+**Status:** Optional
 
-## Custom Colors Configuration
+**Fields:**
 
-### Status
+| Field | Type | Description |
+|--------|--------|-------------|
+| `status` | bool | True if initialized |
+| `coords` | array | [x, y] button coordinates |
+| `enabled` | bool | Whether to click color picker button |
+| `delay` | float | Time to wait after click (0.01-5.0s) |
+| `modifiers` | object | CTRL/ALT/SHIFT key flags |
 
-**Type:** Boolean  
-**Values:** `true` or `false`  
-**Description:** Indicates whether custom colors have been initialized.
+**Behavior:**
+- If enabled: clicks color button before each color change
+- Waits configured delay for color picker to open
+- Supports modifier keys (useful if app requires keyboard shortcut)
 
-### Box
+### Color Button Okay
 
-**Type:** Array `[x1, y1, x2, y2]`  
-**Description:** Screen coordinates of the custom color spectrum region.
+**Status:** Optional
 
-### Preview
+**Fields:**
 
-**Type:** String (path)  
-**Description:** Path to captured custom colors preview image.
+| Field | Type | Description |
+|--------|--------|-------------|
+| `status` | bool | True if initialized |
+| `coords` | array | [x, y] button coordinates |
+| `enabled` | bool | Whether to click confirmation button |
+| `modifiers` | object | CTRL/ALT/SHIFT key flags |
 
-## New Layer Configuration
+**Behavior:**
+- If enabled: clicks confirmation button after color selection
+- Waits configured delay after click
+- Supports modifier keys
 
-### Status
+---
 
-**Type:** Boolean  
-**Values:** `true` or `false`  
-**Description:** Indicates whether the new layer feature is configured.
+## Advanced Features
 
-### Coords
+### Calibration Settings
 
-**Type:** Array `[x, y]`  
-**Description:** Screen coordinates of the new layer button.
+**Purpose:** Configure color calibration scanning behavior
 
-### Enabled
+**Fields:**
 
-**Type:** Boolean  
-**Values:** `true` or `false`  
-**Description:** Whether automatic layer creation is active during drawing.
+| Field | Type | Range | Description |
+|--------|--------|--------|-------------|
+| `step_size` | int | 1-10 | Pixel step size for scanning |
 
-### Modifiers
+**Default:** 2
 
-**Type:** Object  
-**Format:** `{"ctrl": bool, "alt": bool, "shift": bool}`  
-**Description:** Modifier keys to hold when clicking the new layer button.
+**Behavior:**
+- Lower step = more accurate calibration but slower
+- Higher step = faster calibration but less accurate
 
-**Use Case:**
-- Applications that require keyboard shortcuts for layer creation
-- Example: Shift+Click to create new layer
+### Drawing Options
 
-## Color Button Configuration
+**Purpose:** Enable/disable drawing features
 
-### Status
+**Fields:**
 
-**Type:** Boolean  
-**Values:** `true` or `false`  
-**Description:** Indicates whether the color button feature is configured.
-
-### Coords
-
-**Type:** Array `[x, y]`  
-**Description:** Screen coordinates of the color picker button.
-
-### Enabled
-
-**Type:** Boolean  
-**Values:** `true` or `false`  
-**Description:** Whether automatic color button clicking is active during drawing.
-
-### Delay
-
-**Type:** Float  
-**Range:** 0.01 - 5.0 seconds  
-**Default:** 0.1 seconds  
-**Description:** Time to wait after clicking the color button before selecting color.
-
-**Use Case:**
-- Applications that take time to open color picker
-- Adjust based on your application's response time
-
-### Modifiers
-
-**Type:** Object  
-**Format:** `{"ctrl": bool, "alt": bool, "shift": bool}`  
-**Description:** Modifier keys to hold when clicking the color button.
-
-## Color Button Okay Configuration
-
-### Status
-
-**Type:** Boolean  
-**Values:** `true` or `false`  
-**Description:** Indicates whether the color button okay feature is configured.
-
-### Coords
-
-**Type:** Array `[x, y]`  
-**Description:** Screen coordinates of the color confirmation button.
-
-### Enabled
-
-**Type:** Boolean  
-**Values:** `true` or `false`  
-**Description:** Whether automatic color button okay clicking is active during drawing.
-
-### Modifiers
-
-**Type:** Object  
-**Format:** `{"ctrl": bool, "alt": bool, "shift": bool}`  
-**Description:** Modifier keys to hold when clicking the color button okay button.
-
-## Hotkeys
+| Field | Type | Default | Description |
+|--------|--------|----------|-------------|
+| `ignore_white_pixels` | bool | false | Skip drawing white pixels |
+| `use_custom_colors` | bool | false | Use custom color spectrum |
 
 ### Pause Key
 
-**Type:** String  
-**Default:** `"p"`  
-**Description:** Key used to pause/resume drawing.
+**Purpose:** Configure keyboard key for pause/resume
 
-**Valid Values:**
-- Any single character key (e.g., 'p', 's', ' ')
-- Function keys (e.g., 'f1', 'f2')
-- Special keys (e.g., 'space', 'tab')
+**Field:**
 
-**Behavior:**
-- Press during drawing: Toggle pause/resume
-- Press when not drawing: Set the pause key
+| Field | Type | Default | Description |
+|--------|--------|----------|-------------|
+| `pause_key` | string | 'p' | Key name for pause/resume |
 
-### ESC Key
+**Supported Keys:**
+- Any letter key (a-z)
+- Any number (0-9)
+- Function keys (F1-F12)
+- Special keys (arrows, etc.)
 
-**Type:** Global hotkey  
-**Description:** Emergency stop for all drawing operations.
+---
 
-**Behavior:**
-- Pressing ESC immediately stops drawing
-- Works during full drawing, test draw, and simple test draw
+## Default Values
 
-## Palette Advanced Features
+### Drawing Settings
 
-### Manual Color Selection Modes
+| Setting | Default | Min | Max |
+|---------|---------|-----|-----|
+| Delay | 0.15s | 0.01s | 10.0s |
+| Pixel Size | 12 | 3 | 50 |
+| Precision | 0.9 | 0.0 | 1.0 |
+| Jump Delay | 0.5s | 0.0s | 2.0s |
 
-#### Toggle Mode
+### Tool Configuration
 
-**Description:** Click grid cells to mark them as valid (green) or invalid (red).
+All tools default to not initialized (`status: false`).
 
-**Usage:**
-1. Click "Edit Colors" in Setup Window
-2. Click cells to toggle their state
-3. Click "Done" to save
+### User Preferences
 
-#### Pick Centers Mode
+| Setting | Default | Description |
+|---------|---------|-------------|
+| pause_key | 'p' | Pause/resume key |
+| calibration_settings.step_size | 2 | Calibration scan step |
+| drawing_options.ignore_white_pixels | false | Skip white pixels |
+| drawing_options.use_custom_colors | false | Use custom colors |
 
-**Description:** Click exact center points for each palette cell.
+---
 
-**Usage:**
-1. Click "Edit Colors" in Setup Window
-2. Click "Pick Centers" button
-3. Click a cell, then click the center point on your palette
-4. System automatically moves to next color cell
-5. Press ESC to stop
+## Modifying Configuration
 
-#### Auto-Estimate
+### Via UI
 
-**Description:** Automatically calculate center points using grid-based estimation.
+Most settings can be changed through the main window:
 
-**Algorithm:**
-```python
-cell_width = palette_width / columns
-cell_height = palette_height / rows
-center_x = col * cell_width + cell_width / 2
-center_y = row * cell_height + cell_height / 2
-```
+1. **Drawing Settings**: Adjust sliders/entry in Control Panel
+2. **Drawing Options**: Toggle checkboxes in Control Panel
+3. **Pause Key**: Click entry field and press key
+4. **Tools**: Click "Setup" button to configure tools
 
-**Usage:**
-1. Click "Edit Colors" in Setup Window
-2. Click "Auto-Estimate Centers"
-3. Review overlay showing estimated positions
-4. Click "Done" to save
+### Via Text Editor
 
-#### Precision Estimate
+Edit `config.json` directly in a text editor.
 
-**Description:** Advanced center calculation using reference point selection for maximum accuracy.
+**Warning:** Invalid JSON will cause the application to use defaults.
 
-**Modes:**
+### Resetting Configuration
 
-##### Single Column Mode
+To reset all settings:
+1. Close Pyaint
+2. Delete `config.json`
+3. Restart Pyaint
+4. Configure tools via Setup button
 
-**When to use:** Vertical palettes (1 column, multiple rows)
+---
 
-**Reference Points:**
-1. Center of first color box in first row
-2. Center of first color box in second row
-3. Center of first color box in last row
+## Configuration Validation
 
-**Calculation:**
-```python
-row_spacing = (last_row_center - first_row_center) / (last_row_index - first_row_index)
-```
+### Palette
 
-##### 1 Row Mode
+- Must have at least one valid position
+- Rows and columns must be positive integers
+- Box coordinates must be valid (x1 < x2, y1 < y2)
 
-**When to use:** Horizontal palettes (1 row, multiple columns)
+### Canvas
 
-**Reference Points:**
-1. Center of first color box (leftmost)
-2. Center of second color box
-3. Center of last color box (rightmost)
+- Box coordinates must be valid (x1 < x2, y1 < y2)
+- Must be larger than 0 pixels in both dimensions
 
-**Calculation:**
-```python
-col_spacing = (last_col_center - first_col_center) / (last_col_index - first_col_index)
-```
+### Custom Colors
 
-##### Multi-Row Mode
+- Box coordinates must be valid (x1 < x2, y1 < y2)
 
-**When to use:** Grid palettes (multiple rows and columns)
-
-**Reference Points:**
-1. First row: first box, second box, last box
-2. Second row: first box (if > 2 rows)
-3. Last row: first box, last box
-
-**Calculation:**
-```python
-col_spacing = (first_row_last - first_row_first) / (last_col_index - first_col_index)
-row_spacing = (last_row_first - first_row_first) / (last_row_index - first_row_index)
-```
-
-**Usage:**
-1. Click "Edit Colors" in Setup Window
-2. Click "Precision Estimate"
-3. Follow on-screen instructions to click reference points
-4. System calculates all centers
-5. Review overlay showing estimated positions
-6. Click "Done" to save
+### Drawing Settings
 
-## Cache Configuration
-
-Cache files are automatically created in the `cache/` directory.
+- Delay must be between 0.01 and 10.0
+- Pixel size must be between 3 and 50
+- Precision must be between 0.0 and 1.0
+- Jump delay must be between 0.0 and 2.0
 
-### Cache File Naming
-
-**Format:** `cache/{image_hash}_{settings_hash}.json`
-
-**Components:**
-- `image_hash` - MD5 hash of source image (first 8 characters)
-- `settings_hash` - MD5 hash of drawing settings
-
-### Cache Contents
-
-```json
-{
-  "cmap": {
-    "(r, g, b)": [(start, end), ...]
-  },
-  "settings": [delay, step, accuracy, jump_delay],
-  "flags": 0,
-  "mode": "layered",
-  "canvas": [x, y, w, h],
-  "image_hash": "abc12345",
-  "timestamp": 1234567890.0,
-  "palette_info": {
-    "colors_pos": {...},
-    "colors": [...]
-  }
-}
-```
-
-### Cache Validation
-
-Cache is considered valid when:
-- File exists
-- Age < 24 hours
-- Settings match current configuration
-- Canvas dimensions match
-
-### Cache Invalidation
-
-Cache is automatically invalidated when:
-- Drawing settings change
-- Canvas dimensions change
-- Palette configuration change
-- 24 hours have passed
-
-## Configuration Tips
-
-### Performance Optimization
-
-1. **Use Pre-compute** for images you'll draw multiple times
-2. **Adjust Pixel Size** based on desired detail vs. speed tradeoff
-3. **Enable "Ignore White Pixels"** for images with large white areas
-4. **Use Layered Mode** for better visual results on complex images
-5. **Fine-tune Jump Delay** for optimal cursor movement
-
-### Palette Setup Tips
-
-1. **Use Auto-Estimate** for quick initial setup on regular grids
-2. **Use Precision Estimate** for maximum accuracy on irregular palettes
-3. **Toggle Invalid Positions** to exclude broken or unused colors
-4. **Preview captured regions** to verify correct configuration
-5. **For Precision Estimate with multiple rows**, ensure you have at least 2 valid rows
-
-### Color Button Tips
-
-1. **Set appropriate delay** for your application's color picker opening time
-2. **Use modifier keys** if your application requires them to access color picker
-3. **Enable "Color Button Okay"** if your application requires clicking a confirmation button
-4. **Test color button configuration** with a simple test draw before starting a full drawing
-
-## Troubleshooting Configuration Issues
-
-### Palette Not Initializing
-
-**Symptoms:**
-- "Palette not initialized" error when trying to draw
-- Setup window shows "NOT INITIALIZED" status
-
-**Solutions:**
-1. Click "Initialize" in Setup Window
-2. Ensure rows and columns are set correctly
-3. Verify palette box coordinates are correct
-
-### Canvas Not Initializing
-
-**Symptoms:**
-- "Canvas not initialized" error when trying to draw
-- Setup window shows "NOT INITIALIZED" status
-
-**Solutions:**
-1. Click "Initialize" in Setup Window
-2. Verify canvas box coordinates are correct
-
-### Custom Colors Not Working
-
-**Symptoms:**
-- Colors appear incorrect when using custom colors
-- Drawing uses palette colors instead
-
-**Solutions:**
-1. Ensure custom colors box is correctly configured
-2. Verify spectrum scanning has completed (check console for "[Spectrum] Scanned" message)
-3. Test with a simple test draw to verify color selection
-
-### Drawing Too Slow
-
-**Symptoms:**
-- Drawing takes much longer than expected
-- Cursor movements are sluggish
-
-**Solutions:**
-1. Increase Delay setting
-2. Increase Pixel Size (less detail = faster)
-3. Check for background applications consuming CPU
-4. Close unnecessary applications
-
-### Drawing Too Fast / Missed Strokes
-
-**Symptoms:**
-- Drawing completes too quickly
-- Colors are wrong or strokes are missed
-
-**Solutions:**
-1. Decrease Delay setting
-2. Increase Pixel Size (more detail = more reliable)
-3. Check Jump Delay setting
-
-### Colors Not Selecting Correctly
-
-**Symptoms:**
-- Wrong colors are being selected
-- Palette clicks miss the intended color
-
-**Solutions:**
-1. Use manual center picking for precise selection
-2. Use Precision Estimate for maximum accuracy
-3. Check valid positions are marked correctly
-4. Review palette preview to verify configuration
+---
 
 ## See Also
 
-- [API Reference](./api.md)
-- [Architecture](./architecture.md)
-- [Usage Guide](./usage-guide.md)
+- [API Reference](./api.md) - Detailed API documentation
+- [Architecture](./architecture.md) - System architecture details
+- [Troubleshooting](./troubleshooting.md) - Common issues and solutions
+- [Usage Guide](./usage-guide.md) - Step-by-step usage instructions
