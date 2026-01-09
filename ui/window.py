@@ -173,6 +173,7 @@ class Window:
             'Pre-compute',
             'Test Draw',
             'Simple Test Draw',
+            'Run Calibration',
             'Start'
         ]
 
@@ -186,7 +187,8 @@ class Window:
         buttons[1]['command'] = self.start_precompute_thread
         buttons[2]['command'] = self.start_test_draw_thread
         buttons[3]['command'] = self.start_simple_test_draw_thread
-        buttons[4]['command'] = self.start_draw_thread
+        buttons[4]['command'] = self.start_calibration_thread
+        buttons[5]['command'] = self.start_draw_thread
 
         self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
         self._teclbl.grid(column=0, row=5, columnspan=2, sticky='w', padx=5, pady=5)
@@ -290,6 +292,16 @@ class Window:
         self._pause_key_entry = Entry(self._cframe)
         self._pause_key_entry.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
         self._pause_key_entry.bind('<Key>', self._on_pause_key_entry_press)
+        curr_row += 1
+
+        # Calibration Step Size Setting
+        Label(self._cframe, text='Calib. Step', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._calib_step_var = StringVar()
+        self._calib_step_var.set('2')
+        self._calib_step_entry = Entry(self._cframe, textvariable=self._calib_step_var, width=5)
+        self._calib_step_entry.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
+        self._calib_step_entry.bind('<FocusOut>', self._on_calib_step_change)
+        self._calib_step_entry.bind('<Return>', self._on_calib_step_change)
         curr_row += 1
 
         # Redraw Region section
@@ -631,6 +643,42 @@ class Window:
 
         self.tlabel['text'] = Window._SLIDER_TOOLTIPS[index]
 
+    def _on_calib_step_change(self, event=None):
+        """Handle calibration step size change"""
+        try:
+            val_str = self._calib_step_var.get().strip()
+            if not val_str:
+                return  # Empty input, don't update
+            
+            val = int(val_str)
+            
+            # Validate range: 1 to 10
+            if val < 1:
+                val = 1
+                self._calib_step_var.set(str(val))
+            elif val > 10:
+                val = 10
+                self._calib_step_var.set(str(val))
+            
+            # Save to tools config
+            if 'calibration_settings' not in self.tools:
+                self.tools['calibration_settings'] = {}
+            self.tools['calibration_settings']['step_size'] = val
+            
+            try:
+                if not getattr(self, '_initializing', False):
+                    with open(self._config_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                print(f"Failed to save config: {e}")
+            
+            self.tlabel['text'] = 'Calibration step size updated. Lower values = more accurate but slower.'
+            
+        except ValueError:
+            # Invalid input, revert to default
+            self._calib_step_var.set('2')
+            self.tlabel['text'] = 'Invalid step size. Please enter a number between 1 and 10.'
+
     def _on_pause_key_entry_press(self, event):
         # Only allow setting the pause key when not drawing
         if not self.busy:
@@ -676,6 +724,13 @@ class Window:
             self.bot.pause_key = self.tools.get('pause_key', 'p')
             self._pause_key_entry.delete(0, END)
             self._pause_key_entry.insert(0, self.bot.pause_key)
+
+            # Load calibration step size setting
+            if 'calibration_settings' in self.tools:
+                calib_step = self.tools['calibration_settings'].get('step_size', 2)
+                self._calib_step_var.set(str(calib_step))
+            else:
+                self._calib_step_var.set('2')
 
             # Load saved drawing settings
             if 'drawing_settings' in self.tools:
@@ -823,10 +878,13 @@ class Window:
                 self.bot.color_button['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
                 self.bot.color_button['modifiers']['alt'] = bool(mods.get('alt', False))
                 self.bot.color_button['modifiers']['shift'] = bool(mods.get('shift', False))
-                # Update UI checkbox
-                self._colorbutton_var.set(1 if self.bot.color_button['enabled'] else 0)
-                # Enable checkbox only if Color Button is configured (status: true)
-                self._colorbutton_cb.config(state='normal' if cb.get('status', False) else 'disabled')
+                # Update main UI checkbox to reflect new state
+                try:
+                    self._colorbutton_var.set(1 if self.bot.color_button['enabled'] else 0)
+                    # Enable checkbox only if Color Button is configured (status: true)
+                    self._colorbutton_cb.config(state='normal' if cb.get('status', False) else 'disabled')
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -906,13 +964,26 @@ class Window:
                     'alt': False,
                     'shift': False
                 }
+            },
+            'color_preview_spot': {
+                'name': 'Color Preview Spot',
+                'button': None,
+                'enabled': False,
+                'coords': None,
+                'data': None,
+                'modifiers': {
+                    'ctrl': False,
+                    'alt': False,
+                    'shift': False
+                },
+                'status': False
             }
         }
 
         # Build a dedicated setup_tools mapping (only the tools) so the
         # SetupWindow doesn't iterate non-tool keys (like drawing_settings).
         setup_tools = {}
-        for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer', 'Color Button', 'Color Button Okay']:
+        for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer', 'Color Button', 'Color Button Okay', 'color_preview_spot']:
             existing = self.tools.get(tool_name, {})
             merged = default_tools[tool_name].copy()
             merged.update(existing if isinstance(existing, dict) else {})
@@ -1100,6 +1171,111 @@ class Window:
         elif self.busy:
             # Simple test draw finished
             self.tlabel['text'] = 'Simple test draw completed!'
+            self._set_busy(False)
+
+    @is_free
+    def start_calibration_thread(self):
+        """Start the color calibration process in a separate thread"""
+        # Check if required tools are configured
+        custom_colors_data = self.tools.get('Custom Colors', {}).get('box')
+        if not custom_colors_data or (isinstance(custom_colors_data, list) and len(custom_colors_data) == 0):
+            messagebox.showerror(self.title, "Custom Colors tool not configured. Please run Setup first.")
+            self._set_busy(False)
+            return
+        
+        preview_spot_coords = self.tools.get('color_preview_spot', {}).get('coords')
+        if not preview_spot_coords:
+            messagebox.showerror(self.title, "Color Preview Spot tool not configured. Please run Setup first.")
+            self._set_busy(False)
+            return
+        
+        # Get step size from entry field
+        try:
+            step = int(self._calib_step_var.get())
+        except ValueError:
+            step = 2  # Default to 2 if invalid
+        
+        # Store step size in tools config
+        if 'calibration_settings' not in self.tools:
+            self.tools['calibration_settings'] = {}
+        self.tools['calibration_settings']['step_size'] = step
+        
+        # Create and start calibration thread
+        self._calibration_thread_obj = Thread(target=self._calibration_thread)
+        self._calibration_thread_obj.start()
+        self._manage_calibration_thread()
+
+    def _manage_calibration_thread(self):
+        """Manage the calibration thread and update progress"""
+        if getattr(self, '_calibration_thread_obj', None) is not None and self._calibration_thread_obj.is_alive() and self.busy:
+            # Check if calibration was cancelled
+            if self.bot.terminate:
+                self.tlabel['text'] = 'Calibration cancelled by user (ESC pressed)'
+                self._set_busy(False)
+                return
+            
+            self._root.after(500, self._manage_calibration_thread)
+            # Update progress based on calibration state
+            if hasattr(self.bot, '_calibration_progress'):
+                total = self.bot._calibration_progress.get('total', 0)
+                current = self.bot._calibration_progress.get('current', 0)
+                if total > 0:
+                    percent = (current / total) * 100
+                    self.tlabel['text'] = f"Calibrating: {current}/{total} colors ({percent:.1f}%)"
+                else:
+                    self.tlabel['text'] = f"Calibrating: {current} colors..."
+        elif self.busy:
+            # Calibration finished or cancelled
+            if self.bot.terminate:
+                self.tlabel['text'] = 'Calibration cancelled by user (ESC pressed)'
+                # Reset terminate flag for next calibration
+                self.bot.terminate = False
+            else:
+                self.tlabel['text'] = 'Calibration completed!'
+            self._set_busy(False)
+
+    def _calibration_thread(self):
+        """Execute the color calibration process"""
+        try:
+            # Get grid_box and preview_point from tools
+            grid_box = self.tools.get('Custom Colors', {}).get('box')
+            preview_point = self.tools.get('color_preview_spot', {}).get('coords')
+            
+            if not grid_box or not preview_point:
+                self.tlabel['text'] = 'Error: Missing calibration configuration data'
+                self._set_busy(False)
+                return
+            
+            # Get step size
+            step = self.tools.get('calibration_settings', {}).get('step_size', 2)
+            
+            # Initialize progress tracking
+            self.bot._calibration_progress = {'total': 0, 'current': 0}
+            
+            # Calculate total positions to calibrate
+            if isinstance(grid_box, (list, tuple)):
+                grid_width = grid_box[2] - grid_box[0]
+                grid_height = grid_box[3] - grid_box[1]
+            else:
+                grid_width = grid_box.get('width', 0)
+                grid_height = grid_box.get('height', 0)
+            total_positions = ((grid_width // step) + 1) * ((grid_height // step) + 1)
+            self.bot._calibration_progress['total'] = total_positions
+            
+            # Run calibration
+            self.bot.calibrate_custom_colors(grid_box, preview_point, step=step)
+            
+            # Save calibration data to file
+            calib_file = 'color_calibration.json'
+            if self.bot.save_color_calibration(calib_file):
+                self.tlabel['text'] = f'Calibration saved to {calib_file} with {len(self.bot.color_calibration_map)} colors'
+            else:
+                self.tlabel['text'] = 'Failed to save calibration data'
+            
+        except Exception as e:
+            traceback.print_exc()
+            messagebox.showerror(self.title, f'Calibration failed: {str(e)}')
+        finally:
             self._set_busy(False)
 
     def simple_test_draw(self):
