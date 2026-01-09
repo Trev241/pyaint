@@ -191,15 +191,15 @@ class Window:
         buttons[5]['command'] = self.start_draw_thread
 
         self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
-        self._teclbl.grid(column=0, row=5, columnspan=2, sticky='w', padx=5, pady=5)
+        self._teclbl.grid(column=0, row=6, columnspan=2, sticky='w', padx=5, pady=5)
         modes = [Bot.SLOTTED, Bot.LAYERED]
         self._tecvar = StringVar()
         self._tecvar.set(modes[1])
         self._mode = modes[1]
         self._teclst = OptionMenu(self._cframe, self._tecvar, self._mode, *modes, command=self._update_mode)
-        self._teclst.grid(column=0, row=6, columnspan=2, sticky='ew', padx=5, pady=5)
+        self._teclst.grid(column=0, row=7, columnspan=2, sticky='ew', padx=5, pady=5)
 
-        curr_row = 7
+        curr_row = 8
 
         # For every slider option in options, option layout is    :    (name, default, from, to)
         defaults = self.bot.settings
