@@ -127,7 +127,6 @@ dmypy.json
 .pyre/
 
 # Project specific
-/assets
 /pyaint-env
 /cache
 
@@ -148,3 +147,7 @@ config.json
 /ui/__pycache__
 color_calibration.json
 .roo/memory.md
+assets/Canvas_preview.png
+assets/Color Grid_preview.png
+assets/color_preview_spot_preview.png
+assets/Custom Colors_preview.png

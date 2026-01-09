@@ -287,6 +287,14 @@ class Window:
         self._colorbutton_cb.grid(column=1, row=curr_row, padx=5, pady=5, sticky='w')
         curr_row += 1
 
+        # Skip first color option
+        Label(self._cframe, text='Skip First Color', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._skip_first_color_var = IntVar()
+        self._skip_first_color_cb = Checkbutton(self._cframe, text='Skip first color', variable=self._skip_first_color_var,
+            command=self._on_skip_first_color_toggle)
+        self._skip_first_color_cb.grid(column=1, row=curr_row, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
         # Pause Key Setting
         Label(self._cframe, text='Pause Key', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
         self._pause_key_entry = Entry(self._cframe)
@@ -551,6 +559,19 @@ class Window:
         if 'Color Button' not in self.tools:
             self.tools['Color Button'] = {'status': False, 'coords': None, 'enabled': False, 'delay': 0.1, 'modifiers': {'ctrl': False, 'alt': False, 'shift': False}}
         self.tools['Color Button']['enabled'] = enabled
+        try:
+            if not getattr(self, '_initializing', False):
+                with open(self._config_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
+                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
+        except Exception as e:
+            print(f"Failed to save config: {e}")
+
+    def _on_skip_first_color_toggle(self):
+        enabled = bool(self._skip_first_color_var.get())
+        # Update bot state and tools dict
+        self.bot.skip_first_color = enabled
+        self.tools['skip_first_color'] = enabled
         try:
             if not getattr(self, '_initializing', False):
                 with open(self._config_path, 'w', encoding='utf-8') as f:
@@ -885,6 +906,13 @@ class Window:
                     self._colorbutton_cb.config(state='normal' if cb.get('status', False) else 'disabled')
                 except Exception:
                     pass
+        except Exception:
+            pass
+
+        # Apply Skip First Color setting to bot if present
+        try:
+            self.bot.skip_first_color = bool(self.tools.get('skip_first_color', 0))
+            self._skip_first_color_var.set(1 if self.bot.skip_first_color else 0)
         except Exception:
             pass
 

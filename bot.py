@@ -109,6 +109,7 @@ class Bot:
         self.options = Bot.IGNORE_WHITE
         self.config_file = config_file
         self.drawing = False  # Flag to indicate if currently drawing
+        self.skip_first_color = False  # Skip first color when drawing
 
         # Drawing state for pause/resume
         self.draw_state = {
@@ -626,6 +627,11 @@ class Bot:
         self.drawing = True  # Mark as actively drawing
         last_stroke_end = None  # Track last stroke position for jump detection
 
+        # Load calibration data if file exists but not yet loaded
+        if os.path.exists('color_calibration.json') and (self.color_calibration_map is None or not self.color_calibration_map):
+            print("[Calibration] Loading calibration data from color_calibration.json")
+            self.load_color_calibration('color_calibration.json')
+
         # Calculate total strokes for progress tracking
         self.total_strokes = sum(len(lines) for lines in cmap.values())
         self.start_time = time.time()
@@ -637,6 +643,11 @@ class Bot:
         print(f"Estimated drawing time: {estimated_str}")
 
         for color_idx, (c, lines) in enumerate(cmap.items()):
+            # Skip the first color if skip_first_color is enabled
+            if color_idx == 0 and self.skip_first_color:
+                print(f"[Skip First Color] Skipping first color: {c}")
+                continue
+
             # Skip colors already drawn if resuming
             if color_idx < self.draw_state['color_idx']:
                 continue
@@ -651,9 +662,10 @@ class Bot:
             print(f"Switching to color {c} - {num_strokes} cached coordinate points")
 
             # If New Layer is enabled, click the new-layer button with modifiers
+            # Skip on first color when skip_first_color is enabled
             try:
                 nl = self.new_layer
-                if nl.get('enabled') and nl.get('coords'):
+                if nl.get('enabled') and nl.get('coords') and not (color_idx == 0 and self.skip_first_color):
                     nx, ny = nl['coords']
                     print(f"[NewLayer] attempting click at {(nx, ny)} with mods={nl.get('modifiers')}")
 
@@ -795,25 +807,34 @@ class Bot:
                     print(f"[DEBUG] Waiting {delay} seconds after spectrum click...")
                     time.sleep(delay)
                 else:
-                    # Fallback to keyboard input method
-                    try:
-                        cc_box = self._custom_colors
-                        center_x = cc_box[0] + cc_box[2] // 2
-                        center_y = cc_box[1] + cc_box[3] // 2
-                        print(f"[DEBUG] Spectrum not available - clicking center of box at: ({center_x}, {center_y})")
-                        pyautogui.click((center_x, center_y), clicks=3, interval=.15)
-                    except:
-                        raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
-                    print(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
-                    pyautogui.press('tab', presses=7, interval=.05)
-                    for val in c:
-                        numbers = (d for d in str(val))
-                        for n in numbers:
-                            pyautogui.press(str(n))
+                    # Check if manual color selection occurred (color_button_okay enabled)
+                    # If so, skip the keyboard input method since user already selected the color
+                    # Also skip if color_calibration.json exists (calibration data available)
+                    if not self.color_button_okay.get('enabled', False) and not os.path.exists('color_calibration.json'):
+                        # Fallback to keyboard input method
+                        try:
+                            cc_box = self._custom_colors
+                            center_x = cc_box[0] + cc_box[2] // 2
+                            center_y = cc_box[1] + cc_box[3] // 2
+                            print(f"[DEBUG] Spectrum not available - clicking center of box at: ({center_x}, {center_y})")
+                            pyautogui.click((center_x, center_y), clicks=3, interval=.15)
+                        except:
+                            raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
+                        print(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
+                        pyautogui.press('tab', presses=7, interval=.05)
+                        for val in c:
+                            numbers = (d for d in str(val))
+                            for n in numbers:
+                                pyautogui.press(str(n))
+                            pyautogui.press('tab')
                         pyautogui.press('tab')
-                    pyautogui.press('tab')
-                    pyautogui.press('enter')
-                    pyautogui.PAUSE = 0.0
+                        pyautogui.press('enter')
+                        pyautogui.PAUSE = 0.0
+                    else:
+                        if os.path.exists('color_calibration.json'):
+                            print(f"[DEBUG] Color calibration file exists - skipping keyboard input method")
+                        else:
+                            print(f"[DEBUG] Manual color selection detected - skipping keyboard input method")
 
             # If Color Button Okay Mode is enabled, click "Set Okay" button after color selection
             try:
@@ -1035,7 +1056,12 @@ class Bot:
         self.drawing = True
         lines_drawn = 0
         self.start_time = time.time()  # Track start time for test draw
-        
+
+        # Load calibration data if file exists but not yet loaded
+        if os.path.exists('color_calibration.json') and (self.color_calibration_map is None or not self.color_calibration_map):
+            print("[Calibration] Loading calibration data from color_calibration.json")
+            self.load_color_calibration('color_calibration.json')
+
         # Estimate time for the full cmap (not just test lines)
         self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
         estimated_str = self._format_time(self.estimated_time_seconds)
@@ -1059,21 +1085,30 @@ class Bot:
                     delay = self.color_button.get('delay', 0.1)
                     time.sleep(delay)
                 else:
-                    # Fallback to keyboard input method
-                    try:
-                        cc_box = self._custom_colors
-                        pyautogui.click((cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2), clicks=3, interval=.15)
-                    except:
-                        raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
-                    pyautogui.press('tab', presses=7, interval=.05)
-                    for val in c:
-                        numbers = (d for d in str(val))
-                        for n in numbers:
-                            pyautogui.press(str(n))
+                    # Check if manual color selection occurred (color_button_okay enabled)
+                    # If so, skip the keyboard input method since user already selected the color
+                    # Also skip if color_calibration.json exists (calibration data available)
+                    if not self.color_button_okay.get('enabled', False) and not os.path.exists('color_calibration.json'):
+                        # Fallback to keyboard input method
+                        try:
+                            cc_box = self._custom_colors
+                            pyautogui.click((cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2), clicks=3, interval=.15)
+                        except:
+                            raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
+                        pyautogui.press('tab', presses=7, interval=.05)
+                        for val in c:
+                            numbers = (d for d in str(val))
+                            for n in numbers:
+                                pyautogui.press(str(n))
+                            pyautogui.press('tab')
                         pyautogui.press('tab')
-                    pyautogui.press('tab')
-                    pyautogui.press('enter')
-                    pyautogui.PAUSE = 0.0
+                        pyautogui.press('enter')
+                        pyautogui.PAUSE = 0.0
+                    else:
+                        if os.path.exists('color_calibration.json'):
+                            print(f"[DEBUG] Color calibration file exists - skipping keyboard input method")
+                        else:
+                            print(f"[DEBUG] Manual color selection detected - skipping keyboard input method")
 
             for line_idx, line in enumerate(lines):
                 if lines_drawn >= max_lines:
