@@ -37,9 +37,10 @@ pip install -r requirements.txt
 
 **Solution:**
 ```bash
-pip install pypiwin32
-pip install pynput
+pip install -r requirements.txt
 ```
+
+This installs all required dependencies: Pillow, PyAutoGUI, and pynput.
 
 ---
 

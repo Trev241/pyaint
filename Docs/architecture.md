@@ -232,6 +232,7 @@ User clicks "Start"
   ├─> Drawing thread starts
   │     ├─> Reset state (terminate=False, paused=False)
   │     ├─> For each color in cmap (sorted):
+  │     │     ├─> Skip first color if enabled and color_idx == 0
   │     │     ├─> If New Layer enabled:
   │     │     │     ├─> Press modifiers (CTRL/ALT/SHIFT)
   │     │     │     ├─> Click new_layer coords
@@ -772,7 +773,6 @@ total_time = (strokes * delay)
 **Chosen**: `pynput` (global monitoring)
 
 **Alternatives Considered**:
-- `keyboard` library: Simpler but less reliable
 - `pyautogui.press()`: Requires focus, can't detect ESC
 - `tkinter` hotkeys: Limited to window focus
 

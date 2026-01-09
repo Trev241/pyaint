@@ -154,6 +154,7 @@ class Bot:
 | `options` | int | Drawing flags |
 | `drawing` | bool | Currently drawing flag |
 | `draw_state` | dict | State for pause/resume recovery |
+| `skip_first_color` | bool | Skip first color when drawing (default: False) |
 | `new_layer` | dict | New layer configuration |
 | `color_button` | dict | Color button configuration |
 | `color_button_okay` | dict | Color button okay configuration |
@@ -748,6 +749,7 @@ class Window:
 **Drawing Options:**
 - Ignore White Pixels
 - Use Custom Colors
+- Skip First Color
 - Enable New Layer
 - Enable Color Button
 - Enable Color Button Okay

@@ -725,7 +725,6 @@ Thread management via [`_manage_*_thread()`](ui/window.py:1041) methods.
 - **PyAutoGUI** - Mouse and keyboard automation
 - **Pillow** - Image processing
 - **pynput** - Global input monitoring
-- **keyboard** - Keyboard state checking
 - **tkinter** - GUI framework
 
 ### Testing

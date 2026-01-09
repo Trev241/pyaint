@@ -16,6 +16,7 @@ An intelligent drawing automation tool that converts images into precise mouse m
 - **Color Optimization**: Precision settings for color accuracy vs. performance
 - **Smart Movement**: Jump delay optimization for large cursor movements
 - **Background Handling**: Option to ignore white pixels for cleaner results
+- **Skip First Color**: Skip the first color when drawing - useful when you want to start from the second color or when the first color is already present on the canvas
 
 ### Drawing Modes
 - **Test Draw**: Draw first 20 lines to calibrate brush size before full drawing
@@ -123,9 +124,11 @@ An intelligent drawing automation tool that converts images into precise mouse m
 
 ### Region-Based Redrawing
 1. Load your image
-2. Click and drag on the image preview to select a region
-3. Click **"Redraw Region"** to draw only the selected area
-4. Useful for fixing mistakes or adding details without a full redraw
+2. Click **"Pick Region"** to select a specific area on your canvas
+3. Click on the upper-left and lower-right corners of the region you want to redraw
+4. Click **"Draw Region"** to draw only the selected area
+5. Useful for fixing mistakes or adding details without a full redraw
+6. The selected region is automatically scaled to match the canvas size
 
 ### Controls
 - **ESC**: Stop current drawing operation
@@ -153,10 +156,14 @@ An intelligent drawing automation tool that converts images into precise mouse m
 - **Ignore White Pixels**: Skip drawing white areas
 - **Use Custom Colors**: Enable advanced color mixing
 - **New Layer**: Automatic layer creation with modifiers
+- **Skip First Color**: Skip drawing the first color in the sequence - also skips new layer creation for the first color when enabled
 
 ### Hotkeys
 - **Pause Key**: Configurable key for pause/resume (any keyboard key)
 - **ESC**: Emergency stop for all operations
+
+### Calibration Settings
+- **Calibration Step**: Step size for color calibration (1-10 pixels) - lower values provide more accurate calibration but take longer to complete
 
 ### Palette Configuration
 - **Rows/Columns**: Define palette grid dimensions
@@ -189,6 +196,32 @@ Configuration wizard for initializing palette, canvas, and custom color regions 
 - **Pillow**: Image processing and manipulation
 - **pynput**: Global keyboard input monitoring
 - **NumPy**: Mathematical computations (via Pillow)
+
+## Color Calibration System
+
+The color calibration system provides precise color matching for custom colors by scanning the color spectrum grid and recording the RGB values displayed at each position.
+
+### How It Works
+1. **Calibration Process**: The bot systematically moves through the color spectrum grid, clicking at each position and capturing the RGB value shown in the preview spot
+2. **Data Storage**: Calibration data is saved to `color_calibration.json` for reuse across sessions
+3. **Exact Matching**: When drawing, the bot first tries to find an exact color match within a configurable tolerance (default: 20)
+4. **Fallback**: If no exact match is found, it falls back to the nearest color using Euclidean distance calculation
+
+### Usage
+1. Run **Setup** and configure the **Custom Colors** grid area
+2. Configure the **Color Preview Spot** where the selected color is displayed
+3. Click **"Run Calibration"** to start the calibration process
+4. Adjust the **Calibration Step** setting (1-10) to balance accuracy vs. calibration time:
+   - Lower values (1-3): More accurate, slower calibration
+   - Higher values (5-10): Faster calibration, less precise
+5. Wait for calibration to complete - progress is displayed in real-time
+6. Calibration data is automatically saved and loaded for future drawing sessions
+
+### Benefits
+- **Accurate Color Selection**: Solves issues where the bot picks wrong colors (e.g., white instead of yellow)
+- **Persistent Data**: Calibration data persists between sessions
+- **Configurable Precision**: Adjust step size for your specific needs
+- **Tolerance Matching**: Finds exact matches within tolerance before falling back to nearest color
 
 ## Troubleshooting
 
