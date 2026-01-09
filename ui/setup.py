@@ -100,8 +100,9 @@ class SetupWindow:
                 for ci, name in enumerate(('ctrl', 'alt', 'shift')):
                     iv = IntVar()
                     iv.set(1 if mods.get(name, False) else 0)
+                    # FIXED: Capture k as default argument tk to avoid lambda closure bug
                     cb = Checkbutton(settings_frame, text=name.upper(), variable=iv,
-                                     command=lambda n=name, iv=iv: self._on_modifier_toggle(k, n, iv))
+                                     command=lambda tk=k, n=name, iv=iv: self._on_modifier_toggle(tk, n, iv))
                     cb.grid(column=2 + ci, row=0, padx=2, sticky='w')
                     mv[name] = iv
                 self._mod_vars[k] = mv
