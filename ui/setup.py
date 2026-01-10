@@ -66,7 +66,9 @@ class SetupWindow:
         self._statuses = {}
 
         for idt, (k, v) in enumerate(self.tools.items()):
-            Label(frame, text=k, font=SetupWindow.TITLE_FONT).grid(column=0, row=idt, sticky='w', padx=5, pady=5)
+            # Use the 'name' field for display if it exists, otherwise use the key
+            display_name = v.get('name', k) if isinstance(v, dict) else k
+            Label(frame, text=display_name, font=SetupWindow.TITLE_FONT).grid(column=0, row=idt, sticky='w', padx=5, pady=5)
             status = Label(
                 frame, 
                 text='INITIALIZED' if v['status'] else 'NOT INITIALIZED', 
@@ -87,7 +89,7 @@ class SetupWindow:
             # Instead, do "lambda t=tool : self._start_listening(t)" which will pass the tool of the current iteration for every new callback.
             # (Note that t here stores the current tool as a default argument)
             Button(settings_frame, text='Initialize', command=lambda n=k, t=v : self._start_listening(n, t)).grid(column=0, columnspan=2, row=0, sticky='ew', padx=5, pady=5)
-            # For New Layer and Color Button, show modifier checkboxes instead of a preview button
+            
             if k == 'New Layer' or k == 'Color Button' or k == 'Color Button Okay':
                 # Create modifier checkboxes (CTRL, ALT, SHIFT)
                 from tkinter import Checkbutton, IntVar
@@ -97,11 +99,15 @@ class SetupWindow:
                 for ci, name in enumerate(('ctrl', 'alt', 'shift')):
                     iv = IntVar()
                     iv.set(1 if mods.get(name, False) else 0)
+                    # FIXED: Capture k as default argument tk to avoid lambda closure bug
                     cb = Checkbutton(settings_frame, text=name.upper(), variable=iv,
-                                     command=lambda n=name, iv=iv: self._on_modifier_toggle(k, n, iv))
+                                     command=lambda tk=k, n=name, iv=iv: self._on_modifier_toggle(tk, n, iv))
                     cb.grid(column=2 + ci, row=0, padx=2, sticky='w')
                     mv[name] = iv
                 self._mod_vars[k] = mv
+            elif k == 'color_preview_spot':
+                # Color preview spot doesn't need any extra buttons (no modifiers, no preview)
+                pass
             else:
                 Button(settings_frame, text='Preview', command=lambda n=k : self._set_preview(n)).grid(column=2, columnspan=1, row=0, sticky='ew', padx=2, pady=5)
                 
@@ -208,8 +214,11 @@ class SetupWindow:
 
         self._coords = []
         self._clicks = 0
-        # Determine number of clicks required (New Layer, Color Button, and Color Button Okay use single-click)
-        self._required_clicks = 1 if self._tool_name in ('New Layer', 'Color Button', 'Color Button Okay') else 2
+        
+        # FIXED: Added 'color_preview_spot' to the tuple checking for single-click tools
+        # Using the correct configuration key name
+        self._required_clicks = 1 if self._tool_name in ('New Layer', 'Color Button', 'Color Button Okay', 'color_preview_spot') else 2
+        
         prompt = 'Click the location of the button.' if self._required_clicks == 1 else 'Click on the UPPER LEFT and LOWER RIGHT corners of the tool.'
         if messagebox.askokcancel(self.title, prompt) == True:
             self._listener = Listener(on_click=self._on_click)
@@ -1190,7 +1199,8 @@ class SetupWindow:
                 init_functions = {
                     'Palette': self.bot.init_palette,
                     'Canvas': self.bot.init_canvas,
-                    'Custom Colors': self.bot.init_custom_colors
+                    'Custom Colors': self.bot.init_custom_colors,
+                    'color_preview_spot': lambda box: None  # Single-click tool, no init needed
                 }
 
                 if self._required_clicks == 2:
