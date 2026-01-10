@@ -90,8 +90,7 @@ class SetupWindow:
             # (Note that t here stores the current tool as a default argument)
             Button(settings_frame, text='Initialize', command=lambda n=k, t=v : self._start_listening(n, t)).grid(column=0, columnspan=2, row=0, sticky='ew', padx=5, pady=5)
             
-            # FIXED: Added 'color_preview_spot' to the condition using the correct key name
-            if k == 'New Layer' or k == 'Color Button' or k == 'Color Button Okay' or k == 'color_preview_spot':
+            if k == 'New Layer' or k == 'Color Button' or k == 'Color Button Okay':
                 # Create modifier checkboxes (CTRL, ALT, SHIFT)
                 from tkinter import Checkbutton, IntVar
                 self._mod_vars = getattr(self, '_mod_vars', {})
@@ -106,6 +105,9 @@ class SetupWindow:
                     cb.grid(column=2 + ci, row=0, padx=2, sticky='w')
                     mv[name] = iv
                 self._mod_vars[k] = mv
+            elif k == 'color_preview_spot':
+                # Color preview spot doesn't need any extra buttons (no modifiers, no preview)
+                pass
             else:
                 Button(settings_frame, text='Preview', command=lambda n=k : self._set_preview(n)).grid(column=2, columnspan=1, row=0, sticky='ew', padx=2, pady=5)
                 
