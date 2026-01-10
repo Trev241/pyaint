@@ -788,11 +788,12 @@ class Bot:
 
             # DEBUG: Log color selection details
             print(f"[DEBUG] Selecting color: {c}")
-            print(f"[DEBUG] Color in palette: {c in self._palette.colors}")
+            print(f"[DEBUG] Color in palette: {self._palette is not None and c in self._palette.colors}")
             print(f"[DEBUG] Color Button enabled: {self.color_button.get('enabled', False)}")
             print(f"[DEBUG] Custom colors box: {self._custom_colors}")
             
-            if c in self._palette.colors:
+            # Check if palette exists and color is in palette before accessing it
+            if self._palette is not None and c in self._palette.colors:
                 print(f"[DEBUG] Using palette click at: {self._palette.colors_pos[c]}")
                 pyautogui.click(self._palette.colors_pos[c])
             else:
@@ -1074,7 +1075,8 @@ class Bot:
             # Log color change
             print(f"Switching to color {c} for test draw")
 
-            if c in self._palette.colors:
+            # Check if palette exists and color is in palette before accessing it
+            if self._palette is not None and c in self._palette.colors:
                 pyautogui.click(self._palette.colors_pos[c])
             else:
                 # Try to find the color in the spectrum map
