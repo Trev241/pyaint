@@ -274,6 +274,22 @@ pyaint/
 ### Original Videos
 You can watch the bot in action [here](https://youtu.be/qXfUc9KuVlg) and [here](https://youtu.be/kj0iqZkIG1k).
 
+
+#### Usage with gimp
+Demostrates the ability to use within gimp, with new layers and custom colors calibrated.
+
+https://github.com/user-attachments/assets/965556a4-f72b-4e24-a9ea-160732c6be51
+
+
+#### Usage with MS Paint
+Demostrates the ability to use within MS Paint, with custom colors calibrated.
+
+https://github.com/user-attachments/assets/50f2f344-8ca9-439b-8722-0175356ad59e
+
+Calibration is recomended but not required. You only need to calibrate once, but if you use a different drawing app,
+it's recomened to calibrate. If you can not calibrate then dont worry about it, it'll try it's best to match via Euclidean search.
+
+
 ### Contributing
 Suggestions and contributions are welcome. Please ensure compatibility with the existing codebase and maintain the application's stability.
 
