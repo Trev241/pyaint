@@ -198,10 +198,10 @@ Configuration is stored in [`config.json`](../config.json) with the following st
 ```json
 {
   "drawing_settings": {
-    "delay": 0.15,
-    "pixel_size": 3,
-    "precision": 0.896,
-    "jump_delay": 0.059
+    "delay": 0.1,
+    "pixel_size": 12,
+    "precision": 0.9,
+    "jump_delay": 0.5
   },
   "Palette": {
     "status": true,

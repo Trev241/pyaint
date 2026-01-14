@@ -715,11 +715,18 @@ finally:
 **Approximation Formula:**
 
 ```
-total_time = (strokes * delay) 
+total_time = (strokes * delay)
            + (jumps * jump_delay)
            + (colors * 0.5)
            + (modifiers * 0.1)
 ```
+
+**Behavior Details:**
+
+- **Jump Delay Threshold**: Cursor movements greater than 5 pixels trigger jump delay
+- **Stroke Segmentation**: Long lines are divided into 2-10 segments for smooth drawing
+- **Time Comparison Display**: After drawing completes, actual time vs. estimated time is shown
+- **Cache Cleanup**: Cache files are automatically cleaned up on application exit
 
 ### 3. Caching
 

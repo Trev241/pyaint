@@ -96,14 +96,16 @@ class Bot:
     DELAY, STEP, ACCURACY, JUMP_DELAY = tuple(i for i in range(4))
     
     def __init__(self, config_file='config.json')
-    def init_palette(self, colors_pos=None, prows=None, pcols=None, 
+    def init_palette(self, colors_pos=None, prows=None, pcols=None,
                    pbox=None, valid_positions=None, manual_centers=None)
     def init_canvas(self, cabox)
     def init_custom_colors(self, ccbox)
+    def _scan_spectrum(self, ccbox)
+    def _find_nearest_spectrum_color(self, target_color)
     def calibrate_custom_colors(self, grid_box, preview_point, step=2)
     def save_color_calibration(self, filepath)
     def load_color_calibration(self, filepath)
-    def get_calibrated_color_position(self, target_rgb, tolerance=20)
+    def get_calibrated_color_position(self, target_rgb, tolerance=20, k_neighbors=4)
     def process(self, file, flags=0, mode=LAYERED)
     def process_region(self, file, region, flags=0, mode=LAYERED, canvas_target=None)
     def draw(self, cmap)
@@ -131,7 +133,7 @@ class Bot:
 
 | Index | Name | Default | Range | Description |
 |-------|-------|---------|-------------|
-| 0 | `DELAY` | 0.15 | 0.01-10.0s | Stroke timing delay |
+| 0 | `DELAY` | 0.1 | 0.01-10.0s | Stroke timing delay |
 | 1 | `STEP` | 12 | 3-50 | Pixel size step |
 | 2 | `ACCURACY` | 0.9 | 0.0-1.0 | Color precision |
 | 3 | `JUMP_DELAY` | 0.5 | 0.0-2.0s | Delay for cursor jumps > 5px |
@@ -152,12 +154,17 @@ class Bot:
 | `settings` | list | [delay, step, accuracy, jump_delay] |
 | `progress` | float | Processing progress (0-100) |
 | `options` | int | Drawing flags |
-| `drawing` | bool | Currently drawing flag |
+| `drawing` | bool | Flag indicating if bot is actively drawing |
 | `draw_state` | dict | State for pause/resume recovery |
-| `skip_first_color` | bool | Skip first color when drawing (default: False) |
+| `skip_first_color` | bool | Flag to skip first color when drawing (default: False) |
 | `new_layer` | dict | New layer configuration |
 | `color_button` | dict | Color button configuration |
 | `color_button_okay` | dict | Color button okay configuration |
+| `mspaint_mode` | dict | MSPaint mode configuration |
+| `total_strokes` | int | Total number of strokes for progress tracking |
+| `completed_strokes` | int | Number of completed strokes |
+| `start_time` | float | Timestamp when drawing started |
+| `estimated_time_seconds` | float | Estimated drawing time in seconds |
 | `_canvas` | tuple | Canvas box (x, y, w, h) |
 | `_palette` | Palette | Palette object |
 | `_custom_colors` | tuple | Custom colors box |
@@ -359,7 +366,7 @@ if success:
     print(f"Loaded {len(bot.color_calibration_map)} color mappings")
 ```
 
-##### `get_calibrated_color_position(target_rgb, tolerance=20)`
+##### `get_calibrated_color_position(target_rgb, tolerance=20, k_neighbors=4)`
 
 Find exact calibrated color position with tolerance fallback.
 
@@ -369,6 +376,7 @@ Find exact calibrated color position with tolerance fallback.
 |-----------|--------|----------|-------------|
 | `target_rgb` | tuple | - | Target color (r, g, b) |
 | `tolerance` | int | 20 | Maximum color difference for match |
+| `k_neighbors` | int | 4 | Number of nearest colors to use for interpolation |
 
 **Returns:** tuple or None - (x, y) coordinates or None
 

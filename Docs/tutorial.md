@@ -94,6 +94,12 @@ You need to configure the following tools:
 5. **New Layer** - Button to create new layers (optional)
 6. **Color Button** - Button to open color picker (optional)
 7. **Color Button Okay** - Button to confirm color selection (optional)
+8. **MSPaint Mode** - Double-click on palette instead of single click (optional)
+    - **MSPaint Mode checkbox**: Enable/disable double-click behavior
+    - **MSPaint Mode delay**: Delay between double-clicks in seconds (default: 0.5)
+
+9. **Calibration Step** - Pixel step for color calibration scanning (1-10)
+    - **Calibration Step Size entry**: Set pixel step size for calibration (default: 2)
 
 ### Configuring Palette
 

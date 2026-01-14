@@ -34,7 +34,7 @@ Complete guide to configuring Pyaint's settings and tools.
 ```json
 {
   "drawing_settings": {
-    "delay": 0.15,
+    "delay": 0.1,
     "pixel_size": 12,
     "precision": 0.9,
     "jump_delay": 0.5
@@ -376,7 +376,7 @@ Complete guide to configuring Pyaint's settings and tools.
 
 | Setting | Default | Min | Max |
 |---------|---------|-----|-----|
-| Delay | 0.15s | 0.01s | 10.0s |
+| Delay | 0.1s | 0.01s | 10.0s |
 | Pixel Size | 12 | 3 | 50 |
 | Precision | 0.9 | 0.0 | 1.0 |
 | Jump Delay | 0.5s | 0.0s | 2.0s |

@@ -113,7 +113,7 @@ In the Control Panel, adjust these settings:
 
 | Setting | Range | Description | Recommended |
 |----------|--------|-------------|--------------|
-| Delay | 0.01-10.0s | Stroke timing | 0.15s |
+| Delay | 0.01-10.0s | Stroke timing | 0.1s |
 | Pixel Size | 3-50 | Detail level | 12 |
 | Precision | 0.0-1.0 | Color accuracy | 0.9 |
 | Jump Delay | 0.0-2.0s | Cursor jump delay | 0.5s |
@@ -140,6 +140,12 @@ Toggle these checkboxes as needed:
 - **Enable New Layer**: Automatically create new layers for each color
 - **Enable Color Button**: Click color picker button before selecting colors
 - **Enable Color Button Okay**: Click confirmation button after color selection
+- **Enable MSPaint Mode**: Double-click on palette instead of single click (optional)
+    - **MSPaint Mode checkbox**: Enable/disable double-click behavior
+    - **MSPaint Mode delay**: Delay between double-clicks in seconds (default: 0.5)
+- **Color Button delay entry**: Set delay after color button click (0.01-5.0s)
+- **Color Button Okay enable checkbox**: Enable/disable clicking confirmation button
+- **Color Button Okay delay entry**: Set delay after color button okay click (0.01-5.0s)
 
 ## Basic Drawing
 
