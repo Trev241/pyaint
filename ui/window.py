@@ -42,7 +42,7 @@ from tkinter.ttk import (
 
 def is_free(func):
     """
-    Decorator that only executes a function when the bot is not busy by checking the
+    Decorator that only executes a function when the bot is not busy by checking that
     `self.busy` flag. Keeps decorator at module scope to avoid descriptor/type issues.
     """
 
@@ -293,6 +293,23 @@ class Window:
         self._skip_first_color_cb = Checkbutton(self._cframe, text='Skip first color', variable=self._skip_first_color_var,
             command=self._on_skip_first_color_toggle)
         self._skip_first_color_cb.grid(column=1, row=curr_row, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        # MSPaint Mode option
+        Label(self._cframe, text='MSPaint Mode', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._mspaint_mode_var = IntVar()
+        self._mspaint_mode_cb = Checkbutton(self._cframe, text='Enable double-click', variable=self._mspaint_mode_var,
+            command=self._on_mspaint_mode_toggle)
+        self._mspaint_mode_cb.grid(column=1, row=curr_row, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        # MSPaint Mode delay setting
+        Label(self._cframe, text='MSPaint Delay (s)', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._mspaint_delay_var = StringVar()
+        self._mspaint_delay_entry = Entry(self._cframe, textvariable=self._mspaint_delay_var, width=5)
+        self._mspaint_delay_entry.bind('<FocusOut>', self._on_mspaint_delay_change)
+        self._mspaint_delay_entry.bind('<Return>', self._on_mspaint_delay_change)
+        self._mspaint_delay_entry.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
         curr_row += 1
 
         # Pause Key Setting
@@ -580,6 +597,60 @@ class Window:
         except Exception as e:
             print(f"Failed to save config: {e}")
 
+    def _on_mspaint_mode_toggle(self):
+        enabled = bool(self._mspaint_mode_var.get())
+        # Update bot state and tools dict
+        self.bot.mspaint_mode['enabled'] = enabled
+        if 'MSPaint Mode' not in self.tools:
+            self.tools['MSPaint Mode'] = {'enabled': False, 'delay': 0.5}
+        self.tools['MSPaint Mode']['enabled'] = enabled
+        try:
+            if not getattr(self, '_initializing', False):
+                with open(self._config_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
+                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
+        except Exception as e:
+            print(f"Failed to save config: {e}")
+
+    def _on_mspaint_delay_change(self, event=None):
+        """Handle changes to MSPaint Mode delay entry field with validation"""
+        try:
+            val_str = self._mspaint_delay_var.get().strip()
+            if not val_str:
+                return  # Empty input, don't update
+            
+            val = float(val_str)
+            
+            # Validate range: 0.01 to 5.0
+            if val < 0.01:
+                val = 0.01
+                self._mspaint_delay_var.set(str(val))
+            elif val > 5.0:
+                val = 5.0
+                self._mspaint_delay_var.set(str(val))
+            
+            # Update bot state
+            self.bot.mspaint_mode['delay'] = round(val, 3)
+            
+            # Save to tools config
+            if 'MSPaint Mode' not in self.tools:
+                self.tools['MSPaint Mode'] = {'enabled': False, 'delay': 0.5}
+            self.tools['MSPaint Mode']['delay'] = self.bot.mspaint_mode['delay']
+            
+            try:
+                if not getattr(self, '_initializing', False):
+                    with open(self._config_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                print(f"Failed to save config: {e}")
+            
+            self.tlabel['text'] = 'MSPaint Mode delay updated. This is the wait time between double-clicks on the palette.'
+            
+        except ValueError:
+            # Invalid input, revert to current bot setting
+            self._mspaint_delay_var.set(str(self.bot.mspaint_mode.get('delay', 0.5)))
+            self.tlabel['text'] = 'Invalid delay value. Please enter a number between 0.01 and 5.0'
+
     def _on_delay_entry_change(self, event=None):
         """Handle changes to the delay entry field with validation"""
         try:
@@ -701,9 +772,9 @@ class Window:
             self.tlabel['text'] = 'Invalid step size. Please enter a number between 1 and 10.'
 
     def _on_pause_key_entry_press(self, event):
-        # Only allow setting the pause key when not drawing
+        # Only allow setting pause key when not drawing
         if not self.busy:
-            # When not drawing, allow setting the pause key by typing in the entry field
+            # When not drawing, allow setting pause key by typing in the entry field
             key_name = event.keysym.lower()
             # Handle special cases
             if key_name.startswith('f') and key_name[1:].isdigit():
@@ -712,7 +783,7 @@ class Window:
                 # For special keys, keep as-is
                 pass
             else:
-                # For regular keys, use the char
+                # For regular keys, use char
                 key_name = event.char.lower() if event.char else key_name
 
             # Update the entry field and bot's pause key
@@ -720,7 +791,7 @@ class Window:
             self._pause_key_entry.insert(0, key_name)
             self.bot.pause_key = key_name
 
-            # Save the pause key to config file
+            # Save pause key to config file
             self.tools['pause_key'] = key_name
             try:
                 if not getattr(self, '_initializing', False):
@@ -807,8 +878,8 @@ class Window:
                 if 'Palette' in self.tools:
                     palette_config = self.tools['Palette']
                     
-                    # If we have valid_positions, use them to reconstruct the palette
-                    # This handles the case where user has manually edited color positions
+                    # If we have valid_positions, use them to reconstruct palette
+                    # This handles case where user has manually edited color positions
                     if (palette_config.get('box') and 
                         palette_config.get('rows') and 
                         palette_config.get('cols') and 
@@ -916,6 +987,17 @@ class Window:
         except Exception:
             pass
 
+        # Apply MSPaint Mode settings to bot if present
+        try:
+            mm = self.tools.get('MSPaint Mode')
+            if mm:
+                self.bot.mspaint_mode['enabled'] = bool(mm.get('enabled', False))
+                self.bot.mspaint_mode['delay'] = float(mm.get('delay', 0.5))
+                self._mspaint_mode_var.set(1 if self.bot.mspaint_mode['enabled'] else 0)
+                self._mspaint_delay_var.set(str(self.bot.mspaint_mode['delay']))
+        except Exception:
+            pass
+
         # Apply Color Button Okay settings to bot if present
         try:
             cbo = self.tools.get('Color Button Okay')
@@ -933,8 +1015,6 @@ class Window:
                 self.bot.color_button_okay['modifiers']['shift'] = bool(mods.get('shift', False))
         except Exception:
             pass
-
-    pass
 
     def _set_busy(self, val):
         self.busy = val
@@ -1008,7 +1088,7 @@ class Window:
             }
         }
 
-        # Build a dedicated setup_tools mapping (only the tools) so the
+        # Build a dedicated setup_tools mapping (only tools) so that
         # SetupWindow doesn't iterate non-tool keys (like drawing_settings).
         setup_tools = {}
         for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer', 'Color Button', 'Color Button Okay', 'color_preview_spot']:
@@ -1149,7 +1229,7 @@ class Window:
         try:
             cache_file = self.bot.precompute(self._imname, flags=self.draw_options, mode=self._mode)
 
-            # Load the cached data to estimate drawing time
+            # Load cached data to estimate drawing time
             cache_data = self.bot.load_cached(cache_file)
             if cache_data:
                 drawing_eta = self.bot.estimate_drawing_time(cache_data['cmap'])
@@ -1181,7 +1261,7 @@ class Window:
 
     @is_free
     def start_simple_test_draw_thread(self):
-        """Start the simple test draw in a separate thread"""
+        """Start simple test draw in a separate thread"""
         if not hasattr(self.bot, '_canvas') or self.bot._canvas is None:
             messagebox.showerror(self.title, "Canvas not configured. Please run Setup first.")
             self._set_busy(False)
@@ -1192,7 +1272,7 @@ class Window:
         self._manage_simple_test_draw_thread()
 
     def _manage_simple_test_draw_thread(self):
-        """Manage the simple test draw thread"""
+        """Manage simple test draw thread"""
         if getattr(self, '_simple_test_thread_obj', None) is not None and self._simple_test_thread_obj.is_alive() and self.busy:
             self._root.after(500, self._manage_simple_test_draw_thread)
             self.tlabel['text'] = "Simple test drawing in progress..."
@@ -1203,7 +1283,7 @@ class Window:
 
     @is_free
     def start_calibration_thread(self):
-        """Start the color calibration process in a separate thread"""
+        """Start color calibration process in a separate thread"""
         # Check if required tools are configured
         custom_colors_data = self.tools.get('Custom Colors', {}).get('box')
         if not custom_colors_data or (isinstance(custom_colors_data, list) and len(custom_colors_data) == 0):
@@ -1234,7 +1314,7 @@ class Window:
         self._manage_calibration_thread()
 
     def _manage_calibration_thread(self):
-        """Manage the calibration thread and update progress"""
+        """Manage calibration thread and update progress"""
         if getattr(self, '_calibration_thread_obj', None) is not None and self._calibration_thread_obj.is_alive() and self.busy:
             # Check if calibration was cancelled
             if self.bot.terminate:
@@ -1263,7 +1343,7 @@ class Window:
             self._set_busy(False)
 
     def _calibration_thread(self):
-        """Execute the color calibration process"""
+        """Execute color calibration process"""
         try:
             # Get grid_box and preview_point from tools
             grid_box = self.tools.get('Custom Colors', {}).get('box')
@@ -1311,7 +1391,7 @@ class Window:
         try:
             t = time.time()
 
-            messagebox.showinfo(self.title, 'Simple test draw: Will draw 5 lines (1/4 canvas width each) starting from upper-left corner.\n\nPlease select your desired color in the painting app first. No color picking will occur.')
+            messagebox.showinfo(self.title, 'Simple test draw: Will draw 5 lines (1/4 canvas width each) starting from upper-left corner.\n\nPlease select your desired color in painting app first. No color picking will occur.')
             self._root.iconify()
 
             # Clear any previous termination/paused state
@@ -1340,7 +1420,7 @@ class Window:
 
     @is_free
     def start_draw_thread(self):
-        # `_draw_thread` is the actual Thread object used elsewhere; keep that name.
+        # `_draw_thread` is actual Thread object used elsewhere; keep that name.
         self._draw_thread = Thread(target=self.start)
         self._draw_thread.start()
         self._manage_draw_thread()
@@ -1385,7 +1465,7 @@ class Window:
             test_lines = min(20, total_lines)
             print(f"Test drawing first {test_lines} lines out of {total_lines} total")
 
-            messagebox.showinfo(self.title, f'Test drawing the first {test_lines} lines. Adjust your brush size in the painting app, then use the full "Start" button.')
+            messagebox.showinfo(self.title, f'Test drawing first {test_lines} lines. Adjust your brush size in the painting app, then use the full "Start" button.')
             self._root.iconify()
             # Clear any previous termination/paused state so test can be retried
             self.bot.terminate = False
@@ -1462,14 +1542,14 @@ class Window:
             self._coords += x, y
 
             if self._clicks == self._required_clicks:
-                # Determining corner coordinates based on received input. ImageGrab.grab() always expects
+                # Determining corner coordinates based on the received input. ImageGrab.grab() always expects
                 # the first pair of coordinates to be above and on the left of the second pair
                 top_left = min(self._coords[0], self._coords[2]), min(self._coords[1], self._coords[3])
                 bot_right = max(self._coords[0], self._coords[2]), max(self._coords[1], self._coords[3])
                 box = top_left + bot_right
                 print(f'Capturing box: {box}')
 
-                # Store the selected region coordinates
+                # Store selected region coordinates
                 self._redraw_region = box
                 self._redraw_region_label['text'] = f"Region: ({box[0]}, {box[1]}) to ({box[2]}, {box[3]})"
                 self.tlabel['text'] = "Redraw region selected. Click 'Draw Region' to start drawing."
@@ -1522,7 +1602,7 @@ class Window:
             self._cancel_redraw_pick()
 
     def _cancel_redraw_pick(self):
-        """Cancel the redraw region selection"""
+        """Cancel redraw region selection"""
         self._redraw_picking = False
         self.tlabel['text'] = "Redraw region selection cancelled."
 
@@ -1568,7 +1648,7 @@ class Window:
             cmap = self.bot.process_region(self._imname, image_region, flags=self.draw_options, mode=self._mode, canvas_target=canvas_target)
 
             if not cmap or len(cmap) == 0:
-                self.tlabel['text'] = "No drawable content found in selected region."
+                self.tlabel['text'] = "No drawable content found in the selected region."
                 return
 
             # Show drawing time estimate
@@ -1576,7 +1656,7 @@ class Window:
             print(f"Estimated redraw time: {drawing_eta}")
             self.tlabel['text'] = f"Starting redraw - ETA: {drawing_eta}"
 
-            messagebox.showwarning(self.title, f'Redrawing selected region.\nPress ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
+            messagebox.showwarning(self.title, f'Redrawing the selected region.\nPress ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
             self._root.iconify()
 
             # Clear any previous termination/paused state
@@ -1695,7 +1775,7 @@ class Window:
             if keyboard.is_pressed('esc'):
                 raise KeyboardInterrupt("User cancelled with ESC")
 
-            # Validate the points
+            # Validate points
             if len(points) == 2:
                 x1, y1 = points[0]
                 x2, y2 = points[1]
@@ -1709,7 +1789,7 @@ class Window:
                 self.tlabel['text'] = "Redraw region selected. Click 'Draw Region' to start drawing."
                 self._redraw_picking = False
 
-                # Restore the UI
+                # Restore UI
                 self._root.deiconify()
                 self._root.wm_state('normal')
 
@@ -1719,13 +1799,13 @@ class Window:
         except KeyboardInterrupt:
             print("Mouse capture cancelled by user")
             self._cancel_redraw_pick()
-            # Restore the UI
+            # Restore UI
             self._root.deiconify()
             self._root.wm_state('normal')
         except Exception as e:
             print(f"Error during mouse capture: {e}")
             self._cancel_redraw_pick()
-            # Restore the UI
+            # Restore UI
             self._root.deiconify()
             self._root.wm_state('normal')
 
@@ -1765,6 +1845,8 @@ class Window:
 
             messagebox.showwarning(self.title, f'Press ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
             self._root.iconify()
+            # Allow time for user to click inside the app to draw in
+            time.sleep(5)
             # Clear any previous termination/paused state before starting
             self.bot.terminate = False
             self.bot.paused = False
