@@ -131,7 +131,7 @@ Complete guide to configuring Pyaint's settings and tools.
 
 **Range:** 0.01 - 10.0 seconds
 
-**Default:** 0.15
+**Default:** 0.1
 
 **Description:** Controls the duration of each brush stroke.
 
@@ -256,7 +256,7 @@ Complete guide to configuring Pyaint's settings and tools.
 - Used when "Use Custom Colors" is enabled
 - Falls back to keyboard input if not configured
 
-##### MSPaint Mode
+### MSPaint Mode
 
 **Status:** Optional
 
@@ -272,7 +272,7 @@ Complete guide to configuring Pyaint's settings and tools.
 - Waits configured delay between clicks
 - Useful for MS Paint and similar applications requiring double-click
 
-#### Color Preview Spot
+### Color Preview Spot
 
 **Status:** Optional (required for color calibration)
 

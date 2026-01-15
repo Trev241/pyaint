@@ -113,6 +113,7 @@ class Bot:
         self.config_file = config_file
         self.drawing = False  # Flag to indicate if currently drawing
         self.skip_first_color = False  # Skip first color when drawing
+        self.jump_threshold = 5  # Pixel distance threshold for jump detection (default 5)
 
         # Drawing state for pause/resume
         self.draw_state = {
@@ -220,6 +221,15 @@ class Bot:
         # This allows clicking on specific colors in the spectrum instead of using keyboard input
         self._spectrum_map = self._scan_spectrum(ccbox)
         print(f"[Spectrum] Scanned {len(self._spectrum_map)} unique colors from custom colors spectrum")
+        
+        # Load color calibration data if file exists
+        if os.path.exists('color_calibration.json'):
+            try:
+                with open('color_calibration.json', 'r') as f:
+                    calibration_json = json.load(f)
+                print(f"[Color Calibration] Loaded {len(calibration_json)} mapped colors")
+            except Exception as e:
+                print(f"[Color Calibration] Error loading calibration data: {e}")
     
     def _scan_spectrum(self, ccbox):
         """
@@ -346,7 +356,10 @@ class Bot:
             for x in range(grid_x, grid_x + grid_width, step):
                 # Increment step counter
                 current_step += 1
-                
+
+                # Update progress continuously for UI updates
+                self._calibration_progress['current'] = current_step
+
                 # Print progress every 10% or every 100 steps, whichever is more frequent
                 progress_percent = (current_step / total_steps) * 100
                 if (progress_percent - last_progress >= 10) or (current_step % 100 == 0):
@@ -356,7 +369,7 @@ class Bot:
                         avg_time_per_step = elapsed_time / current_step
                         remaining_steps = total_steps - current_step
                         estimated_remaining = remaining_steps * avg_time_per_step
-                        
+
                         # Format time remaining
                         if estimated_remaining < 60:
                             eta_str = f"{estimated_remaining:.1f}s"
@@ -370,7 +383,7 @@ class Bot:
                             eta_str = f"{hours}:{minutes:02.0f}h"
                     else:
                         eta_str = "calculating..."
-                    
+
                     print(f"[Calibration] Progress: {current_step}/{total_steps} ({progress_percent:.1f}%) - {len(self.color_calibration_map)} colors mapped - ETA: {eta_str}")
                     last_progress = progress_percent
                 # Check for termination (ESC key pressed)
@@ -382,17 +395,17 @@ class Bot:
                     except:
                         pass
                     return self.color_calibration_map
-                
+
                 # Move mouse to the current grid position
                 pyautogui.moveTo(x, y)
                 time.sleep(0.01)  # Small delay to allow UI to update
-                
+
                 # Capture 1x1 pixel at preview point
                 try:
                     pixel_img = ImageGrab.grab(bbox=preview_bbox)
                     r, g, b = pixel_img.getpixel((0, 0))
                     color = (r, g, b)
-                    
+
                     # Store the calibration data
                     self.color_calibration_map[color] = (x, y)
                 except Exception as e:
@@ -705,7 +718,9 @@ class Bot:
                 print("[Calibration] Loading calibration data from color_calibration.json")
                 self.load_color_calibration('color_calibration.json')
             else:
-                print("[Calibration] Calibration data already loaded from color_calibration.json")
+                print(f"[Calibration] Calibration data already loaded from color_calibration.json ({len(self.color_calibration_map)} colors)")
+        else:
+            print("[Calibration] No calibration data available")
 
         # Create progress overlay window
         self.create_progress_overlay()
@@ -1098,7 +1113,7 @@ class Bot:
                 start_pos = line[0]
                 if last_stroke_end is not None:
                     jump_distance = ((start_pos[0] - last_stroke_end[0]) ** 2 + (start_pos[1] - last_stroke_end[1]) ** 2) ** 0.5
-                    if jump_distance > 5:  # More than 5 pixels apart
+                    if jump_distance > self.jump_threshold:
                         print(f"Large jump detected ({jump_distance:.1f} pixels) - adding {self.settings[Bot.JUMP_DELAY]}s delay")
                         time.sleep(self.settings[Bot.JUMP_DELAY])
 
@@ -1232,7 +1247,9 @@ class Bot:
                 print("[Calibration] Loading calibration data from color_calibration.json")
                 self.load_color_calibration('color_calibration.json')
             else:
-                print("[Calibration] Calibration data already loaded from color_calibration.json")
+                print(f"[Calibration] Calibration data already loaded from color_calibration.json ({len(self.color_calibration_map)} colors)")
+        else:
+            print("[Calibration] No calibration data available")
 
         # Create progress overlay window
         self.create_progress_overlay()
@@ -1478,7 +1495,7 @@ class Bot:
                     # Check for jump delay if this isn't the first stroke in this color
                     if last_end_pos is not None:
                         jump_distance = ((start_pos[0] - last_end_pos[0]) ** 2 + (start_pos[1] - last_end_pos[1]) ** 2) ** 0.5
-                        if jump_distance > 5:  # Same threshold as in draw method
+                        if jump_distance > self.jump_threshold:
                             estimated_seconds += self.settings[Bot.JUMP_DELAY]
 
                     # Update last position for next jump check

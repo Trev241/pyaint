@@ -14,8 +14,9 @@ A comprehensive guide to using Pyaint - an intelligent drawing automation tool t
 8. [Drawing Workflow](#drawing-workflow)
 9. [Region-Based Redrawing](#region-based-redrawing)
 10. [Controls](#controls)
-11. [Tips & Best Practices](#tips--best-practices)
-12. [Troubleshooting](#troubleshooting)
+11. [File Management](#file-management)
+12. [Tips & Best Practices](#tips--best-practices)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -101,6 +102,8 @@ You need to configure the following tools:
 9. **Calibration Step** - Pixel step for color calibration scanning (1-10)
     - **Calibration Step Size entry**: Set pixel step size for calibration (default: 2)
 
+10. **Jump Threshold** - Pixel distance threshold for jump detection (1-100 pixels, default: 5)
+
 ### Configuring Palette
 
 The Palette is essential - it tells Pyaint where your colors are located.
@@ -149,7 +152,7 @@ Some applications require clicking a button to access the color picker.
 
 1. Click **"Initialize"** next to Color Button
 2. Click on the **Color Button** location
-3. Set the **Delay** (time to wait after click)
+3. Set to **Delay** (time to wait after click)
 4. Optionally, select modifier keys (CTRL, ALT, SHIFT) if needed
 
 ### Configuring Color Button Okay (Optional)
@@ -159,18 +162,29 @@ If your application requires confirming color selection:
 1. Click **"Initialize"** next to Color Button Okay
 2. Click on the **Okay/Confirm button** location
 3. Optionally, select modifier keys (CTRL, ALT, SHIFT) if needed
+
 ### Configuring MSPaint Mode (Optional)
 
 For applications like MS Paint that require double-clicking colors:
 
 1. Click **"Initialize"** next to MSPaint Mode
-2. Use the "Enable double-click" checkbox to enable the feature
-3. Set the **MSPaint Delay (seconds)** - time between double-clicks (default: 0.5s)
+2. Use to **"Enable double-click"** checkbox to enable the feature
+3. Set to **MSPaint Delay (seconds)** - time between double-clicks (default: 0.5s)
 
 **Behavior:**
 - When enabled, double-clicks on palette colors instead of single click
 - Waits configured delay between the two clicks
 - Useful for MS Paint and similar applications requiring double-click interaction
+
+### Configuring Jump Threshold (Optional)
+
+**Jump Threshold** controls when jump delay is applied during drawing:
+
+1. Set to **Jump Thresh (px)** entry field (1-100 pixels, default: 5)
+2. When cursor jumps more than this distance between strokes, jump delay is applied
+3. Higher threshold = fewer jump delays (faster drawing)
+4. Lower threshold = more jump delays (prevents unintended strokes)
+
 ---
 
 ## Advanced Palette Configuration
@@ -289,6 +303,7 @@ Located in the Control Panel, these settings control drawing behavior:
 - **Purpose**: Controls the duration of each stroke
 - **Recommendation**: Increase if your machine is slow and doesn't respond well to fast input
 - **Tip**: Lower values = faster drawing but may cause missed strokes on slow systems
+- **UI Control**: Text entry field (not a slider)
 
 #### Pixel Size
 
@@ -305,6 +320,7 @@ Located in the Control Panel, these settings control drawing behavior:
 - **Lower values**: Reduced color variety, faster processing
 - **Higher values**: Better color matching, slower processing
 - **Recommendation**: 0.9 for a good balance
+- **UI Control**: Slider
 
 #### Jump Delay
 
@@ -312,6 +328,7 @@ Located in the Control Panel, these settings control drawing behavior:
 - **Purpose**: Adds delay when the cursor jumps more than 5 pixels between strokes
 - **Recommendation**: 0.5 seconds
 - **Tip**: Helps prevent unintended strokes from rapid cursor movement
+- **UI Control**: Slider
 
 #### Calibration Step
 
@@ -320,6 +337,16 @@ Located in the Control Panel, these settings control drawing behavior:
 - **Recommendation**: 2 for a good balance of accuracy and speed
 - **Lower**: More accurate but slower calibration
 - **Higher**: Faster but less accurate calibration
+- **UI Control**: Entry field
+
+#### Jump Threshold
+
+- **Range**: 1 - 100 pixels
+- **Purpose**: Pixel distance threshold for triggering jump delay
+- **Recommendation**: 5 pixels
+- **UI Control**: Entry field
+- **Lower threshold**: More jump delays applied (safer but slower)
+- **Higher threshold**: Fewer jump delays (faster but risk of unintended strokes)
 
 ### Drawing Mode
 
@@ -355,11 +382,13 @@ Toggle these checkboxes as needed:
 - Requires Custom Colors tool to be configured
 - Considerably lengthens draw duration
 - Provides unlimited color options
+
 #### Skip First Color
 
 - Skips drawing the first color in the color map
 - Useful when you want to start with a specific color
 - Default: disabled
+
 #### Enable New Layer
 
 - Automatically creates a new layer before drawing
@@ -489,6 +518,83 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 
 ---
 
+## File Management
+
+### Overview
+
+The File Management section in the Control Panel provides two buttons for managing configuration files:
+
+- **Remove Calibration**: Deletes color calibration file
+- **Reset Config**: Deletes main configuration file
+
+### Remove Calibration
+
+**Purpose**: Clear color calibration data to force recalibration or remove outdated data.
+
+**What it Deletes**: `color_calibration.json`
+
+**When to Use:**
+- Color calibration data is outdated or incorrect
+- You want to recalibrate from scratch
+- Calibration was done on different display settings
+
+**Actions:**
+1. Click **"Remove Calibration"** button
+2. Confirm the deletion in dialog
+3. Color calibration map is cleared from memory
+4. Next drawing will require new calibration or revert to keyboard input
+
+**Restoration**: The calibration data will be rebuilt automatically when:
+- You run **"Run Calibration"** again, OR
+- No calibration file exists and drawing uses custom colors (falls back to keyboard input)
+
+### Reset Config
+
+**Purpose**: Reset all settings, tools, and preferences to default values.
+
+**What it Deletes**: `config.json`
+
+**What is Lost:**
+- All tool configurations (Palette, Canvas, Custom Colors, etc.)
+- All drawing settings (Delay, Pixel Size, Precision, Jump Delay)
+- All feature toggles (New Layer, Color Button, MSPaint Mode, etc.)
+- Pause key configuration
+- Last used image URL
+
+**When to Use:**
+- Configuration is corrupted or causing issues
+- You want to start completely fresh
+- Settings are lost and need to be reconfigured
+
+**Actions:**
+1. Click **"Reset Config"** button
+2. Confirm the reset in warning dialog
+3. Configuration file is deleted
+4. Restart the application to load default settings
+
+**Restoration**: You will need to:
+1. Restart Pyaint (application will use built-in defaults)
+2. Run **"Setup"** to reconfigure tools
+3. Adjust drawing settings as needed
+4. Run **"Run Calibration"** if using custom colors
+
+### Confirmation Safety
+
+Both deletion operations include confirmation dialogs to prevent accidental data loss:
+- **Remove Calibration**: Confirm dialog showing which file will be deleted
+- **Reset Config**: Warning dialog listing all data that will be lost
+
+### Error Handling
+
+Both operations provide feedback:
+- Success message when file is deleted
+- Informational message if file doesn't exist
+- Error message with details if deletion fails
+
+Check the tooltip/status label at the bottom of the window for detailed feedback.
+
+---
+
 ## Tips & Best Practices
 
 ### Performance Optimization
@@ -596,7 +702,7 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 
 **Solutions**:
 - Ensure custom colors box is correctly configured
-- Verify "Use Custom Colors" checkbox is enabled
+- Verify **"Use Custom Colors"** checkbox is enabled
 - Check that spectrum scanning has completed
 - Preview the custom colors region
 
@@ -616,9 +722,9 @@ Region-based redrawing allows you to fix mistakes or add details without a full 
 
 #### "Custom colors not initialized"
 
-**Cause**: Custom Colors tool hasn't been configured but "Use Custom Colors" is enabled
+**Cause**: Custom Colors tool hasn't been configured but **"Use Custom Colors"** is enabled
 
-**Solution**: Either disable "Use Custom Colors" or configure the Custom Colors tool in Setup
+**Solution**: Either disable **"Use Custom Colors"** or configure the Custom Colors tool in Setup
 
 #### "No valid colors selected"
 

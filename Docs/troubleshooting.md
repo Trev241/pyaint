@@ -1,550 +1,642 @@
 # Pyaint Troubleshooting Guide
 
-Common issues and solutions.
+Complete troubleshooting guide for Pyaint - solving common issues and errors.
 
 ## Table of Contents
 
-- [Installation Issues](#installation-issues)
-- [Configuration Issues](#configuration-issues)
-- [Tool Configuration](#tool-configuration)
-- [Drawing Issues](#drawing-issues)
-- [Performance Issues](#performance-issues)
-- [UI Issues](#ui-issues)
+- [Common Issues](#common-issues)
 - [Error Messages](#error-messages)
-- [FAQ](#faq)
+- [Configuration Issues](#configuration-issues)
+- [Performance Issues](#performance-issues)
+- [Tool Issues](#tool-issues)
+- [Drawing Issues](#drawing-issues)
+- [Color Issues](#color-issues)
+- [File Management Issues](#file-management-issues)
 
 ---
 
-## Installation Issues
-
-### Module Not Found Errors
-
-**Error:** `ModuleNotFoundError: No module named 'pyautogui'`
-
-**Solution:**
-```bash
-pip install -r requirements.txt
-```
-
-### Permission Denied (Windows)
-
-Run Command Prompt as Administrator, then:
-```bash
-pip install -r requirements.txt
-```
-
-### pynput Installation Fails
-
-**Solution:**
-```bash
-pip install -r requirements.txt
-```
-
-This installs all required dependencies: Pillow, PyAutoGUI, and pynput.
-
----
-
-## Configuration Issues
-
-### Config File Missing or Corrupt
-
-**Solution:**
-1. Delete `config.json`
-2. Restart Pyaint
-3. Reconfigure tools via "Setup"
-
-### Invalid JSON Error
-
-**Cause:** Manually edited `config.json` with syntax errors
-
-**Solution:**
-1. Validate JSON at jsonlint.com
-2. Fix errors (commas, quotes, braces)
-3. Or delete file and reconfigure
-
-### Settings Not Saving
-
-**Causes:**
-- Read-only file system
-- Insufficient permissions
-- Application crash
-
-**Solution:**
-1. Check file permissions on `config.json`
-2. Ensure directory is writable
-
----
-
-## Tool Configuration
-
-### "Palette not initialized" Error
-
-**Solution:**
-1. Click "Setup" → "Palette"
-2. Click "Initialize"
-3. Follow prompts to click corners
-4. Click "Done"
-
-### "Canvas not initialized" Error
-
-**Solution:**
-1. Click "Setup" → "Canvas"
-2. Click "Initialize"
-3. Follow prompts
-4. Click "Done"
-
-### Palette Colors Not Matching
-
-**Causes:**
-- Misaligned palette box
-- Incorrect rows/columns
-- Invalid positions not set
-
-**Solutions:**
-
-**Check Alignment:**
-1. Click "Setup" → "Palette" → "Preview"
-2. Verify grid matches actual palette
-3. Reinitialize if misaligned
-
-**Adjust Valid Positions:**
-1. Click "Setup" → "Palette" → "Manual Color Selection"
-2. Toggle cells as valid/invalid
-3. Click "Done"
-
-**Use Manual Centers:**
-1. Click "Set Pick Centers Mode"
-2. Click exact center of each color
-3. Click "Done"
-
-**Try Auto-Estimate:**
-1. Click "Auto-Estimate"
-2. Click "Show Centers Overlay" to verify
-
-### Canvas Position Offset
-
-**Symptom:** Drawing appears shifted on canvas
-
-**Solution:**
-1. Reinitialize canvas with correct corners
-2. Ensure upper-left is actual drawing area start
-3. Verify preview shows correct area
-
-### Custom Colors Not Working
-
-**Symptom:** "Use Custom Colors" enabled but not using spectrum
-
-**Solutions:**
-1. Configure Custom Colors tool in Setup
-2. Verify spectrum box is correct
-3. Check if using calibrated colors
-
----
-
-## Drawing Issues
-
-### Drawing Won't Start
-
-**Causes:**
-- Missing tools (palette, canvas)
-- Invalid cache
-- Image not loaded
-
-**Solutions:**
-1. Ensure palette and canvas are initialized
-2. Clear cache: delete files in `cache/` directory
-3. Load image first via URL or file path
-
-### Colors Are Wrong
-
-**Causes:**
-- Palette misconfigured
-- Precision too low
-- Using wrong color source
-
-**Solutions:**
-1. Reconfigure palette with Preview check
-2. Increase Precision setting
-3. Disable "Use Custom Colors" to use palette only
-4. Run calibration for custom colors
-
-### Drawing Too Slow
-
-**Causes:**
-- Low delay setting
-- Small pixel size
-- Many color switches
-- High jump delay
-
-**Solutions:**
-1. **Increase Delay** for faster response
-2. **Increase Pixel Size** for less detail (major speedup)
-3. Use **Slotted** mode (faster but less accurate)
-4. Enable **Ignore White Pixels** for images with white backgrounds
-5. **Decrease Jump Delay** (if no accidental strokes)
-
-### Drawing Too Fast / Missed Strokes
-
-**Causes:**
-- Delay too low for your system
-- System not responding fast enough
-
-**Solutions:**
-1. **Increase Delay** setting
-2. Close other applications to free resources
-3. **Increase Jump Delay** to prevent accidental strokes
-
-### Strokes Connecting Unintentionally
-
-**Symptom:** Lines appearing between separate strokes
-
-**Solution:**
-1. **Increase Jump Delay** (prevents rapid cursor movement)
-2. Check if painting app has "connect lines" feature enabled
-3. **Decrease Delay** slightly (faster stroke may help)
-
-### Drawing Wrong Size
-
-**Symptom:** Drawing appears too small/large on canvas
-
-**Solution:**
-1. Adjust **Pixel Size** setting
-2. **Decrease** for smaller pixels = larger image
-3. **Increase** for larger pixels = smaller image
-
-### Drawing Not Centered
-
-**Symptom:** Drawing appears in wrong canvas location
-
-**Solution:**
-1. Reinitialize canvas with correct bounds
-2. Ensure upper-left corner is correct
-3. Preview canvas area in Setup to verify
-
-### Drawing Gaps/Incomplete
-
-**Symptom:** Some areas missing or broken
-
-**Causes:**
-- Too low precision
-- Too high pixel size
-- White pixels ignored but shouldn't be
-
-**Solutions:**
-1. **Increase Precision** setting
-2. **Decrease Pixel Size** for more detail
-3. Disable "Ignore White Pixels" if needed
-
-### ESC Key Not Stopping Drawing
-
-**Symptom:** Pressing ESC doesn't stop drawing
-
-**Causes:**
-- Keyboard listener not running
-- ESC key mapping issue
-
-**Solutions:**
-1. Restart application
-2. Check console for errors
-3. Try pause key instead, then quit
-
----
-
-## Performance Issues
-
-### High Memory Usage
-
-**Symptom:** Application using lots of RAM
-
-**Causes:**
-- Large images
-- Small pixel size
-- High precision
-
-**Solutions:**
-1. Use smaller images
-2. **Increase Pixel Size**
-3. **Decrease Precision**
-4. Delete old cache files
-
-### Processing Takes Too Long
-
-**Symptom:** Image processing takes minutes
-
-**Causes:**
-- Large image
-- Small pixel size
-- High precision
-- Slotted mode (slower than layered)
-
-**Solutions:**
-1. **Increase Pixel Size** (major impact)
-2. **Decrease Precision**
-3. Use **Layered** mode
-4. Pre-compute and cache image
-5. Use smaller/resized images
-
-### Caching Not Working
-
-**Symptom:** Pre-compute doesn't speed up subsequent runs
-
-**Causes:**
-- Settings changed
-- Canvas changed
-- Cache invalid (older than 24 hours)
-
-**Solutions:**
-1. Keep settings consistent
-2. Use same canvas configuration
-3. Clear old cache manually: delete `cache/*.json`
-4. Check cache directory exists
-
----
-
-## UI Issues
-
-### Window Minimizes Unexpectedly
-
-**Symptom:** Main window minimizes at wrong times
-
-**Solution:**
-1. This is normal during drawing
-2. Click taskbar icon to restore when drawing complete
-3. Use pause key to pause and restore window
-
-### Progress Not Updating
-
-**Symptom:** Progress bar stuck or not moving
-
-**Causes:**
-- Thread crash
-- Very slow operation
-
-**Solutions:**
-1. Wait longer (may be slow)
-2. Check console for errors
-3. Use ESC to stop if stuck
-
-### Preview Image Not Showing
-
-**Symptom:** Image URL/file loaded but not displayed
-
-**Causes:**
-- Invalid URL
-- Unsupported image format
-- Network error
-
-**Solutions:**
-1. Try local file instead of URL
-2. Use PNG/JPG format
-3. Check internet connection
-4. Verify URL is accessible in browser
-
-### Setup Window Issues
-
-**Symptom:** Setup window won't close/minimize properly
-
-**Solution:**
-1. Click "Done" button (don't close with X)
-2. If stuck, close application and restart
-
-### Mouse Clicks Not Registered
-
-**Symptom:** Clicking during Setup has no effect
-
-**Causes:**
-- Window not properly minimized
-- Mouse listener not active
-
-**Solutions:**
-1. Ensure Setup window is minimized (check taskbar)
-2. Restart application
-3. Check console for mouse listener errors
+## Common Issues
+
+### Drawing not starting
+
+**Symptoms**: Clicking Start doesn't begin drawing
+
+**Possible Causes**:
+- Palette or canvas not initialized
+- No image loaded in preview
+- Invalid image file
+
+**Solutions**:
+1. Ensure palette and canvas are properly initialized (status should be green)
+2. Check that an image is loaded in the preview panel
+3. Verify the image file is valid and readable
+4. Try reloading the image
+
+### Application not responding to bot
+
+**Symptoms**: Drawing app freezes or doesn't respond to mouse movements
+
+**Possible Causes**:
+- Delay setting too low
+- Jump delay too low
+- System under heavy load
+- Application compatibility issues
+
+**Solutions**:
+1. Use ESC to stop the current drawing
+2. Increase the **Delay** setting to give the app more time
+3. Increase the **Jump Delay** setting
+4. Check if your drawing app is compatible
+5. Close other applications to reduce system load
+
+### Colors incorrect or mismatched
+
+**Symptoms**: Drawn colors don't match the source image
+
+**Possible Causes**:
+- Invalid palette configuration
+- Precision setting too low
+- Valid positions not correctly set
+- Custom colors not configured properly
+
+**Solutions**:
+1. Verify palette colors are correctly scanned
+2. Check custom colors setup if enabled
+3. Increase **Precision** setting for better color matching
+4. Ensure valid positions include all needed colors
+5. Run color calibration for improved accuracy
+6. Preview the palette to verify correct configuration
+
+### Slow drawing performance
+
+**Symptoms**: Drawing takes much longer than expected
+
+**Possible Causes**:
+- Pixel size too small (too much detail)
+- System under heavy load
+- Delay setting too high
+- Custom colors enabled (slower processing)
+
+**Solutions**:
+1. Increase **Pixel Size** setting (less detail = faster)
+2. Increase **Delay** if strokes are being missed
+3. Enable **"Ignore White Pixels"** for images with large white areas
+4. Check if your system is under heavy load
+5. Use **Slotted mode** instead of Layered mode for faster processing
+6. Consider disabling custom colors if not necessary
+
+### Palette colors not selecting correctly
+
+**Symptoms**: Bot doesn't click on the correct colors
+
+**Possible Causes**:
+- Invalid center points
+- Invalid positions marked incorrectly
+- Palette layout changed
+
+**Solutions**:
+1. Verify valid positions are marked correctly
+2. Check that centers are correctly picked
+3. Use **Precision Estimate** for better accuracy
+4. Preview the palette to verify it was captured correctly
+5. Try manual center picking
+6. Re-initialize the palette if layout changed
+
+### Custom colors not working
+
+**Symptoms**: Custom color spectrum isn't being used
+
+**Possible Causes**:
+- Custom colors box not configured
+- Checkbox not enabled
+- Spectrum scanning incomplete
+
+**Solutions**:
+1. Ensure custom colors box is correctly configured
+2. Verify **"Use Custom Colors"** checkbox is enabled
+3. Check that spectrum scanning has completed
+4. Preview the custom colors region
+5. Ensure Color Preview Spot is configured if using calibration
+
+### Drawing stops prematurely
+
+**Symptoms**: Drawing stops before completion
+
+**Possible Causes**:
+- ESC key accidentally pressed
+- System interruption
+- Error during execution
+
+**Solutions**:
+1. Check if ESC was pressed
+2. Review error messages in tooltip panel
+3. Check system logs for errors
+4. Restart the application
+5. Try drawing with different settings
 
 ---
 
 ## Error Messages
 
-### NoPaletteError
+### "Palette not initialized"
 
-**Message:** "Palette not initialized"
+**Cause**: Palette tool hasn't been configured
 
-**Solution:** Configure palette in Setup
+**Solutions**:
+1. Click **"Setup"** button
+2. Initialize the Palette by clicking **"Initialize"**
+3. Follow prompts to select palette corners
+4. Verify status shows green after initialization
 
-### NoCanvasError
+### "Canvas not initialized"
 
-**Message:** "Canvas not initialized"
+**Cause**: Canvas tool hasn't been configured
 
-**Solution:** Configure canvas in Setup
+**Solutions**:
+1. Click **"Setup"** button
+2. Initialize the Canvas by clicking **"Initialize"**
+3. Follow prompts to select canvas corners
+4. Verify status shows green after initialization
 
-### NoCustomColorsError
+### "Custom colors not initialized"
 
-**Message:** "Custom colors not initialized"
+**Cause**: Custom Colors tool hasn't been configured but **"Use Custom Colors"** is enabled
 
-**Solution:** 
-- Either disable "Use Custom Colors"
-- Or configure Custom Colors tool in Setup
+**Solutions**:
+1. Either disable **"Use Custom Colors"** checkbox, OR
+2. Click **"Setup"** button
+3. Initialize Custom Colors tool
+4. Follow prompts to select spectrum corners
 
-### CorruptConfigError
+### "No valid colors selected"
 
-**Message:** "Config file missing or invalid"
+**Cause**: All palette colors are marked as invalid
 
-**Solution:** Delete `config.json` and reconfigure
+**Solutions**:
+1. Click **"Manual Color Selection"**
+2. Click on at least one grid cell to make it valid (green)
+3. Click **"Done"** when finished
+4. Verify at least one color is marked as valid
 
-### Generic Errors
+### "Config file missing or invalid"
 
-**If you encounter other errors:**
+**Cause**: Configuration file is corrupted or missing
 
-1. Check console output for full error traceback
-2. Ensure all dependencies installed: `pip install -r requirements.txt`
-3. Check Python version (requires 3.8+)
-4. Try restarting application
-5. Report issue on GitHub with full error message
+**Solutions**:
+1. The app will use default settings
+2. Click **"Reset Config"** in File Management section
+3. Restart the application
+4. Run **"Setup"** to reconfigure tools
 
----
+### "Color calibration not found"
 
-## FAQ
+**Cause**: Color calibration file doesn't exist
 
-### Q: What is the optimal delay setting?
+**Solutions**:
+1. Run **"Run Calibration"** to create new calibration
+2. Ensure Custom Colors and Color Preview Spot are configured
+3. Set appropriate Calibration Step Size
+4. Wait for calibration to complete
 
-**A:** Start with 0.15 seconds. If strokes are being missed, increase it. If drawing is too slow, decrease it gradually.
+### "Invalid image URL"
 
-### Q: How do I know what pixel size to use?
+**Cause**: The URL provided doesn't point to a valid image
 
-**A:** 
-- Start with 12-15 for balanced detail/speed
-- Increase (20-30) for faster, less detailed drawings
-- Decrease (5-8) for more detail but slower
+**Solutions**:
+1. Verify the URL is correct
+2. Ensure the URL points directly to an image file (not a webpage)
+3. Try opening the URL in a browser to verify
+4. Use **"Open File"** to load from local disk instead
 
-### Q: Should I use Slotted or Layered mode?
+### "Region not selected"
 
-**A:**
-- **Slotted**: Simple images, speed priority
-- **Layered**: Complex images, quality priority (default)
+**Cause**: Attempting to draw a region without selecting one first
 
-### Q: What is the difference between Delay and Jump Delay?
+**Solutions**:
+1. Click **"Redraw Pick"** first
+2. Click on the upper left corner of the region
+3. Click on the lower right corner of the region
+4. Then click **"Draw Region"**
 
-**A:**
-- **Delay**: Duration of each brush stroke (always applied)
-- **Jump Delay**: Extra time when cursor jumps > 5px between strokes
+### "Drawing already in progress"
 
-### Q: Why does drawing take so long?
+**Cause**: Attempting to start a new drawing while one is already running
 
-**A:** Time depends on:
-- Image size and complexity
-- Pixel size (smaller = longer)
-- Number of colors
-- Delay setting
-
-**To speed up:**
-- Increase pixel size
-- Decrease delay
-- Use pre-computation for repeated drawings
-
-### Q: Can I pause and resume drawing?
-
-**A:** Yes! Press your configured pause key (default: 'p') to pause. Press again to resume.
-
-### Q: What does pre-compute do?
-
-**A:** Pre-processes image and saves results to cache. Subsequent runs load from cache instead of reprocessing.
-
-### Q: How do I use color calibration?
-
-**A:**
-1. Configure Custom Colors tool
-2. Configure Color Preview Spot tool
-3. Set Calibration Step Size
-4. Click "Run Calibration"
-5. Results saved to `color_calibration.json`
-
-### Q: Why are some colors wrong even after calibration?
-
-**A:**
-- Increase calibration accuracy by decreasing step size
-- Check that Color Preview Spot is correctly positioned
-- Verify Custom Colors spectrum box is accurate
-- Try higher tolerance in calibration lookup
-
-### Q: Can I draw only part of an image?
-
-**A:** Yes! Use the "Redraw Region" feature:
-1. Load image
-2. Click and drag on preview to select area
-3. Click "Redraw Region"
-
-### Q: What are modifier keys used for?
-
-**A:** For tools that require keyboard shortcuts:
-- CTRL, ALT, SHIFT modifiers
-- Useful for applications where tools need key combinations
-- Configure in Setup tool configuration
-
-### Q: How do I reset all settings?
-
-**A:**
-1. Close Pyaint
-2. Delete `config.json`
-3. Restart
-4. Reconfigure tools via Setup
-
-### Q: Can I use Pyaint with any drawing application?
-
-**A:** Most should work:
-- MS Paint
-- Clip Studio Paint
-- Photoshop
-- Krita
-- GIMP
-- And many others
-
-**Requirements:**
-- Visible palette and canvas
-- Mouse-based color selection
-- (Optional) Custom color spectrum
-
-### Q: Why does the application need to minimize during drawing?
-
-**A:** To prevent interference with the drawing process and ensure accurate mouse positioning.
-
-### Q: Can I run Pyaint while using other applications?
-
-**A:** Yes, but:
-- Window will minimize during drawing
-- Don't move the drawing application
-- Don't interfere with mouse movements
-
-### Q: How do I improve color accuracy?
-
-**A:**
-1. Use **Manual Centers** for palette
-2. Run **Color Calibration** for custom colors
-3. **Increase Precision** setting
-4. Ensure palette/preview boxes are accurate
+**Solutions**:
+1. Press ESC to stop the current drawing
+2. Wait for the drawing to complete
+3. Check if drawing is paused and resume or stop
 
 ---
 
-## Getting Help
+## Configuration Issues
 
-### Documentation
+### Settings not saving
 
-- [API Reference](./api.md) - Detailed API docs
-- [Architecture](./architecture.md) - System architecture
-- [Configuration](./configuration.md) - Settings guide
-- [Usage Guide](./usage-guide.md) - Step-by-step instructions
+**Symptoms**: Changes to settings are not persisted
 
-### Reporting Issues
+**Possible Causes**:
+- File permission issues
+- Disk full
+- Invalid JSON in config file
 
-When reporting issues, include:
-1. Full error message and traceback
-2. Your Python version
-3. Your operating system
-4. Steps to reproduce the issue
-5. Your `config.json` (with sensitive coords removed)
+**Solutions**:
+1. Check file permissions for `config.json`
+2. Ensure sufficient disk space
+3. Verify JSON syntax if editing manually
+4. Try **"Reset Config"** and reconfigure
 
-### Known Limitations
+### Invalid settings loaded
 
-- Single-threaded drawing (no parallel processing)
-- Limited by system responsiveness
-- Keyboard input fallback for colors can be slow
-- Requires visible UI elements for automation
+**Symptoms**: Settings show incorrect values on startup
+
+**Possible Causes**:
+- Corrupted configuration file
+- Manual editing errors
+- Version incompatibility
+
+**Solutions**:
+1. Click **"Reset Config"** in File Management section
+2. Restart the application
+3. Reconfigure all tools and settings
+4. Avoid manual editing of config files
+
+### Tool status not updating
+
+**Symptoms**: Tool initialization status doesn't change
+
+**Possible Causes**:
+- Preview not saved
+- Image capture failed
+- UI update delay
+
+**Solutions**:
+1. Verify the preview images were saved in `assets/` folder
+2. Try initializing the tool again
+3. Check for error messages in tooltip
+4. Restart the application
+
+---
+
+## Performance Issues
+
+### High CPU usage
+
+**Symptoms**: Application uses excessive CPU during drawing
+
+**Possible Causes**:
+- Pixel size too small
+- Custom colors enabled
+- Complex image
+
+**Solutions**:
+1. Increase **Pixel Size** to reduce processing
+2. Disable custom colors if not needed
+3. Use **Slotted mode** for faster processing
+4. Reduce image complexity if possible
+
+### Long processing time for Pre-compute
+
+**Symptoms**: Pre-computing takes very long time
+
+**Possible Causes**:
+- Large image size
+- Very small pixel size
+- Custom colors enabled
+
+**Solutions**:
+1. Use smaller images or resize before loading
+2. Increase **Pixel Size**
+3. Disable custom colors during pre-compute
+4. Consider skipping pre-compute for one-time drawings
+
+### Memory usage high
+
+**Symptoms**: Application uses a lot of memory
+
+**Possible Causes**:
+- Large cached images
+- Multiple pre-computed images
+- Layered mode
+
+**Solutions**:
+1. Use **Slotted mode** instead of Layered mode
+2. Clear cached data by restarting
+3. Reduce image size before loading
+4. Increase **Pixel Size** to reduce data
+
+---
+
+## Tool Issues
+
+### Palette initialization fails
+
+**Symptoms**: Unable to initialize palette
+
+**Possible Causes**:
+- Invalid corner selection
+- Palette area too small
+- System permissions
+
+**Solutions**:
+1. Ensure you click on actual corners, not near them
+2. Make sure palette area is large enough
+3. Check screen permissions
+4. Try restarting the application
+
+### Canvas initialization fails
+
+**Symptoms**: Unable to initialize canvas
+
+**Possible Causes**:
+- Invalid corner selection
+- Canvas area too small
+- Multiple monitors
+
+**Solutions**:
+1. Ensure you click on actual corners
+2. Make sure canvas is visible on screen
+3. Move canvas to primary monitor if using multiple displays
+4. Check screen permissions
+
+### Custom colors initialization fails
+
+**Symptoms**: Unable to initialize custom colors
+
+**Possible Causes**:
+- Spectrum not accessible
+- Invalid corner selection
+- Application blocking screenshot
+
+**Solutions**:
+1. Ensure custom color spectrum is visible
+2. Click on exact corners of spectrum
+3. Close other applications that might block screenshots
+4. Restart the application
+
+### Color calibration fails
+
+**Symptoms**: Calibration doesn't complete or produces errors
+
+**Possible Causes**:
+- Preview spot not configured
+- Spectrum not accessible
+- Calibration step too small/large
+- Application blocking mouse
+
+**Solutions**:
+1. Verify Color Preview Spot is configured
+2. Ensure custom color spectrum is accessible
+3. Adjust Calibration Step Size (try 2-5)
+4. Make sure drawing app doesn't block mouse input
+5. Close other applications that might interfere
+
+---
+
+## Drawing Issues
+
+### Drawing starts in wrong location
+
+**Symptoms**: Drawing begins offset from expected location
+
+**Possible Causes**:
+- Canvas box incorrect
+- Window moved after initialization
+- Display scaling changed
+
+**Solutions**:
+1. Re-initialize the Canvas tool
+2. Ensure drawing app window hasn't moved
+3. Check display scaling settings
+4. Restart the application if display changed
+
+### Drawing has gaps
+
+**Symptoms**: Some areas of the image are not drawn
+
+**Possible Causes**:
+- Pixel size too large
+- Ignore White Pixels enabled
+- Color not in palette
+
+**Solutions**:
+1. Decrease **Pixel Size** for more detail
+2. Disable **"Ignore White Pixels"** if needed
+3. Verify all needed colors are in palette
+4. Check that valid positions include needed colors
+
+### Drawing has artifacts
+
+**Symptoms**: Extra dots or marks appear in drawing
+
+**Possible Causes**:
+- Jump delay too low
+- Mouse sensitivity too high
+- Unexpected cursor movement
+
+**Solutions**:
+1. Increase **Jump Delay**
+2. Decrease mouse sensitivity in drawing app
+3. Increase **Delay** setting
+4. Check for interference from other software
+
+### Strokes not appearing
+
+**Symptoms**: Bot moves but no strokes appear
+
+**Possible Causes**:
+- Delay too short
+- Brush not selected
+- Drawing app not active window
+
+**Solutions**:
+1. Increase **Delay** setting
+2. Ensure brush tool is selected in drawing app
+3. Make sure drawing app is the active window
+4. Check that drawing app is responding to mouse
+
+---
+
+## Color Issues
+
+### Colors washed out
+
+**Symptoms**: Colors appear lighter/less saturated than source
+
+**Possible Causes**:
+- Precision setting too low
+- Custom colors not configured
+- Palette colors limited
+
+**Solutions**:
+1. Increase **Precision** setting
+2. Enable and configure custom colors
+3. Run color calibration
+4. Verify palette has good color variety
+
+### Colors too dark
+
+**Symptoms**: Colors appear darker than source
+
+**Possible Causes**:
+- Palette colors too dark
+- Custom colors scanning error
+- Preview spot not accurate
+
+**Solutions**:
+1. Verify palette colors are accurate
+2. Re-initialize custom colors
+3. Check Color Preview Spot location
+4. Run calibration again
+
+### Wrong color selected
+
+**Symptoms**: Bot selects different color than intended
+
+**Possible Causes**:
+- Invalid color mapping
+- Center points incorrect
+- Calibration mismatch
+
+**Solutions**:
+1. Re-pick center points in **Manual Color Selection**
+2. Use **Precision Estimate** for better accuracy
+3. Re-run color calibration
+4. Verify valid positions
+
+### Color changes too frequently
+
+**Symptoms**: Bot switches colors excessively
+
+**Possible Causes**:
+- Pixel size too small
+- Image has many color variations
+- Precision too high
+
+**Solutions**:
+1. Increase **Pixel Size**
+2. Decrease **Precision** setting
+3. Use **Slotted mode** for fewer color switches
+4. Enable **"Skip First Color"** if applicable
+
+---
+
+## File Management Issues
+
+### Cannot remove calibration
+
+**Symptoms**: Clicking "Remove Calibration" doesn't work
+
+**Possible Causes**:
+- File in use by another process
+- File permissions issue
+- Calibration file doesn't exist
+
+**Solutions**:
+1. Stop any running drawing operations
+2. Close other applications that might use the file
+3. Check file permissions for `color_calibration.json`
+4. Check tooltip for specific error message
+
+### Cannot reset config
+
+**Symptoms**: Clicking "Reset Config" doesn't work
+
+**Possible Causes**:
+- File in use by application
+- File permissions issue
+- Config file doesn't exist
+
+**Solutions**:
+1. Restart the application
+2. Close other instances of Pyaint
+3. Check file permissions for `config.json`
+4. Manually delete the file if needed
+
+### Confirmation dialog not appearing
+
+**Symptoms**: No confirmation dialog when clicking delete buttons
+
+**Possible Causes**:
+- UI unresponsive
+- Dialog appearing off-screen
+- Application frozen
+
+**Solutions**:
+1. Check if application is responding
+2. Restart the application
+3. Check application logs for errors
+4. Try the operation again after restart
+
+### File deletion fails
+
+**Symptoms**: Error message appears when trying to delete files
+
+**Possible Causes**:
+- File doesn't exist
+- File in use
+- Permissions issue
+- Disk full
+
+**Solutions**:
+1. Check tooltip for specific error message
+2. Verify file exists in project directory
+3. Close other applications using the file
+4. Check disk space
+5. Manually delete the file as last resort
+
+### Data lost after reset
+
+**Symptoms**: All settings gone after reset
+
+**Cause**: This is expected behavior of Reset Config
+
+**Prevention**:
+1. Always back up `config.json` before resetting
+2. Export important settings manually
+3. Take screenshots of your setup
+
+**Recovery**:
+1. Run **"Setup"** to reconfigure all tools
+2. Adjust drawing settings to preferred values
+3. Run calibration if using custom colors
+4. Consider keeping a backup config file for future reference
+
+### Calibration data outdated
+
+**Symptoms**: Colors don't match after display or application changes
+
+**Cause**: Calibration data from old configuration
+
+**Solutions**:
+1. Click **"Remove Calibration"** in File Management section
+2. Confirm deletion
+3. Reconfigure Custom Colors if needed
+4. Run **"Run Calibration"** again
+5. Test with a test draw before full drawing
+
+---
+
+## Getting Additional Help
+
+If you're still experiencing issues after trying these solutions:
+
+1. **Check the logs**: Look for error messages in the tooltip panel
+2. **Review configuration**: Verify all tools are correctly configured
+3. **Test simple cases**: Try with a simple image first
+4. **Restart**: Often a simple application restart resolves issues
+5. **Consult documentation**: Review the [Tutorial](./tutorial.md) and [Configuration Guide](./configuration.md)
+
+---
+
+## Prevention Tips
+
+To avoid common issues:
+
+1. **Save backups**: Keep a backup of your `config.json`
+2. **Test before full drawing**: Always run a test draw first
+3. **Keep settings moderate**: Avoid extreme delay or pixel size values
+4. **Regular calibration**: Run calibration periodically for best results
+5. **Update regularly**: Keep Pyaint updated to latest version
+6. **Monitor system**: Ensure system has sufficient resources
+7. **Clean setup**: Start fresh if experiencing persistent issues with Reset Config
