@@ -126,7 +126,7 @@ class Window:
         # Determine config file path relative to project root (one level up from ui/)
         self._config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
         self.load_config()  # Load saved config
-        # UI initialization finished — allow saving
+        # UI initialization finished - allow saving
         self._initializing = False
 
         self._root.mainloop()
