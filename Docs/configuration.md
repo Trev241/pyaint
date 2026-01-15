@@ -443,10 +443,86 @@ Edit `config.json` directly in a text editor.
 ### Resetting Configuration
 
 To reset all settings:
-1. Close Pyaint
-2. Delete `config.json`
-3. Restart Pyaint
-4. Configure tools via Setup button
+1. **Via UI**: Click "Reset Config" button in File Management section
+2. **Via Manual**: Delete `config.json` file and restart Pyaint
+3. Configure tools via Setup button
+
+---
+
+## File Management
+
+### Overview
+
+The File Management section in the Control Panel provides two buttons for managing configuration files:
+
+- **Remove Calibration**: Deletes the color calibration file
+- **Reset Config**: Deletes the main configuration file
+
+### Remove Calibration
+
+**Purpose:** Clear color calibration data to force recalibration or remove outdated data.
+
+**What it Deletes:** `color_calibration.json`
+
+**When to Use:**
+- Color calibration data is outdated or incorrect
+- You want to recalibrate from scratch
+- Calibration was done on different display settings
+
+**Actions:**
+1. Click "Remove Calibration" button
+2. Confirm the deletion in the dialog
+3. Color calibration map is cleared from memory
+4. Next drawing will require new calibration or revert to keyboard input
+
+**Restoration:** The calibration data will be rebuilt automatically when:
+- You run "Run Calibration" again, OR
+- No calibration file exists and drawing uses custom colors (falls back to keyboard input)
+
+### Reset Config
+
+**Purpose:** Reset all settings, tools, and preferences to default values.
+
+**What it Deletes:** `config.json`
+
+**What is Lost:**
+- All tool configurations (Palette, Canvas, Custom Colors, etc.)
+- All drawing settings (Delay, Pixel Size, Precision, Jump Delay)
+- All feature toggles (New Layer, Color Button, MSPaint Mode, etc.)
+- Pause key configuration
+- Last used image URL
+
+**When to Use:**
+- Configuration is corrupted or causing issues
+- You want to start completely fresh
+- Settings are lost and need to reconfigure everything
+
+**Actions:**
+1. Click "Reset Config" button
+2. Confirm the reset in the warning dialog
+3. Configuration file is deleted
+4. Restart the application to load default settings
+
+**Restoration:** You will need to:
+1. Restart Pyaint (application will use built-in defaults)
+2. Run "Setup" to reconfigure tools
+3. Adjust drawing settings as needed
+4. Run "Run Calibration" if using custom colors
+
+### Confirmation Safety
+
+Both deletion operations include confirmation dialogs to prevent accidental data loss:
+- **Remove Calibration**: Confirm dialog showing which file will be deleted
+- **Reset Config**: Warning dialog listing all data that will be lost
+
+### Error Handling
+
+Both operations provide feedback:
+- Success message when file is deleted
+- Informational message if file doesn't exist
+- Error message with details if deletion fails
+
+Check the tooltip/status label at the bottom of the window for detailed feedback.
 
 ---
 

@@ -91,6 +91,11 @@ class Window:
         self._config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
 
         self._root.title(title)
+        # Center the window on screen
+        screen_width = self._root.winfo_screenwidth()
+        screen_height = self._root.winfo_screenheight()
+        x = (screen_width - w) // 2
+        y = (screen_height - h) // 2
         self._root.geometry(f"{w}x{h}+{x}+{y}")
         
         self._root.columnconfigure(0, weight=1, uniform='column')
@@ -343,6 +348,16 @@ class Window:
         # Redraw region display
         self._redraw_region_label = Label(self._cframe, text='No region selected', font=('TkDefaultFont', 8))
         self._redraw_region_label.grid(column=0, row=curr_row, columnspan=2, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        # Delete Files section
+        Label(self._cframe, text='File Management', font=Window.TITLE_FONT).grid(column=0, row=curr_row, columnspan=2, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        self._delete_calib_btn = Button(self._cframe, text='Remove Calibration', command=self._on_delete_calibration)
+        self._delete_calib_btn.grid(column=0, row=curr_row, padx=5, pady=5, sticky='ew')
+        self._reset_config_btn = Button(self._cframe, text='Reset Config', command=self._on_reset_config)
+        self._reset_config_btn.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
         curr_row += 1
 
         # Initialize redraw state
@@ -1308,6 +1323,14 @@ class Window:
             self.tools['calibration_settings'] = {}
         self.tools['calibration_settings']['step_size'] = step
         
+        # Minimize window then start calibration
+        messagebox.showinfo(self.title, f'Press ESC to stop calibration.')
+        self._root.iconify()
+        time.sleep(1)  # Small delay before starting to allow window to minimize
+        
+        # Track calibration start time for ETA calculation
+        self._calibration_start_time = time.time()
+        
         # Create and start calibration thread
         self._calibration_thread_obj = Thread(target=self._calibration_thread)
         self._calibration_thread_obj.start()
@@ -1329,17 +1352,29 @@ class Window:
                 current = self.bot._calibration_progress.get('current', 0)
                 if total > 0:
                     percent = (current / total) * 100
-                    self.tlabel['text'] = f"Calibrating: {current}/{total} colors ({percent:.1f}%)"
+                    # Calculate ETA based on elapsed time
+                    elapsed_time = time.time() - self._calibration_start_time
+                    if current > 0 and percent < 100:
+                        avg_time_per_color = elapsed_time / current
+                        colors_remaining = total - current
+                        eta_seconds = colors_remaining * avg_time_per_color
+                        eta_str = self.bot._format_time(eta_seconds)
+                    else:
+                        eta_str = "calculating..."
+                    self.tlabel['text'] = f"Calibrating: {current}/{total} colors ({percent:.1f}%) - ETA: {eta_str}"
                 else:
-                    self.tlabel['text'] = f"Calibrating: {current} colors..."
+                    elapsed_time = time.time() - self._calibration_start_time
+                    self.tlabel['text'] = f"Calibrating: {current} colors... (Time: {elapsed_time:.0f}s)"
         elif self.busy:
             # Calibration finished or cancelled
+            total_time = time.time() - self._calibration_start_time
             if self.bot.terminate:
-                self.tlabel['text'] = 'Calibration cancelled by user (ESC pressed)'
+                self.tlabel['text'] = f'Calibration cancelled by user (ESC pressed) - Time: {total_time:.0f}s'
                 # Reset terminate flag for next calibration
                 self.bot.terminate = False
             else:
-                self.tlabel['text'] = 'Calibration completed!'
+                num_colors = len(self.bot.color_calibration_map) if hasattr(self.bot, 'color_calibration_map') else 0
+                self.tlabel['text'] = f'Calibration completed! {num_colors} colors mapped - Time: {total_time:.0f}s'
             self._set_busy(False)
 
     def _calibration_thread(self):
@@ -1384,6 +1419,9 @@ class Window:
             traceback.print_exc()
             messagebox.showerror(self.title, f'Calibration failed: {str(e)}')
         finally:
+            # Restore window after calibration completes (even if cancelled or failed)
+            self._root.deiconify()
+            self._root.wm_state('normal')
             self._set_busy(False)
 
     def simple_test_draw(self):
@@ -1605,6 +1643,42 @@ class Window:
         """Cancel redraw region selection"""
         self._redraw_picking = False
         self.tlabel['text'] = "Redraw region selection cancelled."
+
+    def _on_delete_calibration(self):
+        """Remove the color calibration file"""
+        from tkinter import messagebox
+        if messagebox.askyesno(self.title, "Are you sure you want to remove the color calibration file?\n\nThis will delete: color_calibration.json"):
+            try:
+                import os
+                calib_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'color_calibration.json')
+                if os.path.exists(calib_path):
+                    os.remove(calib_path)
+                    self.tlabel['text'] = "Color calibration file removed successfully."
+                    # Clear calibration data from bot
+                    self.bot.color_calibration_map = None
+                    print(f"[File Management] Removed calibration file: {calib_path}")
+                else:
+                    self.tlabel['text'] = "No calibration file found to remove."
+            except Exception as e:
+                self.tlabel['text'] = f"Error removing calibration file: {str(e)}"
+                print(f"[File Management] Error: {e}")
+
+    def _on_reset_config(self):
+        """Delete config.json file to reset to defaults"""
+        from tkinter import messagebox
+        if messagebox.askyesno(self.title, "Are you sure you want to reset to default settings?\n\nThis will delete: config.json\n\nAll your tool positions, settings, and preferences will be lost."):
+            try:
+                import os
+                config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+                if os.path.exists(config_path):
+                    os.remove(config_path)
+                    self.tlabel['text'] = "Config file removed successfully. Please restart the application to use defaults."
+                    print(f"[File Management] Removed config file: {config_path}")
+                else:
+                    self.tlabel['text'] = "No config file found to remove."
+            except Exception as e:
+                self.tlabel['text'] = f"Error removing config file: {str(e)}"
+                print(f"[File Management] Error: {e}")
 
     @is_free
     def _redraw_draw_thread(self):

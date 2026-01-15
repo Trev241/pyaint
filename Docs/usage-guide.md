@@ -10,6 +10,7 @@ Step-by-step instructions for using Pyaint effectively.
 - [Color Calibration](#color-calibration)
 - [Region-Based Redrawing](#region-based-redrawing)
 - [Advanced Features](#advanced-features)
+- [File Management](#file-management)
 - [Keyboard Controls](#keyboard-controls)
 - [Tips and Best Practices](#tips-and-best-practices)
 
@@ -35,18 +36,20 @@ Step-by-step instructions for using Pyaint effectively.
 
 ## Initial Setup
 
-### First Launch
+When you first launch Pyaint, you'll see a main application window with three panels:
 
-When you first launch Pyaint, you'll see a main window with three panels:
+![Main Application Window](images/main-ui.png)
 
-- **Control Panel** (left): Drawing settings and action buttons
+- **Control Panel** (left): Drawing settings and all action buttons
 - **Image Preview Panel** (right): Image loading and display
 - **Tooltip Panel** (bottom): Status messages and progress tracking
 
-### Setup Process
+The File Management section is located in the Control Panel and provides configuration file management.
 
 1. Click **"Setup"** button in Control Panel
 2. A Setup Window will appear with tools configuration
+
+![Setup Window](images/setup-window.png)
 
 ### Initializing Tools
 
@@ -146,6 +149,64 @@ Toggle these checkboxes as needed:
 - **Color Button delay entry**: Set delay after color button click (0.01-5.0s)
 - **Color Button Okay enable checkbox**: Enable/disable clicking confirmation button
 - **Color Button Okay delay entry**: Set delay after color button okay click (0.01-5.0s)
+
+### File Management
+
+The File Management section provides buttons to manage configuration files directly from the UI.
+
+#### Remove Calibration
+
+**Purpose:** Clear color calibration data to force recalibration or remove outdated data.
+
+**What it Does:** Deletes `color_calibration.json` file and clears calibration data from memory.
+
+**When to Use:**
+- Color calibration data is outdated or incorrect
+- You want to recalibrate from scratch
+- Calibration was done on different display settings
+- You're starting fresh
+
+**Steps:**
+1. Click **"Remove Calibration"** button in Control Panel
+2. Confirm deletion in the dialog
+3. Status message will confirm success or error
+
+**After Deletion:**
+- Bot will revert to keyboard input for custom colors
+- Run **"Run Calibration"** again to rebuild calibration data
+
+#### Reset Config
+
+**Purpose:** Reset all settings, tools, and preferences to default values.
+
+**What it Does:** Deletes `config.json` file to start fresh.
+
+**What is Lost:**
+- All tool configurations (Palette, Canvas, Custom Colors, etc.)
+- All drawing settings (Delay, Pixel Size, Precision, Jump Delay)
+- All feature toggles (New Layer, Color Button, MSPaint Mode, etc.)
+- Pause key configuration
+- Last used image URL
+
+**When to Use:**
+- Configuration is corrupted or causing issues
+- You want to start completely fresh
+- Settings are lost and need to reconfigure everything
+
+**Steps:**
+1. Click **"Reset Config"** button in Control Panel
+2. Confirm deletion in the warning dialog
+3. Status message will confirm success or error
+
+**After Reset:**
+- **Restart the application** to load default configurations
+- Run **"Setup"** to reconfigure all tools
+- Adjust drawing settings as needed
+- Run **"Run Calibration"** if using custom colors
+
+**Safety:**
+- Both buttons include confirmation dialogs to prevent accidental data loss
+- Check the status tooltip at the bottom of the window for detailed feedback
 
 ## Basic Drawing
 
@@ -399,6 +460,49 @@ Global hotkey for emergency stop.
 2. **Monitor progress** via the tooltip panel
 3. **Use pause/resume** to interrupt if needed
 4. **ESC to stop** if something goes wrong
+
+### File Management Section
+
+![Main UI with File Management](images/main-ui.png)
+
+The File Management section provides two buttons for managing configuration files directly from the UI:
+
+#### Remove Calibration Button
+
+**Purpose:** Clear color calibration data to force recalibration or remove outdated data.
+
+**What it Does:**
+- Deletes `color_calibration.json` file
+- Resets bot's calibration map in memory
+
+**When to Use:**
+- Calibration data is outdated or incorrect
+- You want to recalibrate from scratch
+- Calibration was done on different display settings
+
+**Safety:** Confirmation dialog prevents accidental deletion
+
+#### Reset Config Button
+
+**Purpose:** Reset all settings, tools, and preferences to default values.
+
+**What it Does:**
+- Deletes `config.json` file
+- ALL settings are reset to application defaults
+
+**What is Lost:**
+- All tool configurations (Palette, Canvas, Custom Colors, etc.)
+- All drawing settings (Delay, Pixel Size, Precision, Jump Delay)
+- All feature toggles (New Layer, Color Button, MSPaint Mode, etc.)
+- Pause key configuration
+- Last used image URL
+
+**When to Use:**
+- Configuration is corrupted or causing issues
+- You want to start completely fresh
+- Settings are lost and need to reconfigure everything
+
+**Safety:** Warning dialog alerts you that all data will be lost
 
 ### Troubleshooting
 

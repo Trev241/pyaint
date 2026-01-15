@@ -27,7 +27,7 @@ from tkinter.ttk import (
 )
 
 class SetupWindow:
-    def __init__(self, parent, bot, tools, on_complete, title='Child Window', w=700, h=800, x=5, y=5):
+    def __init__(self, parent, bot, tools, on_complete, title='Child Window', w=1600, h=900, x=5, y=5):
         self._root = Toplevel(parent)
 
         self.title = title
@@ -37,6 +37,11 @@ class SetupWindow:
         self.parent = parent
 
         self._root.title(self.title)
+        # Center the window on screen
+        screen_width = self._root.winfo_screenwidth()
+        screen_height = self._root.winfo_screenheight()
+        x = (screen_width - w) // 2
+        y = (screen_height - h) // 2
         self._root.geometry(f'{w}x{h}+{x}+{y}')
         self._root.protocol('WM_DELETE_WINDOW', self.close)
 
@@ -1240,7 +1245,9 @@ class SetupWindow:
 
                 self._listener.stop()
                 self.parent.deiconify()
+                self.parent.wm_state('normal')
                 self._root.deiconify()
+                self._root.wm_state('normal')
 
     def _validate_dimensions(self, value):
         return re.fullmatch(r'\d*', value) is not None

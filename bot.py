@@ -5,6 +5,9 @@ import hashlib
 import json
 import os
 import math
+import threading
+import tkinter as tk
+from tkinter import ttk
 from typing import Optional, Tuple, Dict, List, Any
 from PIL import ImageGrab
 
@@ -171,6 +174,13 @@ class Bot:
         # Color calibration map for custom colors: {(r,g,b): (x,y)}
         self.color_calibration_map = None
 
+        # Progress Overlay state
+        self.progress_overlay = None
+        self.progress_overlay_enabled = True  # Always enabled by default
+        self.overlay_window = None
+        self.overlay_update_thread = None
+        self.overlay_stop_event = None
+
         pyautogui.PAUSE = 0.0
         pyautogui.MINIMUM_DURATION = 0.01
 
@@ -329,6 +339,7 @@ class Bot:
         total_steps = ((grid_width // step) + 1) * ((grid_height // step) + 1)
         current_step = 0
         last_progress = 0
+        start_time = time.time()  # Track start time for ETA calculation
         
         # Loop through grid coordinates with step size
         for y in range(grid_y, grid_y + grid_height, step):
@@ -339,7 +350,28 @@ class Bot:
                 # Print progress every 10% or every 100 steps, whichever is more frequent
                 progress_percent = (current_step / total_steps) * 100
                 if (progress_percent - last_progress >= 10) or (current_step % 100 == 0):
-                    print(f"[Calibration] Progress: {current_step}/{total_steps} ({progress_percent:.1f}%) - {len(self.color_calibration_map)} colors mapped")
+                    # Calculate ETA
+                    elapsed_time = time.time() - start_time
+                    if current_step > 0:
+                        avg_time_per_step = elapsed_time / current_step
+                        remaining_steps = total_steps - current_step
+                        estimated_remaining = remaining_steps * avg_time_per_step
+                        
+                        # Format time remaining
+                        if estimated_remaining < 60:
+                            eta_str = f"{estimated_remaining:.1f}s"
+                        elif estimated_remaining < 3600:
+                            minutes = int(estimated_remaining // 60)
+                            seconds = estimated_remaining % 60
+                            eta_str = f"{minutes}:{seconds:02.0f}"
+                        else:
+                            hours = int(estimated_remaining // 3600)
+                            minutes = int((estimated_remaining % 3600) // 60)
+                            eta_str = f"{hours}:{minutes:02.0f}h"
+                    else:
+                        eta_str = "calculating..."
+                    
+                    print(f"[Calibration] Progress: {current_step}/{total_steps} ({progress_percent:.1f}%) - {len(self.color_calibration_map)} colors mapped - ETA: {eta_str}")
                     last_progress = progress_percent
                 # Check for termination (ESC key pressed)
                 if self.terminate:
@@ -370,7 +402,21 @@ class Bot:
         # Release mouse up at the end
         pyautogui.mouseUp(button='left')
         
+        # Calculate actual time and show completion message
+        actual_time = time.time() - start_time
+        if actual_time < 60:
+            actual_str = f"{actual_time:.1f}s"
+        elif actual_time < 3600:
+            minutes = int(actual_time // 60)
+            seconds = actual_time % 60
+            actual_str = f"{minutes}:{seconds:02.0f}"
+        else:
+            hours = int(actual_time // 3600)
+            minutes = int((actual_time % 3600) // 60)
+            actual_str = f"{hours}:{minutes:02.0f}h"
+        
         print(f"[Calibration] Calibration complete. Mapped {len(self.color_calibration_map)} colors.")
+        print(f"[Calibration] Total time: {actual_str}")
         
         return self.color_calibration_map
     
@@ -451,7 +497,11 @@ class Bot:
             (x, y) coordinates of the best match, or None if no calibration data exists
         """
         if self.color_calibration_map is None or not self.color_calibration_map:
+            print(f"[Calibration] ERROR: Calibration map is empty or None!")
             return None
+        
+        print(f"[Calibration] Looking up target color {target_rgb}")
+        print(f"[Calibration] Calibration map has {len(self.color_calibration_map)} entries")
         
         # First, try to find exact match within tolerance using Manhattan distance
         for color, pos in self.color_calibration_map.items():
@@ -644,23 +694,29 @@ class Bot:
         Supports pause/resume functionality and configurable jump delays.
         '''
 
+        # Calculate total strokes for progress tracking (must be before overlay creation)
+        self.total_strokes = sum(len(lines) for lines in cmap.values())
+        self.start_time = time.time()
+        self.completed_strokes = 0
+
+        # Load calibration data if file exists - always load if file exists to ensure latest data is used
+        if os.path.exists('color_calibration.json'):
+            if self.color_calibration_map is None or not self.color_calibration_map:
+                print("[Calibration] Loading calibration data from color_calibration.json")
+                self.load_color_calibration('color_calibration.json')
+            else:
+                print("[Calibration] Calibration data already loaded from color_calibration.json")
+
+        # Create progress overlay window
+        self.create_progress_overlay()
+        if self.overlay_window:
+            self.update_progress_overlay(0, self.total_strokes, 0)
+
         # Reset bot state for fresh drawing session
         self.terminate = False
         self.paused = False
         self.drawing = True  # Mark as actively drawing
         last_stroke_end = None  # Track last stroke position for jump detection
-
-        # Load calibration data if file exists but not yet loaded
-        if os.path.exists('color_calibration.json') and (self.color_calibration_map is None or not self.color_calibration_map):
-            print("[Calibration] Loading calibration data from color_calibration.json")
-            self.load_color_calibration('color_calibration.json')
-
-        # Calculate total strokes for progress tracking
-        self.total_strokes = sum(len(lines) for lines in cmap.values())
-        self.start_time = time.time()
-        self.completed_strokes = 0
-        
-        # Store estimated time in seconds for comparison
         self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
         estimated_str = self._format_time(self.estimated_time_seconds)
         print(f"Estimated drawing time: {estimated_str}")
@@ -883,7 +939,61 @@ class Bot:
                         else:
                             print(f"[DEBUG] Color calibration file exists - skipping keyboard input method")
             else:
-                print(f"[DEBUG] Color Button Okay enabled - skipping automatic color selection (user should manually select)")
+                # Color Button Okay is enabled, but we still need to select color in spectrum before clicking okay
+                print(f"[DEBUG] Color Button Okay enabled - selecting color in spectrum before clicking okay")
+                
+                # Try to find the color in the spectrum map
+                spectrum_pos = self.get_calibrated_color_position(c, tolerance=20)
+                if spectrum_pos:
+                    print(f"[DEBUG] Using spectrum click at: {spectrum_pos}")
+                    
+                    # MSPaint Mode: Double-click on spectrum instead of single click
+                    if self.mspaint_mode.get('enabled', False):
+                        # First click
+                        pyautogui.click(spectrum_pos)
+                        # Wait for configured delay between clicks
+                        mspaint_delay = self.mspaint_mode.get('delay', 0.5)
+                        print(f"[MSPaintMode] Waiting {mspaint_delay} seconds between double-click...")
+                        time.sleep(mspaint_delay)
+                        # Second click on the same position
+                        pyautogui.click(spectrum_pos)
+                        print(f"[MSPaintMode] Double-click completed at {spectrum_pos}")
+                        # Use color button delay after double-click
+                        delay = self.color_button.get('delay', 0.1)
+                        print(f"[DEBUG] Waiting {delay} seconds after spectrum double-click...")
+                        time.sleep(delay)
+                    else:
+                        # Simple click (original behavior)
+                        pyautogui.click(spectrum_pos)
+                        # Wait for the application to register the color selection (use same delay as color button)
+                        delay = self.color_button.get('delay', 0.1)
+                        print(f"[DEBUG] Waiting {delay} seconds after spectrum click...")
+                        time.sleep(delay)
+                else:
+                    # Check if manual color selection occurred (color_calibration.json exists)
+                    # If so, skip keyboard input method since user already selected the color
+                    if not os.path.exists('color_calibration.json'):
+                        # Fallback to keyboard input method
+                        try:
+                            cc_box = self._custom_colors
+                            center_x = cc_box[0] + cc_box[2] // 2
+                            center_y = cc_box[1] + cc_box[3] // 2
+                            print(f"[DEBUG] Spectrum not available - clicking center of box at: ({center_x}, {center_y})")
+                            pyautogui.click((center_x, center_y), clicks=3, interval=.15)
+                        except:
+                            raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
+                        print(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
+                        pyautogui.press('tab', presses=7, interval=.05)
+                        for val in c:
+                            numbers = (d for d in str(val))
+                            for n in numbers:
+                                pyautogui.press(str(n))
+                                pyautogui.press('tab')
+                        pyautogui.press('tab')
+                        pyautogui.press('enter')
+                        pyautogui.PAUSE = 0.0
+                    else:
+                        print(f"[DEBUG] Color calibration file exists - skipping keyboard input method")
 
             # If Color Button Okay Mode is enabled, click "Set Okay" button after color selection
             try:
@@ -980,6 +1090,10 @@ class Bot:
                 print(f"Drawing stroke {line_idx + 1}/{len(lines)} for color {c} - {progress_percent:.1f}% complete")
                 print(f"Total progress: {self.completed_strokes}/{self.total_strokes} strokes - {time_remaining} remaining")
 
+                # Update overlay with progress and ETA
+                if self.overlay_window:
+                    self.update_progress_overlay(self.completed_strokes, self.total_strokes, estimated_remaining)
+
                 # Check for large cursor jumps and add delay
                 start_pos = line[0]
                 if last_stroke_end is not None:
@@ -1008,6 +1122,7 @@ class Bot:
                 if self.terminate:
                     pyautogui.mouseUp()
                     self.drawing = False  # Clear drawing flag on termination
+                    self.close_progress_overlay()  # Close overlay on termination
                     return 'terminated'
 
                 # Draw line with pause support (complete each stroke before checking pause)
@@ -1054,12 +1169,14 @@ class Bot:
                     self.draw_state['segment_idx'] = 0  # Stroke completed, so reset segment
                     self.draw_state['current_color'] = c  # Save current color
                     if self.terminate:
+                        self.close_progress_overlay()  # Close overlay on termination
                         return 'terminated'
                     # Wait for resume
                     print("Paused after completing stroke - press resume to continue")
                     while self.paused and not self.terminate:
                         time.sleep(0.1)
                     if self.terminate:
+                        self.close_progress_overlay()  # Close overlay on termination
                         return 'terminated'
                     # Resume - replay the current stroke to ensure clean result
                     print(f"Resuming - replaying current stroke for color {c}")
@@ -1087,6 +1204,9 @@ class Bot:
         print(f"{diff_str}")
         print("=" * 50)
         
+        # Close progress overlay
+        self.close_progress_overlay()
+        
         # Reset draw state on successful completion
         self.drawing = False  # Clear drawing flag
         self.draw_state['color_idx'] = 0
@@ -1106,10 +1226,18 @@ class Bot:
         lines_drawn = 0
         self.start_time = time.time()  # Track start time for test draw
 
-        # Load calibration data if file exists but not yet loaded
-        if os.path.exists('color_calibration.json') and (self.color_calibration_map is None or not self.color_calibration_map):
-            print("[Calibration] Loading calibration data from color_calibration.json")
-            self.load_color_calibration('color_calibration.json')
+        # Load calibration data if file exists - always load if file exists to ensure latest data is used
+        if os.path.exists('color_calibration.json'):
+            if self.color_calibration_map is None or not self.color_calibration_map:
+                print("[Calibration] Loading calibration data from color_calibration.json")
+                self.load_color_calibration('color_calibration.json')
+            else:
+                print("[Calibration] Calibration data already loaded from color_calibration.json")
+
+        # Create progress overlay window
+        self.create_progress_overlay()
+        if self.overlay_window:
+            self.update_progress_overlay(0, min(max_lines, sum(len(lines) for lines in cmap.values())), 0)
 
         # Estimate time for the full cmap (not just test lines)
         self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
@@ -1137,13 +1265,32 @@ class Bot:
                     pyautogui.mouseUp(px, py, button='left')
                 else:
                     # Try to find the color in the spectrum map
-                    spectrum_pos = self._find_nearest_spectrum_color(c)
+                    # Use tolerance of 20 (same as calibration default) to ensure accurate color selection
+                    spectrum_pos = self.get_calibrated_color_position(c, tolerance=20)
                     if spectrum_pos:
                         print(f"[DEBUG] Using spectrum click at: {spectrum_pos}")
-                        pyautogui.click(spectrum_pos)
-                        # Wait for the application to register the color selection (use same delay as color button)
-                        delay = self.color_button.get('delay', 0.1)
-                        time.sleep(delay)
+                        
+                        # MSPaint Mode: Double-click on spectrum instead of single click
+                        if self.mspaint_mode.get('enabled', False):
+                            # First click
+                            pyautogui.click(spectrum_pos)
+                            # Wait for configured delay between clicks
+                            mspaint_delay = self.mspaint_mode.get('delay', 0.5)
+                            print(f"[MSPaintMode] Waiting {mspaint_delay} seconds between double-click...")
+                            time.sleep(mspaint_delay)
+                            # Second click on the same position
+                            pyautogui.click(spectrum_pos)
+                            print(f"[MSPaintMode] Double-click completed at {spectrum_pos}")
+                            # Use color button delay after double-click
+                            delay = self.color_button.get('delay', 0.1)
+                            print(f"[DEBUG] Waiting {delay} seconds after spectrum double-click...")
+                            time.sleep(delay)
+                        else:
+                            # Simple click (original behavior)
+                            pyautogui.click(spectrum_pos)
+                            # Wait for the application to register the color selection (use same delay as color button)
+                            delay = self.color_button.get('delay', 0.1)
+                            time.sleep(delay)
                     else:
                         # Check if color_calibration.json exists (calibration data available)
                         # If so, skip the keyboard input method since calibration should find the color
@@ -1167,8 +1314,69 @@ class Bot:
                             pyautogui.PAUSE = 0.0
                         else:
                             print(f"[DEBUG] Color calibration file exists - skipping keyboard input method")
-            else:
-                print(f"[DEBUG] Color Button Okay enabled - skipping automatic color selection (user should manually select)")
+
+            # Only click okay button if Color Button Okay is enabled
+            if self.color_button_okay.get('enabled', False):
+                # Click to Color Button Okay button to confirm color selection
+                try:
+                    cbo = self.color_button_okay
+                    if cbo.get('coords'):
+                        cx, cy = cbo['coords']
+                        print(f"[ColorButtonOkay] attempting click at {(cx, cy)} with mods={cbo.get('modifiers')}")
+
+                        # Track which modifiers were pressed so we can release them in reverse order
+                        pressed_modifiers = []
+
+                        # Press modifiers immediately before the click
+                        modifier_keys = [('ctrl', 'ctrl'), ('alt', 'alt'), ('shift', 'shift')]
+                        for mod_key, pygui_key in modifier_keys:
+                            if cbo['modifiers'].get(mod_key):
+                                pyautogui.keyDown(pygui_key)
+                                pressed_modifiers.append(pygui_key)
+                                print(f"[ColorButtonOkay] pressed modifier: {pygui_key}")
+
+                        # Click the button with modifiers active
+                        print(f"[ColorButtonOkay] performing mouseDown at {(cx, cy)}")
+                        pyautogui.mouseDown(cx, cy, button='left')
+                        time.sleep(0.08)
+                        pyautogui.mouseUp(cx, cy, button='left')
+                        print(f"[ColorButtonOkay] mouse click performed at {(cx, cy)}")
+
+                        # Release modifiers immediately after the click with robust handling
+                        for pygui_key in reversed(pressed_modifiers):
+                            pyautogui.keyUp(pygui_key)
+                            print(f"[ColorButtonOkay] released modifier: {pygui_key}")
+                            time.sleep(0.05)  # Small delay to ensure each key release is registered
+
+                        # Brute-force release all modifiers as backup (in case tracked list missed any)
+                        try:
+                            pyautogui.keyUp('shift')
+                            time.sleep(0.05)
+                            pyautogui.keyUp('alt')
+                            time.sleep(0.05)
+                            pyautogui.keyUp('ctrl')
+                            time.sleep(0.05)
+                            print(f"[ColorButtonOkay] force-released all modifiers as backup")
+                        except:
+                            pass
+
+                        # Additional delay to ensure OS processes all key release events
+                        time.sleep(0.1)
+
+                        # Wait for configured delay after clicking the Color Button Okay (use same delay as Color Button)
+                        delay = self.color_button_okay.get('delay', 0.1)
+                        print(f"[ColorButtonOkay] waiting {delay} seconds before starting to draw...")
+                        time.sleep(delay)
+
+                except Exception as e:
+                    print(f"[ColorButtonOkay] Error during color button okay click: {e}")
+                    # Ensure modifiers are released even if there's an error
+                    try:
+                        pyautogui.keyUp('shift')
+                        pyautogui.keyUp('alt')
+                        pyautogui.keyUp('ctrl')
+                    except:
+                        pass
 
             for line_idx, line in enumerate(lines):
                 if lines_drawn >= max_lines:
@@ -1178,10 +1386,15 @@ class Bot:
                 lines_drawn += 1
                 print(f"Drawing test line {lines_drawn}/{max_lines} for color {c}")
 
+                # Update overlay progress
+                if self.overlay_window:
+                    self.update_progress_overlay(lines_drawn, max_lines, 0)
+
                 # Check for pause/terminate
                 if self.terminate:
                     pyautogui.mouseUp()
                     self.drawing = False  # Clear drawing flag on termination
+                    self.close_progress_overlay()  # Close overlay on termination
                     return 'terminated'
 
                 # Draw the line (simplified, no segmentation for test draw)
@@ -1214,6 +1427,9 @@ class Bot:
         print(f"Actual (test):   {actual_str}")
         print(f"{diff_str}")
         print("=" * 50)
+        
+        # Close progress overlay
+        self.close_progress_overlay()
         
         self.drawing = False  # Clear drawing flag
         return 'success'
@@ -1593,6 +1809,127 @@ class Bot:
         print("Simple test draw completed!")
         self.drawing = False
         return 'success'
+
+    def create_progress_overlay(self):
+        '''
+        Create and show an always-on-top progress overlay window.
+        The window displays current drawing progress and ETA.
+        '''
+        if not self.progress_overlay_enabled:
+            return None
+
+        try:
+            # Create the overlay window
+            self.overlay_window = tk.Toplevel()
+            self.overlay_window.title("pyaint Progress")
+
+            # Set window to always on top and remove decorations
+            self.overlay_window.attributes("-topmost", True)
+            self.overlay_window.overrideredirect(True)
+
+            # Set window size and position (top center of screen)
+            window_width = 240
+            window_height = 20
+            screen_width = self.overlay_window.winfo_screenwidth()
+            x_position = (screen_width - window_width) // 2
+            y_position = 10
+
+            self.overlay_window.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+
+            # Create a dark background frame with border
+            border_frame = tk.Frame(
+                self.overlay_window,
+                bg="#4a4a4a",
+                width=window_width,
+                height=window_height
+            )
+            border_frame.pack(fill=tk.BOTH, expand=True)
+
+            # Inner frame for content
+            self.overlay_frame = tk.Frame(
+                border_frame,
+                bg="#2c2c2c",
+                width=window_width - 2,
+                height=window_height - 2
+            )
+            self.overlay_frame.place(x=1, y=1, width=window_width - 2, height=window_height - 2)
+
+            # Create centered label for progress text
+            self.overlay_label = tk.Label(
+                self.overlay_frame,
+                text="Initializing...",
+                bg="#2c2c2c",
+                fg="#00ff00",  # Green text for progress
+                font=("Arial", 9, "bold"),
+                relief=tk.FLAT
+            )
+            self.overlay_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+            # Create stop event for thread
+            self.overlay_stop_event = threading.Event()
+
+            # Keep window responsive
+            self.overlay_window.update()
+
+            print("[ProgressOverlay] Overlay window created")
+            return self.overlay_window
+
+        except Exception as e:
+            print(f"[ProgressOverlay] Error creating overlay: {e}")
+            return None
+
+    def update_progress_overlay(self, completed, total, eta_seconds):
+        '''
+        Update the progress overlay with current progress and ETA.
+        '''
+        if self.overlay_window is None or self.overlay_label is None or not self.progress_overlay_enabled:
+            return
+
+        try:
+            # Format ETA string
+            if eta_seconds < 60:
+                eta_str = f"{eta_seconds:.0f}s"
+            elif eta_seconds < 3600:
+                minutes = int(eta_seconds // 60)
+                seconds = int(eta_seconds % 60)
+                eta_str = f"{minutes}:{seconds:02d}"
+            else:
+                hours = int(eta_seconds // 3600)
+                minutes = int((eta_seconds % 3600) // 60)
+                eta_str = f"{hours}:{minutes:02d}h"
+
+            # Create progress text
+            progress_text = f"{completed}/{total} Strokes (ETA: {eta_str})"
+
+            # Update label
+            self.overlay_label.config(text=progress_text)
+            self.overlay_window.update()
+
+        except Exception as e:
+            print(f"[ProgressOverlay] Error updating overlay: {e}")
+
+    def close_progress_overlay(self):
+        '''
+        Close the progress overlay window and cleanup resources.
+        '''
+        if self.overlay_window is not None:
+            try:
+                # Stop any running threads
+                if self.overlay_stop_event:
+                    self.overlay_stop_event.set()
+
+                # Close the window
+                self.overlay_window.destroy()
+                self.overlay_window = None
+                self.overlay_label = None
+                self.overlay_frame = None
+                print("[ProgressOverlay] Overlay window closed")
+            except Exception as e:
+                print(f"[ProgressOverlay] Error closing overlay: {e}")
+                # Force cleanup
+                self.overlay_window = None
+                self.overlay_label = None
+                self.overlay_frame = None
 
     def get_cached_status(self, image_path, flags=0, mode=LAYERED):
         """Check if valid cached computation exists"""
