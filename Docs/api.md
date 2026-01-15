@@ -893,6 +893,7 @@ class SetupWindow:
 - Color Button
 - Color Button Okay
 - Color Preview Spot
+- MSPaint Mode
 
 **Palette Features:**
 1. **Toggle Mode** - Mark cells valid/invalid

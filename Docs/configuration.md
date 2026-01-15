@@ -41,7 +41,8 @@ Complete guide to configuring Pyaint's settings and tools.
   },
   "drawing_options": {
     "ignore_white_pixels": false,
-    "use_custom_colors": false
+    "use_custom_colors": false,
+    "skip_first_color": false
   },
   "pause_key": "p",
   "calibration_settings": {
@@ -85,7 +86,7 @@ Complete guide to configuring Pyaint's settings and tools.
     "status": true,
     "coords": [x, y],
     "enabled": false,
-    "delay": 0.5,
+    "delay": 0.1,
     "modifiers": {
       "ctrl": false,
       "alt": false,
@@ -96,11 +97,16 @@ Complete guide to configuring Pyaint's settings and tools.
     "status": true,
     "coords": [x, y],
     "enabled": false,
+    "delay": 0.1,
     "modifiers": {
       "ctrl": false,
       "alt": false,
       "shift": false
     }
+  },
+  "MSPaint Mode": {
+    "enabled": false,
+    "delay": 0.5
   },
   "color_preview_spot": {
     "name": "Color Preview Spot",
@@ -250,7 +256,23 @@ Complete guide to configuring Pyaint's settings and tools.
 - Used when "Use Custom Colors" is enabled
 - Falls back to keyboard input if not configured
 
-### Color Preview Spot
+##### MSPaint Mode
+
+**Status:** Optional
+
+**Fields:**
+
+| Field | Type | Default | Description |
+|--------|--------|----------|-------------|
+| `enabled` | bool | false | Whether to double-click on palette instead of single click |
+| `delay` | float | 0.5 | Delay between double-clicks in seconds |
+
+**Behavior:**
+- If enabled: Double-clicks on palette colors instead of single click
+- Waits configured delay between clicks
+- Useful for MS Paint and similar applications requiring double-click
+
+#### Color Preview Spot
 
 **Status:** Optional (required for color calibration)
 
@@ -314,6 +336,7 @@ Complete guide to configuring Pyaint's settings and tools.
 | `status` | bool | True if initialized |
 | `coords` | array | [x, y] button coordinates |
 | `enabled` | bool | Whether to click confirmation button |
+| `delay` | float | Time to wait after click (0.01-5.0s) |
 | `modifiers` | object | CTRL/ALT/SHIFT key flags |
 
 **Behavior:**
@@ -351,6 +374,7 @@ Complete guide to configuring Pyaint's settings and tools.
 |--------|--------|----------|-------------|
 | `ignore_white_pixels` | bool | false | Skip drawing white pixels |
 | `use_custom_colors` | bool | false | Use custom color spectrum |
+| `skip_first_color` | bool | false | Skip first color when drawing |
 
 ### Pause Key
 
@@ -390,9 +414,12 @@ All tools default to not initialized (`status: false`).
 | Setting | Default | Description |
 |---------|---------|-------------|
 | pause_key | 'p' | Pause/resume key |
+| skip_first_color | false | Skip first color when drawing |
 | calibration_settings.step_size | 2 | Calibration scan step |
 | drawing_options.ignore_white_pixels | false | Skip white pixels |
 | drawing_options.use_custom_colors | false | Use custom colors |
+| mspaint_mode.enabled | false | Enable double-click on palette |
+| mspaint_mode.delay | 0.5 | Delay between double-clicks in seconds |
 
 ---
 

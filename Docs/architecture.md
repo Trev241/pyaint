@@ -547,13 +547,18 @@ Special tools:
 ```json
 "drawing_options": {
     "ignore_white_pixels": false,
-    "use_custom_colors": false
+    "use_custom_colors": false,
+    "skip_first_color": false
 },
 "pause_key": "p",
 "calibration_settings": {
     "step_size": 2
 },
-"last_image_url": "https://..."
+"last_image_url": "https://...",
+"mspaint_mode": {
+    "enabled": false,
+    "delay": 0.5
+}
 ```
 
 ### Configuration Loading Flow
@@ -579,6 +584,8 @@ Window.__init__()
   ├─> Apply to UI:
   │     ├─> Drawing settings (delay, pixel_size, precision, jump_delay)
   │     ├─> Drawing options (ignore_white, use_custom_colors)
+  │     ├─> Skip first color checkbox
+  │     ├─> MSPaint mode (enabled, delay)
   │     ├─> Pause key entry
   │     ├─> Calibration step entry
   │     └─> Checkboxes

@@ -28,6 +28,8 @@ Pyaint is a Python-based automation tool designed to recreate digital images thr
 - **Intelligent Caching**: Pre-compute image processing for instant subsequent runs
 - **Advanced Palette Features**: Manual center picking, valid position selection, precision estimation
 - **Pause/Resume**: Configurable hotkey for interruption and continuation
+- **Skip First Color**: Option to skip drawing the first color in the coordinate map
+- **MSPaint Mode**: Double-click on palette colors instead of single click (optional)
 - **Region-Based Redrawing**: Select specific image areas to redraw
 - **Color Calibration System**: Scan and save custom color mappings for improved accuracy
 - **Modifier Key Support**: Configure CTRL, ALT, SHIFT modifiers for tool clicks
@@ -95,6 +97,36 @@ Main drawing engine handling image processing and mouse automation.
 - `STEP` (1) - Pixel size step
 - `ACCURACY` (2) - Color precision
 - `JUMP_DELAY` (3) - Delay for large cursor movements
+
+**Instance Attributes:**
+- `terminate` (bool) - Stop drawing when True
+- `paused` (bool) - Pause/resume state
+- `pause_key` (str) - Key for pause/resume (default: 'p')
+- `settings` (list) - [delay, step, accuracy, jump_delay]
+- `progress` (float) - Processing progress (0-100)
+- `options` (int) - Drawing flags
+- `drawing` (bool) - Currently drawing flag
+- `draw_state` (dict) - State for pause/resume recovery
+- `skip_first_color` (bool) - Skip first color when drawing (default: False)
+- `new_layer` (dict) - New layer configuration
+- `color_button` (dict) - Color button configuration
+- `color_button_okay` (dict) - Color button okay configuration
+- `mspaint_mode` (dict) - MSPaint mode (double-click on palette)
+- `total_strokes` (int) - Total number of strokes for progress tracking
+- `completed_strokes` (int) - Number of completed strokes
+- `start_time` (float) - Timestamp when drawing started
+- `estimated_time_seconds` (float) - Estimated drawing time in seconds
+- `_canvas` (tuple) - Canvas box (x, y, w, h)
+- `_palette` (Palette) - Palette object
+- `_custom_colors` (tuple) - Custom colors box
+- `_spectrum_map` (dict) - Color spectrum mappings
+- `color_calibration_map` (dict) - Color calibration data
+
+**Constructor Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|--------|----------|-------------|
+| `config_file` (str) - Path to config file (default: 'config.json') |
 
 **Key Methods:**
 

@@ -159,7 +159,18 @@ If your application requires confirming color selection:
 1. Click **"Initialize"** next to Color Button Okay
 2. Click on the **Okay/Confirm button** location
 3. Optionally, select modifier keys (CTRL, ALT, SHIFT) if needed
+### Configuring MSPaint Mode (Optional)
 
+For applications like MS Paint that require double-clicking colors:
+
+1. Click **"Initialize"** next to MSPaint Mode
+2. Use the "Enable double-click" checkbox to enable the feature
+3. Set the **MSPaint Delay (seconds)** - time between double-clicks (default: 0.5s)
+
+**Behavior:**
+- When enabled, double-clicks on palette colors instead of single click
+- Waits configured delay between the two clicks
+- Useful for MS Paint and similar applications requiring double-click interaction
 ---
 
 ## Advanced Palette Configuration
@@ -344,7 +355,11 @@ Toggle these checkboxes as needed:
 - Requires Custom Colors tool to be configured
 - Considerably lengthens draw duration
 - Provides unlimited color options
+#### Skip First Color
 
+- Skips drawing the first color in the color map
+- Useful when you want to start with a specific color
+- Default: disabled
 #### Enable New Layer
 
 - Automatically creates a new layer before drawing
