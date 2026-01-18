@@ -1,249 +1,164 @@
+<div align="center">
+
 # Pyaint
 
-An intelligent drawing automation tool that converts images into precise mouse movements for painting applications. Built with Python and designed for artists and designers who want to recreate digital images through automated brush strokes.
+**Transform images into automated brush strokes**
+
+An intelligent drawing automation tool that converts images into precise mouse movements for painting applications.
+
+[Quick Start](#installation) • [Usage](#usage) • [Demo](#videos)
+
+</div>
+
+---
 
 ## Features
 
-### Core Functionality
-- **Multi-Application Support**: Compatible with MS Paint, Clip Studio Paint, skribbl, and most drawing software
-- **Dual Input Methods**: Load images from local files or remote URLs
-- **High-Precision Drawing**: Produces near-perfect color accuracy with customizable precision settings
-- **Real-time Progress**: Live progress tracking with estimated completion time
-
-### Advanced Controls
-- **Configurable Timing**: Adjustable stroke delay for different system speeds
-- **Detail Control**: Pixel size settings for balancing detail vs. drawing time
-- **Color Optimization**: Precision settings for color accuracy vs. performance
-- **Smart Movement**: Jump delay optimization for large cursor movements
-- **Background Handling**: Option to ignore white pixels for cleaner results
-
-### Drawing Modes
-- **Test Draw**: Draw first 20 lines to calibrate brush size before full drawing
-- **Simple Test Draw**: Quick 5-line brush calibration without color picking
-- **Full Drawing**: Complete automated image recreation
-- **Slotted Mode**: Simple color-to-lines mapping for faster processing
-- **Layered Mode**: Advanced color layering with frequency sorting (default)
-- **Region-Based Redrawing**: Select specific image areas to redraw
-- **Pause/Resume**: Configurable hotkey for interruption and continuation
-- **Mid-Stroke Recovery**: Resume drawing from exact interruption point
-
-### Performance Features
-- **Intelligent Caching**: Pre-compute image processing for instant subsequent runs
-- **Cache Validation**: Validates cache matches current settings, canvas, and image
-- **Cache Invalidation**: Auto-invalidates after 24 hours for freshness
-- **Layered Processing**: Advanced color layering algorithms for optimal results
-- **Background Processing**: Non-blocking computation with progress updates
-- **Memory Efficient**: Optimized for large images and long drawing sessions
-- **Time Estimation**: Pre-draw time estimation based on coordinate data
-
-### Advanced Palette Features
-- **Manual Color Center Picking**: Click to set exact center points for each palette color
-- **Valid Positions Selection**: Toggle which palette colors are valid/invalid
-- **Auto-Estimate Centers**: Automatically calculate center points using grid-based estimation
-- **Precision Estimate**: Advanced center calculation using reference point selection for maximum accuracy
-  - **Single Column Mode**: Pick first row (1st box), second row (1st box), and last row (1st box) to calculate vertical spacing
-  - **1 Row Mode**: Pick first box, second box, and last box of the row to calculate horizontal spacing
-  - **Multi-Row Mode**: Pick first row (1st, 2nd, last boxes), second row (1st box), and last row (1st, last boxes)
-  - Automatically calculates spacing between boxes and rows for precise center estimation
-- **Grid-Based Configuration**: Visual grid for easy palette cell selection
-- **Preview Generation**: Visual preview of captured palette, canvas, and custom color regions
-
-### Custom Colors Spectrum Scanning
-- **Automatic Spectrum Mapping**: Scans the custom color spectrum to create a color-to-position map
-- **Intelligent Color Selection**: Automatically finds and clicks the nearest matching color on the spectrum
-- **High Precision**: Samples the spectrum at regular intervals for accurate color matching
-- **Full Spectrum Support**: Works with continuous color spectrums for unlimited color options
-
-### Color Button Features
-- **Color Button Click**: Automatically clicks the color button to open the color picker
-- **Color Button Okay**: Optional click to confirm color selection (can be enabled/disabled)
-- **Modifier Keys**: Configure CTRL, ALT, SHIFT modifiers for color button clicks
-- **Configurable Delay**: Set delay after color button click to allow the color picker to open
-- **Application Compatibility**: Supports applications that require clicking a button to access the color picker
-
-### Additional Features
-- **New Layer Automation**: Automatic layer creation with keyboard modifier support (Ctrl, Alt, Shift)
-- **Settings Persistence**: All preferences automatically saved and restored
-- **Windows Compatible**: Optimized for Windows with Python 3.8+
-- **Error Recovery**: Robust error handling and graceful failure recovery
+- **Multi-Application Support** - Works with MS Paint, Clip Studio Paint, GIMP, skribbl, and more
+- **Dual Input** - Load images from local files or URLs
+- **High Precision** - Near-perfect color accuracy with customizable settings
+- **Smart Caching** - Pre-compute for instant subsequent runs
+- **Pause & Resume** - Mid-stroke recovery from exact interruption point
+- **Advanced Palette Config** - Manual or automatic color center positioning
+- **Color Calibration** - Spectrum scanning for accurate custom colors
+- **File Management** - Remove calibration data and reset configuration with UI buttons
 
 ## Installation
 
-### Requirements
-- Python 3.8 or higher (3.8 recommended)
-- Windows operating system
+**Requirements:** Python 3.8+ • Windows
 
-### Setup
-1. Clone or download the repository
+```bash
+# Clone the repo
+git clone https://github.com/Trev241/pyaint.git
+cd pyaint
 
-2. **Optional: Create a conda environment** (recommended for isolation):
-   ```bash
-   conda create -n pyaint python=3.8
-   conda activate pyaint
-   ```
+# (Optional) Create virtual environment
+conda create -n pyaint python=3.8
+conda activate pyaint
 
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+# Install dependencies
+pip install -r requirements.txt
 
-4. Run the application:
-   ```bash
-   python main.py
-   ```
+# Run
+python main.py
+```
 
 ## Usage
 
-### Initial Setup
-1. Launch the application
-2. Click **"Setup"** to configure your drawing environment
-3. Initialize **Palette**, **Canvas**, and **Custom Colors** by clicking the corners as prompted
-4. Configure palette dimensions (rows and columns) if needed
-5. Optionally use advanced palette features:
-   - Toggle valid/invalid palette cells
-   - Pick exact center points for precise color selection
-   - Auto-estimate centers for quick setup (uses simple grid calculation)
-   - **Precision Estimate** for maximum accuracy (uses reference point selection):
-     - Select 3-5 reference points based on your palette's row count
-     - System calculates exact spacing between boxes and rows
-     - Automatically estimates centers for all valid positions
-6. Configure **Color Button** and **Color Button Okay** if your application requires clicking a button to access the color picker:
-   - Click the location of the color button
-   - Set optional modifier keys (CTRL, ALT, SHIFT) if needed
-   - Configure delay after color button click (allows time for the color picker to open)
-   - Enable/disable "Color Button Okay" to click the confirmation button after color selection
-7. Configure your preferred settings using the control panel sliders
+### Quick Start
 
-### Basic Drawing
-1. Enter an image URL or select a local file
-2. Click **"Pre-compute"** (optional, for caching and time estimation)
-3. Click **"Simple Test Draw"** for quick brush calibration or **"Test Draw"** for detailed calibration
-4. Adjust brush settings in your painting application
-5. Click **"Start"** for complete automated drawing
+1. **Setup** - Click "Setup" to define your palette, canvas, and custom colors
+2. **Load Image** - Enter a URL or select a local file
+3. **Calibrate** - Use "Simple Test Draw" for quick brush adjustment
+4. **Draw** - Click "Start" to begin automated painting
 
-### Region-Based Redrawing
-1. Load your image
-2. Click and drag on the image preview to select a region
-3. Click **"Redraw Region"** to draw only the selected area
-4. Useful for fixing mistakes or adding details without a full redraw
+### Key Controls
 
-### Controls
-- **ESC**: Stop current drawing operation
-- **Custom Pause Key**: Pause/resume drawing (default: 'p')
-- **Setup**: Configure palette, canvas, and custom colors
-- **Pre-compute**: Cache image processing for faster subsequent runs
-- **Simple Test Draw**: Quick 5-line brush calibration
-- **Test Draw**: Draw sample lines for brush calibration (first 20 lines)
-- **Start**: Begin full image drawing
-- **Redraw Region**: Draw selected image region only
+| Key | Action |
+|-----|--------|
+| `ESC` | Stop drawing |
+| `P` (default) | Pause/Resume |
+| `Setup` | Configure colors & canvas |
+| `Pre-compute` | Cache for faster redraws |
+| `Pick Region` | Select area to redraw only |
 
 ## Configuration
 
 ### Drawing Settings
-- **Delay**: Stroke timing (0.0-1.0 seconds)
-- **Pixel Size**: Detail level (3-50 pixels)
-- **Precision**: Color accuracy (0.0-1.0)
-- **Jump Delay**: Cursor movement optimization (0.0-2.0 seconds)
+
+| Setting | Range | Description |
+|---------|-------|-------------|
+| **Delay** | 0.0-1.0s | Time between strokes |
+| **Pixel Size** | 3-50px | Detail level (lower = more detail) |
+| **Precision** | 0.0-1.0 | Color accuracy |
+| **Jump Delay** | 0.0-2.0s | Cursor movement optimization |
 
 ### Drawing Mode
-- **Slotted**: Fast processing, simple color-to-lines mapping
-- **Layered**: Better visual results, color frequency sorting with line merging
+
+- **Slotted** - Fast processing, simple mapping
+- **Layered** - Better results, color frequency sorting
 
 ### Options
-- **Ignore White Pixels**: Skip drawing white areas
-- **Use Custom Colors**: Enable advanced color mixing
-- **New Layer**: Automatic layer creation with modifiers
 
-### Hotkeys
-- **Pause Key**: Configurable key for pause/resume (any keyboard key)
-- **ESC**: Emergency stop for all operations
+✓ Ignore White Pixels → Skip white areas for cleaner results  
+✓ Use Custom Colors → Enable spectrum color matching  
+✓ New Layer → Auto-create layers with Ctrl/Alt/Shift modifiers  
+✓ Skip First Color → Skip initial color in sequence  
 
-### Palette Configuration
-- **Rows/Columns**: Define palette grid dimensions
-- **Valid Positions**: Select which palette cells to use
-- **Manual Centers**: Pick exact center points for each color
-- **Auto-Estimate**: Automatically calculate center positions
+### Palette Setup
 
-### Color Button Configuration
-- **Color Button**: Location of the color picker button in your application
-- **Color Button Okay**: Location of the confirmation button (optional)
-- **Delay**: Time to wait after clicking color button before selecting color
-- **Modifiers**: CTRL, ALT, SHIFT keys to hold when clicking
+- **Manual Centers** - Pick exact color positions
+- **Auto-Estimate** - Quick grid calculation
+- **Precision Estimate** - Reference-point based accuracy  
+✓ Toggle valid/invalid palette cells
 
 ## Architecture
 
-The application consists of three main components:
+```
+pyaint/
+├── main.py          # Entry point
+├── bot.py           # Drawing engine & image processing
+├── ui/
+│   ├── window.py    # GUI interface
+│   └── setup.py     # Configuration wizard
+├── utils.py         # Utilities
+└── config.json      # Settings storage
+```
 
-### Bot (`bot.py`)
-Core drawing engine handling image processing, mouse automation, and drawing algorithms.
+## Color Calibration
 
-### Window (`ui/window.py`)
-Graphical user interface with real-time controls and progress monitoring.
+Precise color matching for custom colors using spectrum scanning.
 
-### Setup (`ui/setup.py`)
-Configuration wizard for initializing palette, canvas, and custom color regions with advanced features like manual center picking and valid position selection.
-
-## Dependencies
-
-- **PyAutoGUI**: Cross-platform GUI automation
-- **Pillow**: Image processing and manipulation
-- **pynput**: Global keyboard input monitoring
-- **NumPy**: Mathematical computations (via Pillow)
+**How it works:**
+1. Scans color spectrum grid, capturing RGB values at each position
+2. Saves data to `color_calibration.json` for reuse
+3. Uses exact match (tolerance-based) → falls back to nearest Euclidean match
+**Calibration Step:** 1-10 pixels  
+- **1-3**: High accuracy, slower  
+- **5-10**: Faster calibration
 
 ## Troubleshooting
 
-### Common Issues
-- **Drawing not starting**: Ensure palette and canvas are properly initialized
-- **Colors incorrect**: Check custom colors setup and precision settings
-- **Slow performance**: Reduce pixel size or increase delay settings
-- **Application not responding**: Use ESC to stop and restart
-- **Palette colors not selecting**: Verify valid positions are marked and centers are correctly picked
-- **Custom colors not working**: Ensure custom colors box is correctly configured and spectrum scanning has completed
+| Issue | Solution |
+|-------|----------|
+| Drawing not starting | Verify palette & canvas are initialized |
+| Colors incorrect | Check custom colors setup & precision |
+| Slow performance | Reduce pixel size or increase delay |
+| Application unresponsive | Press `ESC` to stop & restart |
 
-### Performance Tips
-- Use **Pre-compute** for images you'll draw multiple times
-- Adjust **Pixel Size** based on desired detail level
-- Enable **Ignore White Pixels** for images with large white areas
-- Fine-tune **Jump Delay** for optimal cursor movement
-- Use **Layered mode** for better visual results, **Slotted mode** for faster processing
+**Tips:**
+- Use **Pre-compute** for repeated drawings
+- Enable **Ignore White Pixels** for images with large blank areas
+- **Layered mode** = better results, **Slotted mode** = faster processing
 
-### Palette Tips
-- Use **Auto-Estimate Centers** for quick initial setup on regular grids
-- Use **Precision Estimate** for maximum accuracy on irregular or complex palettes
-- Use **Pick Centers** for precise color selection on complex palettes requiring manual input
-- Toggle invalid positions to exclude broken or unused colors
-- Preview captured regions to verify correct configuration
-- For Precision Estimate with multiple rows, ensure you have at least 2 valid rows for accurate row spacing calculation
+## Documentation
 
-### Color Button Tips
-- Set appropriate delay for your application's color picker opening time
-- Use modifier keys if your application requires them to access the color picker
-- Enable "Color Button Okay" if your application requires clicking a confirmation button
-- Test color button configuration with a simple test draw before starting a full drawing
+- [API Reference](Docs/api.md)
+- [Architecture](Docs/architecture.md)
+- [Configuration Guide](Docs/configuration.md)
+- [Troubleshooting](Docs/troubleshooting.md)
 
-## Development
+## Dependencies
 
-### Project Structure
-```
-pyaint/
-├── main.py              # Application entry point
-├── bot.py               # Core drawing engine
-├── ui/
-│   ├── window.py        # Main GUI interface
-│   └── setup.py         # Setup configuration wizard
-├── exceptions.py        # Custom error classes
-├── utils.py             # Utility functions
-├── config.json          # Persistent settings storage
-├── cache/               # Cached computation results
-└── requirements.txt     # Python dependencies
-```
+- **PyAutoGUI** - GUI automation
+- **Pillow** - Image processing
+- **pynput** - Keyboard monitoring
+- **NumPy** - Math computations
 
-### Original Videos
-You can watch the bot in action [here](https://youtu.be/qXfUc9KuVlg) and [here](https://youtu.be/kj0iqZkIG1k).
+## Videos
 
-### Contributing
-Suggestions and contributions are welcome. Please ensure compatibility with the existing codebase and maintain the application's stability.
+### Usage with GIMP
+Demonstrates new layers and custom color calibration
+
+https://github.com/user-attachments/assets/965556a4-f72b-4e24-a9ea-160732c6be51
+
+### Usage with MS Paint
+Demonstrates custom color calibration
+
+https://github.com/user-attachments/assets/50f2f344-8ca9-439b-8722-0175356ad59e
+
+> **Note:** Calibration is recommended but not required. Calibrate once per app, or let Pyaint match via Euclidean search.
 
 ## License
 
-This project is licensed under GNU General Public License v3.0 (GPL-3.0).
+GNU General Public License v3.0

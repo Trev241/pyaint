@@ -1,6 +1,6 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
+# VS Code Settings
+.vscode/
+
 *$py.class
 
 # C extensions
@@ -127,7 +127,6 @@ dmypy.json
 .pyre/
 
 # Project specific
-/assets
 /pyaint-env
 /cache
 
@@ -143,3 +142,14 @@ dmypy.json
 Thumbs.db
 /memory-bank
 .clinerules
+config.json
+/__pycache__
+/ui/__pycache__
+color_calibration.json
+.roo/memory.md
+assets/Canvas_preview.png
+assets/Color Grid_preview.png
+assets/color_preview_spot_preview.png
+assets/Custom Colors_preview.png
+assets/Palette_preview.png
+.github/instructions/memory.instruction.md

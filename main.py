@@ -38,7 +38,7 @@ if __name__ == '__main__':
     pynput_listener.start()
 
     try:
-        Window('pyaint', bot, 800, 550, 5, 5)
+        Window('pyaint', bot, 1600, 900, 5, 5)
     finally:
         # Stop listener when done
         pynput_listener.stop()

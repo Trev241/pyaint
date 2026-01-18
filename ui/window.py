@@ -28,21 +28,22 @@ from tkinter import (
     END
 )
 from tkinter.ttk import (
-    LabelFrame, 
-    Frame, 
-    Scale, 
-    Label, 
-    OptionMenu, 
-    Scrollbar, 
-    Button, 
-    Checkbutton, 
-    Entry
+    LabelFrame,
+    Frame,
+    Scale,
+    Label,
+    OptionMenu,
+    Scrollbar,
+    Button,
+    Checkbutton,
+    Entry,
+    Progressbar
 )
 
 
 def is_free(func):
     """
-    Decorator that only executes a function when the bot is not busy by checking the
+    Decorator that only executes a function when the bot is not busy by checking that
     `self.busy` flag. Keeps decorator at module scope to avoid descriptor/type issues.
     """
 
@@ -91,6 +92,11 @@ class Window:
         self._config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
 
         self._root.title(title)
+        # Center the window on screen
+        screen_width = self._root.winfo_screenwidth()
+        screen_height = self._root.winfo_screenheight()
+        x = (screen_width - w) // 2
+        y = (screen_height - h) // 2
         self._root.geometry(f"{w}x{h}+{x}+{y}")
         
         self._root.columnconfigure(0, weight=1, uniform='column')
@@ -126,7 +132,7 @@ class Window:
         # Determine config file path relative to project root (one level up from ui/)
         self._config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
         self.load_config()  # Load saved config
-        # UI initialization finished — allow saving
+        # UI initialization finished - allow saving
         self._initializing = False
 
         self._root.mainloop()
@@ -173,6 +179,7 @@ class Window:
             'Pre-compute',
             'Test Draw',
             'Simple Test Draw',
+            'Run Calibration',
             'Start'
         ]
 
@@ -186,25 +193,26 @@ class Window:
         buttons[1]['command'] = self.start_precompute_thread
         buttons[2]['command'] = self.start_test_draw_thread
         buttons[3]['command'] = self.start_simple_test_draw_thread
-        buttons[4]['command'] = self.start_draw_thread
+        buttons[4]['command'] = self.start_calibration_thread
+        buttons[5]['command'] = self.start_draw_thread
 
         self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
-        self._teclbl.grid(column=0, row=5, columnspan=2, sticky='w', padx=5, pady=5)
+        self._teclbl.grid(column=0, row=6, columnspan=2, sticky='w', padx=5, pady=5)
         modes = [Bot.SLOTTED, Bot.LAYERED]
         self._tecvar = StringVar()
         self._tecvar.set(modes[1])
         self._mode = modes[1]
         self._teclst = OptionMenu(self._cframe, self._tecvar, self._mode, *modes, command=self._update_mode)
-        self._teclst.grid(column=0, row=6, columnspan=2, sticky='ew', padx=5, pady=5)
+        self._teclst.grid(column=0, row=7, columnspan=2, sticky='ew', padx=5, pady=5)
 
-        curr_row = 7
+        curr_row = 8
 
         # For every slider option in options, option layout is    :    (name, default, from, to)
         defaults = self.bot.settings
         self._options = (
             # ('Confidence', defaults[0], 0, 1),
             ('Delay', defaults[0], 0, 1),
-            ('Pixel Size', defaults[1], 3, 50),
+            ('Pixel Size', defaults[1], 1, 50),
             ('Precision', defaults[2], 0, 1),
             ('Jump Delay', defaults[3] if len(defaults) > 3 else 0.5, 0, 2),
         )
@@ -285,11 +293,56 @@ class Window:
         self._colorbutton_cb.grid(column=1, row=curr_row, padx=5, pady=5, sticky='w')
         curr_row += 1
 
+        # Skip first color option
+        Label(self._cframe, text='Skip First Color', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._skip_first_color_var = IntVar()
+        self._skip_first_color_cb = Checkbutton(self._cframe, text='Skip first color', variable=self._skip_first_color_var,
+            command=self._on_skip_first_color_toggle)
+        self._skip_first_color_cb.grid(column=1, row=curr_row, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        # MSPaint Mode option
+        Label(self._cframe, text='MSPaint Mode', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._mspaint_mode_var = IntVar()
+        self._mspaint_mode_cb = Checkbutton(self._cframe, text='Enable double-click', variable=self._mspaint_mode_var,
+            command=self._on_mspaint_mode_toggle)
+        self._mspaint_mode_cb.grid(column=1, row=curr_row, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        # MSPaint Mode delay setting
+        Label(self._cframe, text='MSPaint Delay (s)', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._mspaint_delay_var = StringVar()
+        self._mspaint_delay_entry = Entry(self._cframe, textvariable=self._mspaint_delay_var, width=5)
+        self._mspaint_delay_entry.bind('<FocusOut>', self._on_mspaint_delay_change)
+        self._mspaint_delay_entry.bind('<Return>', self._on_mspaint_delay_change)
+        self._mspaint_delay_entry.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
+        curr_row += 1
+
         # Pause Key Setting
         Label(self._cframe, text='Pause Key', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
         self._pause_key_entry = Entry(self._cframe)
         self._pause_key_entry.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
         self._pause_key_entry.bind('<Key>', self._on_pause_key_entry_press)
+        curr_row += 1
+
+        # Calibration Step Size Setting
+        Label(self._cframe, text='Calib. Step', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._calib_step_var = StringVar()
+        self._calib_step_var.set('2')
+        self._calib_step_entry = Entry(self._cframe, textvariable=self._calib_step_var, width=5)
+        self._calib_step_entry.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
+        self._calib_step_entry.bind('<FocusOut>', self._on_calib_step_change)
+        self._calib_step_entry.bind('<Return>', self._on_calib_step_change)
+        curr_row += 1
+
+        # Jump Threshold Setting
+        Label(self._cframe, text='Jump Thresh (px)', font=Window.TITLE_FONT).grid(column=0, row=curr_row, padx=5, pady=5, sticky='w')
+        self._jump_threshold_var = StringVar()
+        self._jump_threshold_var.set('5')
+        self._jump_threshold_entry = Entry(self._cframe, textvariable=self._jump_threshold_var, width=5)
+        self._jump_threshold_entry.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
+        self._jump_threshold_entry.bind('<FocusOut>', self._on_jump_threshold_change)
+        self._jump_threshold_entry.bind('<Return>', self._on_jump_threshold_change)
         curr_row += 1
 
         # Redraw Region section
@@ -306,6 +359,16 @@ class Window:
         # Redraw region display
         self._redraw_region_label = Label(self._cframe, text='No region selected', font=('TkDefaultFont', 8))
         self._redraw_region_label.grid(column=0, row=curr_row, columnspan=2, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        # Delete Files section
+        Label(self._cframe, text='File Management', font=Window.TITLE_FONT).grid(column=0, row=curr_row, columnspan=2, padx=5, pady=5, sticky='w')
+        curr_row += 1
+
+        self._delete_calib_btn = Button(self._cframe, text='Remove Calibration', command=self._on_delete_calibration)
+        self._delete_calib_btn.grid(column=0, row=curr_row, padx=5, pady=5, sticky='ew')
+        self._reset_config_btn = Button(self._cframe, text='Reset Config', command=self._on_reset_config)
+        self._reset_config_btn.grid(column=1, row=curr_row, padx=5, pady=5, sticky='ew')
         curr_row += 1
 
         # Initialize redraw state
@@ -547,6 +610,73 @@ class Window:
         except Exception as e:
             print(f"Failed to save config: {e}")
 
+    def _on_skip_first_color_toggle(self):
+        enabled = bool(self._skip_first_color_var.get())
+        # Update bot state and tools dict
+        self.bot.skip_first_color = enabled
+        self.tools['skip_first_color'] = enabled
+        try:
+            if not getattr(self, '_initializing', False):
+                with open(self._config_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
+                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
+        except Exception as e:
+            print(f"Failed to save config: {e}")
+
+    def _on_mspaint_mode_toggle(self):
+        enabled = bool(self._mspaint_mode_var.get())
+        # Update bot state and tools dict
+        self.bot.mspaint_mode['enabled'] = enabled
+        if 'MSPaint Mode' not in self.tools:
+            self.tools['MSPaint Mode'] = {'enabled': False, 'delay': 0.5}
+        self.tools['MSPaint Mode']['enabled'] = enabled
+        try:
+            if not getattr(self, '_initializing', False):
+                with open(self._config_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
+                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
+        except Exception as e:
+            print(f"Failed to save config: {e}")
+
+    def _on_mspaint_delay_change(self, event=None):
+        """Handle changes to MSPaint Mode delay entry field with validation"""
+        try:
+            val_str = self._mspaint_delay_var.get().strip()
+            if not val_str:
+                return  # Empty input, don't update
+            
+            val = float(val_str)
+            
+            # Validate range: 0.01 to 5.0
+            if val < 0.01:
+                val = 0.01
+                self._mspaint_delay_var.set(str(val))
+            elif val > 5.0:
+                val = 5.0
+                self._mspaint_delay_var.set(str(val))
+            
+            # Update bot state
+            self.bot.mspaint_mode['delay'] = round(val, 3)
+            
+            # Save to tools config
+            if 'MSPaint Mode' not in self.tools:
+                self.tools['MSPaint Mode'] = {'enabled': False, 'delay': 0.5}
+            self.tools['MSPaint Mode']['delay'] = self.bot.mspaint_mode['delay']
+            
+            try:
+                if not getattr(self, '_initializing', False):
+                    with open(self._config_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                print(f"Failed to save config: {e}")
+            
+            self.tlabel['text'] = 'MSPaint Mode delay updated. This is the wait time between double-clicks on the palette.'
+            
+        except ValueError:
+            # Invalid input, revert to current bot setting
+            self._mspaint_delay_var.set(str(self.bot.mspaint_mode.get('delay', 0.5)))
+            self.tlabel['text'] = 'Invalid delay value. Please enter a number between 0.01 and 5.0'
+
     def _on_delay_entry_change(self, event=None):
         """Handle changes to the delay entry field with validation"""
         try:
@@ -631,10 +761,85 @@ class Window:
 
         self.tlabel['text'] = Window._SLIDER_TOOLTIPS[index]
 
+    def _on_jump_threshold_change(self, event=None):
+        """Handle jump threshold change"""
+        try:
+            val_str = self._jump_threshold_var.get().strip()
+            if not val_str:
+                return  # Empty input, don't update
+            
+            val = int(val_str)
+            
+            # Validate range: 1 to 100 pixels
+            if val < 1:
+                val = 1
+                self._jump_threshold_var.set(str(val))
+            elif val > 100:
+                val = 100
+                self._jump_threshold_var.set(str(val))
+            
+            # Update bot state
+            self.bot.jump_threshold = val
+            
+            # Save to tools config
+            if 'drawing_settings' not in self.tools:
+                self.tools['drawing_settings'] = {}
+            self.tools['drawing_settings']['jump_threshold'] = val
+            
+            try:
+                if not getattr(self, '_initializing', False):
+                    with open(self._config_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                print(f"Failed to save config: {e}")
+            
+            self.tlabel['text'] = f'Jump threshold updated to {val} pixels. Cursor jumps larger than this will trigger delay.'
+            
+        except ValueError:
+            # Invalid input, revert to current bot setting
+            self._jump_threshold_var.set(str(self.bot.jump_threshold))
+            self.tlabel['text'] = 'Invalid jump threshold. Please enter a number between 1 and 100.'
+
+    def _on_calib_step_change(self, event=None):
+        """Handle calibration step size change"""
+        try:
+            val_str = self._calib_step_var.get().strip()
+            if not val_str:
+                return  # Empty input, don't update
+            
+            val = int(val_str)
+            
+            # Validate range: 1 to 10
+            if val < 1:
+                val = 1
+                self._calib_step_var.set(str(val))
+            elif val > 10:
+                val = 10
+                self._calib_step_var.set(str(val))
+            
+            # Save to tools config
+            if 'calibration_settings' not in self.tools:
+                self.tools['calibration_settings'] = {}
+            self.tools['calibration_settings']['step_size'] = val
+            
+            try:
+                if not getattr(self, '_initializing', False):
+                    with open(self._config_path, 'w', encoding='utf-8') as f:
+                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                print(f"Failed to save config: {e}")
+            
+            self.tlabel['text'] = 'Calibration step size updated. Lower values = more accurate but slower.'
+            
+        except ValueError:
+            # Invalid input, revert to default
+            self._calib_step_var.set('2')
+            self.tlabel['text'] = 'Invalid step size. Please enter a number between 1 and 10.'
+
     def _on_pause_key_entry_press(self, event):
-        # Only allow setting the pause key when not drawing
+        # Only allow setting pause key when not drawing
         if not self.busy:
-            # When not drawing, allow setting the pause key by typing in the entry field
+            # When not drawing, allow setting pause key by typing in the entry field
             key_name = event.keysym.lower()
             # Handle special cases
             if key_name.startswith('f') and key_name[1:].isdigit():
@@ -643,7 +848,7 @@ class Window:
                 # For special keys, keep as-is
                 pass
             else:
-                # For regular keys, use the char
+                # For regular keys, use char
                 key_name = event.char.lower() if event.char else key_name
 
             # Update the entry field and bot's pause key
@@ -651,7 +856,7 @@ class Window:
             self._pause_key_entry.insert(0, key_name)
             self.bot.pause_key = key_name
 
-            # Save the pause key to config file
+            # Save pause key to config file
             self.tools['pause_key'] = key_name
             try:
                 if not getattr(self, '_initializing', False):
@@ -676,6 +881,22 @@ class Window:
             self.bot.pause_key = self.tools.get('pause_key', 'p')
             self._pause_key_entry.delete(0, END)
             self._pause_key_entry.insert(0, self.bot.pause_key)
+
+            # Load calibration step size setting
+            if 'calibration_settings' in self.tools:
+                calib_step = self.tools['calibration_settings'].get('step_size', 2)
+                self._calib_step_var.set(str(calib_step))
+            else:
+                self._calib_step_var.set('2')
+
+            # Load jump threshold setting
+            if 'drawing_settings' in self.tools:
+                jump_threshold = self.tools['drawing_settings'].get('jump_threshold', 5)
+                self.bot.jump_threshold = jump_threshold
+                self._jump_threshold_var.set(str(jump_threshold))
+            else:
+                self.bot.jump_threshold = 5
+                self._jump_threshold_var.set('5')
 
             # Load saved drawing settings
             if 'drawing_settings' in self.tools:
@@ -731,8 +952,8 @@ class Window:
                 if 'Palette' in self.tools:
                     palette_config = self.tools['Palette']
                     
-                    # If we have valid_positions, use them to reconstruct the palette
-                    # This handles the case where user has manually edited color positions
+                    # If we have valid_positions, use them to reconstruct palette
+                    # This handles case where user has manually edited color positions
                     if (palette_config.get('box') and 
                         palette_config.get('rows') and 
                         palette_config.get('cols') and 
@@ -823,10 +1044,31 @@ class Window:
                 self.bot.color_button['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
                 self.bot.color_button['modifiers']['alt'] = bool(mods.get('alt', False))
                 self.bot.color_button['modifiers']['shift'] = bool(mods.get('shift', False))
-                # Update UI checkbox
-                self._colorbutton_var.set(1 if self.bot.color_button['enabled'] else 0)
-                # Enable checkbox only if Color Button is configured (status: true)
-                self._colorbutton_cb.config(state='normal' if cb.get('status', False) else 'disabled')
+                # Update main UI checkbox to reflect new state
+                try:
+                    self._colorbutton_var.set(1 if self.bot.color_button['enabled'] else 0)
+                    # Enable checkbox only if Color Button is configured (status: true)
+                    self._colorbutton_cb.config(state='normal' if cb.get('status', False) else 'disabled')
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Apply Skip First Color setting to bot if present
+        try:
+            self.bot.skip_first_color = bool(self.tools.get('skip_first_color', 0))
+            self._skip_first_color_var.set(1 if self.bot.skip_first_color else 0)
+        except Exception:
+            pass
+
+        # Apply MSPaint Mode settings to bot if present
+        try:
+            mm = self.tools.get('MSPaint Mode')
+            if mm:
+                self.bot.mspaint_mode['enabled'] = bool(mm.get('enabled', False))
+                self.bot.mspaint_mode['delay'] = float(mm.get('delay', 0.5))
+                self._mspaint_mode_var.set(1 if self.bot.mspaint_mode['enabled'] else 0)
+                self._mspaint_delay_var.set(str(self.bot.mspaint_mode['delay']))
         except Exception:
             pass
 
@@ -847,8 +1089,6 @@ class Window:
                 self.bot.color_button_okay['modifiers']['shift'] = bool(mods.get('shift', False))
         except Exception:
             pass
-
-    pass
 
     def _set_busy(self, val):
         self.busy = val
@@ -906,13 +1146,26 @@ class Window:
                     'alt': False,
                     'shift': False
                 }
+            },
+            'color_preview_spot': {
+                'name': 'Color Preview Spot',
+                'button': None,
+                'enabled': False,
+                'coords': None,
+                'data': None,
+                'modifiers': {
+                    'ctrl': False,
+                    'alt': False,
+                    'shift': False
+                },
+                'status': False
             }
         }
 
-        # Build a dedicated setup_tools mapping (only the tools) so the
+        # Build a dedicated setup_tools mapping (only tools) so that
         # SetupWindow doesn't iterate non-tool keys (like drawing_settings).
         setup_tools = {}
-        for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer', 'Color Button', 'Color Button Okay']:
+        for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer', 'Color Button', 'Color Button Okay', 'color_preview_spot']:
             existing = self.tools.get(tool_name, {})
             merged = default_tools[tool_name].copy()
             merged.update(existing if isinstance(existing, dict) else {})
@@ -1050,7 +1303,7 @@ class Window:
         try:
             cache_file = self.bot.precompute(self._imname, flags=self.draw_options, mode=self._mode)
 
-            # Load the cached data to estimate drawing time
+            # Load cached data to estimate drawing time
             cache_data = self.bot.load_cached(cache_file)
             if cache_data:
                 drawing_eta = self.bot.estimate_drawing_time(cache_data['cmap'])
@@ -1082,7 +1335,7 @@ class Window:
 
     @is_free
     def start_simple_test_draw_thread(self):
-        """Start the simple test draw in a separate thread"""
+        """Start simple test draw in a separate thread"""
         if not hasattr(self.bot, '_canvas') or self.bot._canvas is None:
             messagebox.showerror(self.title, "Canvas not configured. Please run Setup first.")
             self._set_busy(False)
@@ -1093,7 +1346,7 @@ class Window:
         self._manage_simple_test_draw_thread()
 
     def _manage_simple_test_draw_thread(self):
-        """Manage the simple test draw thread"""
+        """Manage simple test draw thread"""
         if getattr(self, '_simple_test_thread_obj', None) is not None and self._simple_test_thread_obj.is_alive() and self.busy:
             self._root.after(500, self._manage_simple_test_draw_thread)
             self.tlabel['text'] = "Simple test drawing in progress..."
@@ -1102,12 +1355,255 @@ class Window:
             self.tlabel['text'] = 'Simple test draw completed!'
             self._set_busy(False)
 
+    @is_free
+    def start_calibration_thread(self):
+        """Start color calibration process in a separate thread"""
+        # Check if required tools are configured
+        custom_colors_data = self.tools.get('Custom Colors', {}).get('box')
+        if not custom_colors_data or (isinstance(custom_colors_data, list) and len(custom_colors_data) == 0):
+            messagebox.showerror(self.title, "Custom Colors tool not configured. Please run Setup first.")
+            self._set_busy(False)
+            return
+        
+        preview_spot_coords = self.tools.get('color_preview_spot', {}).get('coords')
+        if not preview_spot_coords:
+            messagebox.showerror(self.title, "Color Preview Spot tool not configured. Please run Setup first.")
+            self._set_busy(False)
+            return
+        
+        # Get step size from entry field
+        try:
+            step = int(self._calib_step_var.get())
+        except ValueError:
+            step = 2  # Default to 2 if invalid
+        
+        # Store step size in tools config
+        if 'calibration_settings' not in self.tools:
+            self.tools['calibration_settings'] = {}
+        self.tools['calibration_settings']['step_size'] = step
+        
+        # Create calibration progress overlay window
+        self._create_calibration_overlay()
+        
+        # Minimize window then start calibration
+        messagebox.showinfo(self.title, f'Press ESC to stop calibration.')
+        self._root.iconify()
+        time.sleep(1)  # Small delay before starting to allow window to minimize
+        
+        # Track calibration start time for ETA calculation
+        self._calibration_start_time = time.time()
+        
+        # Create and start calibration thread
+        self._calibration_thread_obj = Thread(target=self._calibration_thread)
+        self._calibration_thread_obj.start()
+        self._manage_calibration_thread()
+
+    def _create_calibration_overlay(self):
+        """
+        Create and show an always-on-top progress overlay window for color calibration.
+        The window displays current calibration progress and appears above the custom color box location.
+        """
+        try:
+            # Get custom color box location for positioning
+            custom_colors_box = self.tools.get('Custom Colors', {}).get('box')
+            if not custom_colors_box:
+                # Fallback to top center of screen if box location not available
+                screen_width = self._root.winfo_screenwidth()
+                x_position = (screen_width - 240) // 2
+                y_position = 10
+            else:
+                # Position above the custom color box
+                if isinstance(custom_colors_box, list):
+                    box_x = custom_colors_box[0]
+                    box_y = custom_colors_box[1]
+                else:
+                    box_x = custom_colors_box.get('x', 0)
+                    box_y = custom_colors_box.get('y', 0)
+                
+            # Position overlay above the box (with some offset)
+            window_width = 400
+            window_height = 20
+            # Align right edge of overlay with right edge of custom colors box
+            box_right = custom_colors_box[2] if isinstance(custom_colors_box, list) else box_x + (custom_colors_box.get('width', 0) if isinstance(custom_colors_box, dict) else 0)
+            x_position = box_right - window_width
+            y_position = box_y - 30  # 30 pixels above the box
+            
+            # Create the overlay window
+            self._calib_overlay_window = tkinter.Toplevel(self._root)
+            self._calib_overlay_window.title("Calibration Progress")
+
+            # Set window to always on top and remove decorations
+            self._calib_overlay_window.attributes("-topmost", True)
+            self._calib_overlay_window.overrideredirect(True)
+
+            # Set window size and position
+            window_width = 400
+            window_height = 20
+            self._calib_overlay_window.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+
+            # Create a dark background frame with border
+            border_frame = tkinter.Frame(
+                self._calib_overlay_window,
+                bg="#4a4a4a",
+                width=window_width,
+                height=window_height
+            )
+            border_frame.pack(fill=tkinter.BOTH, expand=True)
+
+            # Inner frame for content
+            overlay_frame = tkinter.Frame(
+                border_frame,
+                bg="#2c2c2c",
+                width=window_width - 2,
+                height=window_height - 2
+            )
+            overlay_frame.place(x=1, y=1, width=window_width - 2, height=window_height - 2)
+
+            # Create centered label for progress text
+            self._calib_overlay_label = tkinter.Label(
+                overlay_frame,
+                text="Initializing...",
+                bg="#2c2c2c",
+                fg="#00ff00",  # Green text for progress
+                font=("Arial", 9, "bold"),
+                relief=tkinter.FLAT
+            )
+            self._calib_overlay_label.place(relx=0.5, rely=0.5, anchor=tkinter.CENTER)
+
+            # Keep window responsive
+            self._calib_overlay_window.update()
+
+            print("[CalibrationOverlay] Overlay window created")
+            return self._calib_overlay_window
+
+        except Exception as e:
+            print(f"[CalibrationOverlay] Error creating overlay: {e}")
+            return None
+
+    def _close_calibration_overlay(self):
+        """Close the calibration progress overlay window"""
+        try:
+            if hasattr(self, '_calib_overlay_window') and self._calib_overlay_window is not None:
+                self._calib_overlay_window.destroy()
+                self._calib_overlay_window = None
+                self._calib_overlay_label = None
+                print("[CalibrationOverlay] Overlay window closed")
+        except Exception as e:
+            print(f"[CalibrationOverlay] Error closing overlay: {e}")
+
+    def _manage_calibration_thread(self):
+        """Manage calibration thread and update progress"""
+        if getattr(self, '_calibration_thread_obj', None) is not None and self._calibration_thread_obj.is_alive() and self.busy:
+            # Check if calibration was cancelled
+            if self.bot.terminate:
+                self.tlabel['text'] = 'Calibration cancelled by user (ESC pressed)'
+                self._close_calibration_overlay()
+                self._set_busy(False)
+                return
+            
+            self._root.after(500, self._manage_calibration_thread)
+            # Update progress based on calibration state
+            if hasattr(self.bot, '_calibration_progress'):
+                total = self.bot._calibration_progress.get('total', 0)
+                current = self.bot._calibration_progress.get('current', 0)
+                if total > 0:
+                    percent = (current / total) * 100
+                    # Calculate ETA based on elapsed time
+                    elapsed_time = time.time() - self._calibration_start_time
+                    if current > 0 and percent < 100:
+                        avg_time_per_color = elapsed_time / current
+                        colors_remaining = total - current
+                        eta_seconds = colors_remaining * avg_time_per_color
+                        eta_str = self.bot._format_time(eta_seconds)
+                    else:
+                        eta_str = "calculating..."
+                    # Update overlay label
+                    if hasattr(self, '_calib_overlay_label') and self._calib_overlay_label is not None:
+                        self._calib_overlay_label['text'] = f"Calibrating: {current}/{total} ({percent:.1f}%) - ETA: {eta_str}"
+                        if hasattr(self, '_calib_overlay_window') and self._calib_overlay_window is not None:
+                            try:
+                                self._calib_overlay_window.update()  # Force UI update
+                            except Exception as e:
+                                print(f"[CalibrationOverlay] Error updating window: {e}")
+                    self.tlabel['text'] = f"Calibrating: {current}/{total} colors ({percent:.1f}%) - ETA: {eta_str}"
+                else:
+                    elapsed_time = time.time() - self._calibration_start_time
+                    if hasattr(self, '_calib_overlay_label') and self._calib_overlay_label is not None:
+                        self._calib_overlay_label['text'] = f"Calibrating: {current} colors... ({elapsed_time:.0f}s)"
+                        if hasattr(self, '_calib_overlay_window') and self._calib_overlay_window is not None:
+                            try:
+                                self._calib_overlay_window.update()  # Force UI update
+                            except Exception as e:
+                                print(f"[CalibrationOverlay] Error updating window: {e}")
+                    self.tlabel['text'] = f"Calibrating: {current} colors... (Time: {elapsed_time:.0f}s)"
+        elif self.busy:
+            # Calibration finished or cancelled
+            total_time = time.time() - self._calibration_start_time
+            self._close_calibration_overlay()
+            if self.bot.terminate:
+                self.tlabel['text'] = f'Calibration cancelled by user (ESC pressed) - Time: {total_time:.0f}s'
+                # Reset terminate flag for next calibration
+                self.bot.terminate = False
+            else:
+                num_colors = len(self.bot.color_calibration_map) if hasattr(self.bot, 'color_calibration_map') else 0
+                self.tlabel['text'] = f'Calibration completed! {num_colors} colors mapped - Time: {total_time:.0f}s'
+            self._set_busy(False)
+
+    def _calibration_thread(self):
+        """Execute color calibration process"""
+        try:
+            # Get grid_box and preview_point from tools
+            grid_box = self.tools.get('Custom Colors', {}).get('box')
+            preview_point = self.tools.get('color_preview_spot', {}).get('coords')
+            
+            if not grid_box or not preview_point:
+                self.tlabel['text'] = 'Error: Missing calibration configuration data'
+                self._set_busy(False)
+                return
+            
+            # Get step size
+            step = self.tools.get('calibration_settings', {}).get('step_size', 2)
+            
+            # Initialize progress tracking
+            self.bot._calibration_progress = {'total': 0, 'current': 0}
+            
+            # Calculate total positions to calibrate
+            if isinstance(grid_box, (list, tuple)):
+                grid_width = grid_box[2] - grid_box[0]
+                grid_height = grid_box[3] - grid_box[1]
+            else:
+                grid_width = grid_box.get('width', 0)
+                grid_height = grid_box.get('height', 0)
+            total_positions = ((grid_width // step) + 1) * ((grid_height // step) + 1)
+            self.bot._calibration_progress['total'] = total_positions
+            
+            # Run calibration
+            self.bot.calibrate_custom_colors(grid_box, preview_point, step=step)
+            
+            # Save calibration data to file
+            calib_file = 'color_calibration.json'
+            if self.bot.save_color_calibration(calib_file):
+                self.tlabel['text'] = f'Calibration saved to {calib_file} with {len(self.bot.color_calibration_map)} colors'
+            else:
+                self.tlabel['text'] = 'Failed to save calibration data'
+            
+        except Exception as e:
+            traceback.print_exc()
+            messagebox.showerror(self.title, f'Calibration failed: {str(e)}')
+        finally:
+            # Close calibration overlay window
+            self._close_calibration_overlay()
+            # Restore window after calibration completes (even if cancelled or failed)
+            self._root.deiconify()
+            self._root.wm_state('normal')
+            self._set_busy(False)
+
     def simple_test_draw(self):
         """Execute simple test draw"""
         try:
             t = time.time()
 
-            messagebox.showinfo(self.title, 'Simple test draw: Will draw 5 lines (1/4 canvas width each) starting from upper-left corner.\n\nPlease select your desired color in the painting app first. No color picking will occur.')
+            messagebox.showinfo(self.title, 'Simple test draw: Will draw 5 lines (1/4 canvas width each) starting from upper-left corner.\n\nPlease select your desired color in painting app first. No color picking will occur.')
             self._root.iconify()
 
             # Clear any previous termination/paused state
@@ -1136,7 +1632,7 @@ class Window:
 
     @is_free
     def start_draw_thread(self):
-        # `_draw_thread` is the actual Thread object used elsewhere; keep that name.
+        # `_draw_thread` is actual Thread object used elsewhere; keep that name.
         self._draw_thread = Thread(target=self.start)
         self._draw_thread.start()
         self._manage_draw_thread()
@@ -1181,7 +1677,7 @@ class Window:
             test_lines = min(20, total_lines)
             print(f"Test drawing first {test_lines} lines out of {total_lines} total")
 
-            messagebox.showinfo(self.title, f'Test drawing the first {test_lines} lines. Adjust your brush size in the painting app, then use the full "Start" button.')
+            messagebox.showinfo(self.title, f'Test drawing first {test_lines} lines. Adjust your brush size in the painting app, then use the full "Start" button.')
             self._root.iconify()
             # Clear any previous termination/paused state so test can be retried
             self.bot.terminate = False
@@ -1258,14 +1754,14 @@ class Window:
             self._coords += x, y
 
             if self._clicks == self._required_clicks:
-                # Determining corner coordinates based on received input. ImageGrab.grab() always expects
+                # Determining corner coordinates based on the received input. ImageGrab.grab() always expects
                 # the first pair of coordinates to be above and on the left of the second pair
                 top_left = min(self._coords[0], self._coords[2]), min(self._coords[1], self._coords[3])
                 bot_right = max(self._coords[0], self._coords[2]), max(self._coords[1], self._coords[3])
                 box = top_left + bot_right
                 print(f'Capturing box: {box}')
 
-                # Store the selected region coordinates
+                # Store selected region coordinates
                 self._redraw_region = box
                 self._redraw_region_label['text'] = f"Region: ({box[0]}, {box[1]}) to ({box[2]}, {box[3]})"
                 self.tlabel['text'] = "Redraw region selected. Click 'Draw Region' to start drawing."
@@ -1318,9 +1814,45 @@ class Window:
             self._cancel_redraw_pick()
 
     def _cancel_redraw_pick(self):
-        """Cancel the redraw region selection"""
+        """Cancel redraw region selection"""
         self._redraw_picking = False
         self.tlabel['text'] = "Redraw region selection cancelled."
+
+    def _on_delete_calibration(self):
+        """Remove the color calibration file"""
+        from tkinter import messagebox
+        if messagebox.askyesno(self.title, "Are you sure you want to remove the color calibration file?\n\nThis will delete: color_calibration.json"):
+            try:
+                import os
+                calib_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'color_calibration.json')
+                if os.path.exists(calib_path):
+                    os.remove(calib_path)
+                    self.tlabel['text'] = "Color calibration file removed successfully."
+                    # Clear calibration data from bot
+                    self.bot.color_calibration_map = None
+                    print(f"[File Management] Removed calibration file: {calib_path}")
+                else:
+                    self.tlabel['text'] = "No calibration file found to remove."
+            except Exception as e:
+                self.tlabel['text'] = f"Error removing calibration file: {str(e)}"
+                print(f"[File Management] Error: {e}")
+
+    def _on_reset_config(self):
+        """Delete config.json file to reset to defaults"""
+        from tkinter import messagebox
+        if messagebox.askyesno(self.title, "Are you sure you want to reset to default settings?\n\nThis will delete: config.json\n\nAll your tool positions, settings, and preferences will be lost."):
+            try:
+                import os
+                config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+                if os.path.exists(config_path):
+                    os.remove(config_path)
+                    self.tlabel['text'] = "Config file removed successfully. Please restart the application to use defaults."
+                    print(f"[File Management] Removed config file: {config_path}")
+                else:
+                    self.tlabel['text'] = "No config file found to remove."
+            except Exception as e:
+                self.tlabel['text'] = f"Error removing config file: {str(e)}"
+                print(f"[File Management] Error: {e}")
 
     @is_free
     def _redraw_draw_thread(self):
@@ -1364,7 +1896,7 @@ class Window:
             cmap = self.bot.process_region(self._imname, image_region, flags=self.draw_options, mode=self._mode, canvas_target=canvas_target)
 
             if not cmap or len(cmap) == 0:
-                self.tlabel['text'] = "No drawable content found in selected region."
+                self.tlabel['text'] = "No drawable content found in the selected region."
                 return
 
             # Show drawing time estimate
@@ -1372,7 +1904,7 @@ class Window:
             print(f"Estimated redraw time: {drawing_eta}")
             self.tlabel['text'] = f"Starting redraw - ETA: {drawing_eta}"
 
-            messagebox.showwarning(self.title, f'Redrawing selected region.\nPress ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
+            messagebox.showwarning(self.title, f'Redrawing the selected region.\nPress ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
             self._root.iconify()
 
             # Clear any previous termination/paused state
@@ -1491,7 +2023,7 @@ class Window:
             if keyboard.is_pressed('esc'):
                 raise KeyboardInterrupt("User cancelled with ESC")
 
-            # Validate the points
+            # Validate points
             if len(points) == 2:
                 x1, y1 = points[0]
                 x2, y2 = points[1]
@@ -1505,7 +2037,7 @@ class Window:
                 self.tlabel['text'] = "Redraw region selected. Click 'Draw Region' to start drawing."
                 self._redraw_picking = False
 
-                # Restore the UI
+                # Restore UI
                 self._root.deiconify()
                 self._root.wm_state('normal')
 
@@ -1515,13 +2047,13 @@ class Window:
         except KeyboardInterrupt:
             print("Mouse capture cancelled by user")
             self._cancel_redraw_pick()
-            # Restore the UI
+            # Restore UI
             self._root.deiconify()
             self._root.wm_state('normal')
         except Exception as e:
             print(f"Error during mouse capture: {e}")
             self._cancel_redraw_pick()
-            # Restore the UI
+            # Restore UI
             self._root.deiconify()
             self._root.wm_state('normal')
 
@@ -1561,6 +2093,8 @@ class Window:
 
             messagebox.showwarning(self.title, f'Press ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
             self._root.iconify()
+            # Allow time for user to click inside the app to draw in
+            time.sleep(5)
             # Clear any previous termination/paused state before starting
             self.bot.terminate = False
             self.bot.paused = False
