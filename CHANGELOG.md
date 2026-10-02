@@ -28,6 +28,15 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   okay, swatch click, RGB keyboard entry, stroke execution).
 - `tests/test_painter.py`: headless characterization tests for the seam using a
   fake `pyautogui`.
+- `pyaint_targets.py`: a declarative **target recipe** registry so multi-app
+  support is data, not code. `Recipe` (schema + `to_dict`/`from_dict`),
+  `RecipeRegistry` (with `load_dir` for JSON recipes), and built-in recipes for
+  `generic`, `mspaint`, `gimp`, and `skribbl`.
+- Main window **Target App** dropdown: selecting a target applies its colour
+  strategy and drawing defaults, disables tools it doesn't use, and persists
+  the choice (`Profile.target`).
+- `tests/test_targets.py`: recipe registry/validation plus `Profile.target`
+  round-trip coverage.
 - `_color_source()` / `_select_color()` color-selection strategy in `Bot`,
   driven by `Profile.color_selection` (`auto` | `palette` | `custom`) instead
   of ad-hoc conditionals.
@@ -52,6 +61,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   preferences merged with `profile.to_config()`, and passes the shared Profile
   into `SetupWindow` so setup mutations need no merge-back.
 - `.gitignore`: ignore `/AGENTS/`.
+- `pyaint_profile.py`: added `target` (the selected recipe id) to the shared
+  profile, `from_config`/`to_config`, and the preset `to_dict`/`from_dict`.
+- `ui/setup.py`: the Setup window now only lists the tools the selected target
+  recipe uses (e.g. skribbl shows just Palette and Canvas).
 
 ### Fixed
 - `get_cache_filename()` no longer fails when the canvas is uninitialized; it

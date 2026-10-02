@@ -8,6 +8,7 @@ import urllib.error as urllib_error
 import utils
 
 from pyaint_profile import Profile, ENV_CONFIG_KEYS
+from pyaint_targets import get_recipe, list_recipes
 from ui.setup import SetupWindow
 from tkinter import filedialog
 from bot import Bot
@@ -179,6 +180,21 @@ class Window:
 
         curr_row = 0
 
+        # Target application (recipe). Selecting one applies its defaults and
+        # limits which tools Setup asks for.
+        Label(self._cframe, text='Target App', font=Window.TITLE_FONT).grid(
+            column=0, row=curr_row, columnspan=2, sticky='w', padx=5, pady=5)
+        self._recipes = list_recipes()
+        self._recipes_by_name = {r.name: r for r in self._recipes}
+        self._target_var = StringVar()
+        initial_recipe = get_recipe(self.profile.target)
+        self._target_var.set(initial_recipe.name)
+        self._target_menu = OptionMenu(
+            self._cframe, self._target_var, initial_recipe.name,
+            *[r.name for r in self._recipes], command=self._on_target_change)
+        self._target_menu.grid(column=0, row=curr_row + 1, columnspan=2, sticky='ew', padx=5, pady=5)
+        curr_row += 2
+
         # Options
         btn_names = [
             'Setup',
@@ -193,7 +209,7 @@ class Window:
         buttons = []
         for i in range(len(btn_names)):
             b = Button(self._cframe, text=btn_names[i])
-            b.grid(column=0, row=i, columnspan=2, padx=5, pady=5, sticky='ew')
+            b.grid(column=0, row=curr_row + i, columnspan=2, padx=5, pady=5, sticky='ew')
             buttons.append(b)
         buttons[0]['command'] = self.setup
         # buttons[1]['command'] = self.test
@@ -202,17 +218,18 @@ class Window:
         buttons[3]['command'] = self.start_simple_test_draw_thread
         buttons[4]['command'] = self.start_calibration_thread
         buttons[5]['command'] = self.start_draw_thread
+        curr_row += len(btn_names)
 
         self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
-        self._teclbl.grid(column=0, row=6, columnspan=2, sticky='w', padx=5, pady=5)
+        self._teclbl.grid(column=0, row=curr_row, columnspan=2, sticky='w', padx=5, pady=5)
+        curr_row += 1
         modes = [Bot.SLOTTED, Bot.LAYERED]
         self._tecvar = StringVar()
         self._tecvar.set(modes[1])
         self._mode = modes[1]
         self._teclst = OptionMenu(self._cframe, self._tecvar, self._mode, *modes, command=self._update_mode)
-        self._teclst.grid(column=0, row=7, columnspan=2, sticky='ew', padx=5, pady=5)
-
-        curr_row = 8
+        self._teclst.grid(column=0, row=curr_row, columnspan=2, sticky='ew', padx=5, pady=5)
+        curr_row += 1
 
         # For every slider option in options, option layout is    :    (name, default, from, to)
         defaults = self.bot.settings
@@ -394,6 +411,82 @@ class Window:
 
     def _update_mode(self, selection):
         self._mode = selection
+
+    def _on_target_change(self, value):
+        """Handle the user picking a target from the dropdown."""
+        recipe = self._recipes_by_name.get(value)
+        if recipe is None:
+            return
+        self._select_target(recipe)
+
+    def _select_target(self, recipe):
+        """Apply a target recipe and persist the choice."""
+        self.profile.target = recipe.id
+        self._apply_recipe(recipe)
+        self._store_drawing_settings()
+        self._store_drawing_options()
+        self.tlabel['text'] = f"Target set to {recipe.name}. Use Setup to teach its tools."
+        self._save_config()
+
+    def _apply_recipe(self, recipe):
+        """Apply a recipe's defaults to the live profile/bot and refresh widgets."""
+        self.profile.color_selection = recipe.color_selection
+
+        # Disable tools this target does not use so stale enables cannot fire.
+        for tool in ('New Layer', 'Color Button', 'Color Button Okay'):
+            if tool not in recipe.tools:
+                self.profile[tool]['enabled'] = False
+        if not recipe.supports_mspaint_mode:
+            self.profile.mspaint_mode['enabled'] = False
+
+        # Drawing settings.
+        settings = recipe.drawing_settings or {}
+        if settings:
+            current = self.bot.settings
+            current[0] = settings.get('delay', current[0])
+            current[1] = settings.get('pixel_size', current[1])
+            current[2] = settings.get('precision', current[2])
+            current[3] = settings.get('jump_delay', current[3])
+            if 'jump_threshold' in settings:
+                self.bot.jump_threshold = settings['jump_threshold']
+
+        # Drawing options (bit flags).
+        options = recipe.drawing_options or {}
+        if 'ignore_white_pixels' in options:
+            if options['ignore_white_pixels']:
+                self.draw_options |= Bot.IGNORE_WHITE
+            else:
+                self.draw_options &= ~Bot.IGNORE_WHITE
+        if 'use_custom_colors' in options:
+            if options['use_custom_colors']:
+                self.draw_options |= Bot.USE_CUSTOM_COLORS
+            else:
+                self.draw_options &= ~Bot.USE_CUSTOM_COLORS
+
+        self.bot.skip_first_color = bool(recipe.skip_first_color)
+
+        self._refresh_drawing_widgets()
+        self._refresh_option_widgets()
+        self._sync_env_ui()
+
+    def _refresh_drawing_widgets(self):
+        """Mirror ``self.bot.settings`` into the delay entry and sliders."""
+        for i, val in enumerate(self.bot.settings):
+            if i == 0:  # Delay - entry field
+                self._delay_var.set(str(val))
+                self._optlabl[0]['text'] = f"{self._options[0][0]}: {val:.2f}"
+            elif i == 1:  # Pixel Size - integer slider
+                val = int(val)
+                self._optvars[i].set(val)
+                self._optlabl[i]['text'] = f"{self._options[i][0]}: {val}"
+            else:  # Other sliders
+                self._optvars[i].set(val)
+                self._optlabl[i]['text'] = f"{self._options[i][0]}: {val:.2f}"
+
+    def _refresh_option_widgets(self):
+        """Mirror the ``draw_options`` bit flags into the checkbuttons."""
+        self._checkbutton_vars[0].set(1 if self.draw_options & Bot.IGNORE_WHITE else 0)
+        self._checkbutton_vars[1].set(1 if self.draw_options & Bot.USE_CUSTOM_COLORS else 0)
 
     def _init_ipanel(self):
         # IMAGE PREVIEW FRAME
@@ -809,6 +902,15 @@ class Window:
         self.tools = {k: v for k, v in config.items() if k not in ENV_CONFIG_KEYS}
         self.tools.setdefault('pause_key', 'p')
 
+        # Restore the selected target without re-applying its defaults; the
+        # user's saved settings take precedence on load.
+        try:
+            recipe = get_recipe(self.profile.target)
+            self.profile.target = recipe.id
+            self._target_var.set(recipe.name)
+        except Exception:
+            pass
+
         try:
             # Load pause key first
             self.bot.pause_key = self.tools.get('pause_key', 'p')
@@ -1030,8 +1132,10 @@ class Window:
     def setup(self):
         self.load_config()
         # The Profile is the single source of truth; SetupWindow mutates it in
-        # place, so there is nothing to merge back afterwards.
-        self._iwindow = SetupWindow(parent=self._root, bot=self.bot, tools=self.profile, on_complete=self._on_complete_setup, title='Setup')
+        # place, so there is nothing to merge back afterwards. Only show the
+        # tools the selected target actually needs.
+        recipe = get_recipe(self.profile.target)
+        self._iwindow = SetupWindow(parent=self._root, bot=self.bot, tools=self.profile, on_complete=self._on_complete_setup, title='Setup', required_tools=recipe.tools)
 
     def _on_complete_setup(self):
         # SetupWindow mutated the shared Profile in place, so the bot already

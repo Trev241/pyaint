@@ -90,7 +90,7 @@ DEFAULT_MSPAINT_MODE: Dict[str, Any] = {"enabled": False, "delay": 0.5}
 
 # Keys that belong to the environment profile rather than to preferences.
 # Used to split a loaded config.json into Profile + preferences.
-ENV_CONFIG_KEYS = frozenset(TOOL_KEYS) | {"MSPaint Mode", "color_selection"}
+ENV_CONFIG_KEYS = frozenset(TOOL_KEYS) | {"MSPaint Mode", "color_selection", "target"}
 
 
 def box_to_wh(box: Optional[Any]) -> Optional[Tuple[int, int, int, int]]:
@@ -123,6 +123,7 @@ class Profile(Mapping):
         mspaint_mode: Optional[Mapping[str, Any]] = None,
         color_selection: str = AUTO,
         calibration: Optional[Mapping[Tuple[int, int, int], Any]] = None,
+        target: str = "generic",
     ) -> None:
         self.tools: Dict[str, Dict[str, Any]] = {}
         for key in TOOL_KEYS:
@@ -137,6 +138,9 @@ class Profile(Mapping):
         if isinstance(mspaint_mode, Mapping):
             self.mspaint_mode.update(copy.deepcopy(dict(mspaint_mode)))
 
+        # Name of the selected target recipe (``pyaint_targets``). Stored as a
+        # plain string so this module does not depend on the registry.
+        self.target = str(target) if target else "generic"
         self.color_selection = (
             color_selection if color_selection in VALID_COLOR_SELECTION else AUTO
         )
@@ -180,6 +184,7 @@ class Profile(Mapping):
             tools=tools,
             mspaint_mode=config.get("MSPaint Mode"),
             color_selection=config.get("color_selection", AUTO),
+            target=config.get("target", "generic"),
         )
 
     def to_config(self) -> Dict[str, Any]:
@@ -191,12 +196,14 @@ class Profile(Mapping):
         payload: Dict[str, Any] = copy.deepcopy(self.tools)
         payload["MSPaint Mode"] = copy.deepcopy(self.mspaint_mode)
         payload["color_selection"] = self.color_selection
+        payload["target"] = self.target
         return payload
 
     def to_dict(self) -> Dict[str, Any]:
         """Full, standalone, versioned representation (a shareable preset)."""
         return {
             "version": 1,
+            "target": self.target,
             "color_selection": self.color_selection,
             "mspaint_mode": copy.deepcopy(self.mspaint_mode),
             "tools": copy.deepcopy(self.tools),
@@ -217,6 +224,7 @@ class Profile(Mapping):
             mspaint_mode=data.get("mspaint_mode"),
             color_selection=data.get("color_selection", AUTO),
             calibration=calibration or None,
+            target=data.get("target", "generic"),
         )
 
     # ------------------------------------------------------------------

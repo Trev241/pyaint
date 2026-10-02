@@ -27,13 +27,16 @@ from tkinter.ttk import (
 )
 
 class SetupWindow:
-    def __init__(self, parent, bot, tools, on_complete, title='Child Window', w=1600, h=900, x=5, y=5):
+    def __init__(self, parent, bot, tools, on_complete, title='Child Window', w=1600, h=900, x=5, y=5, required_tools=None):
         self._root = Toplevel(parent)
 
         self.title = title
         self.bot = bot
         self.on_complete = on_complete
         self.tools = tools
+        # Only show tools the selected target recipe actually uses. ``None``
+        # means show everything (the generic/manual case).
+        self._required_tools = tuple(required_tools) if required_tools else tuple(self.tools.keys())
         self.parent = parent
 
         self._root.title(self.title)
@@ -70,7 +73,8 @@ class SetupWindow:
 
         self._statuses = {}
 
-        for idt, (k, v) in enumerate(self.tools.items()):
+        visible = [(k, v) for k, v in self.tools.items() if k in self._required_tools]
+        for idt, (k, v) in enumerate(visible):
             # Use the 'name' field for display if it exists, otherwise use the key
             display_name = v.get('name', k) if isinstance(v, dict) else k
             Label(frame, text=display_name, font=SetupWindow.TITLE_FONT).grid(column=0, row=idt, sticky='w', padx=5, pady=5)
