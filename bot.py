@@ -12,13 +12,13 @@ from typing import Optional, Tuple, Dict, List, Any
 from PIL import ImageGrab
 
 from exceptions import (
-    NoCustomColorsError,
     NoCanvasError,
     NoPaletteError
 )
 from PIL import Image
 
 from pyaint_profile import Profile, box_to_wh
+from pyaint_painter import ScreenPainter
 
 class Palette:
     def __init__(self, colors_pos=None, box=None, rows=None, columns=None, valid_positions=None, manual_centers=None):
@@ -134,6 +134,11 @@ class Bot:
         # Live palette object, derived from the profile's Palette geometry.
         self._palette = None
 
+        # Screen-input driver: the app-specific half of the engine. The
+        # planner keeps app-agnostic logic; all synthetic input goes through
+        # this object so other transports can be substituted later.
+        self.painter = ScreenPainter(self)
+
         # Progress Overlay state
         self.progress_overlay = None
         self.progress_overlay_enabled = True  # Always enabled by default
@@ -187,54 +192,18 @@ class Bot:
         """Decide how ``target`` should be selected, without performing input.
 
         Returns ``'palette'``, ``'calibrated'``, ``'keyboard'`` or ``'none'``.
-        Honours ``profile.color_selection`` so the strategy is data rather
-        than conditionals scattered through the drawing loop.
+        Delegates to the screen driver's colour-selection chain so the strategy
+        lives with the rest of the app-specific input code.
         """
-        selection = self.profile.color_selection
-        if not force_custom and selection != Profile.CUSTOM:
-            if self._palette is not None and target in self._palette.colors:
-                return 'palette'
-        if selection == Profile.PALETTE:
-            return 'none'
-        if self.get_calibrated_color_position(target, tolerance=20):
-            return 'calibrated'
-        if not os.path.exists('color_calibration.json') and self._custom_colors is not None:
-            return 'keyboard'
-        return 'none'
+        return self.painter.resolve_color_source(target, force_custom)
 
     def _click_swatch(self, x, y):
-        """Click a palette/spectrum swatch, honouring MSPaint double-click mode."""
-        if self.mspaint_mode.get('enabled', False):
-            pyautogui.click((x, y))
-            delay = self.mspaint_mode.get('delay', 0.5)
-            print(f"[MSPaintMode] Waiting {delay} seconds between double-click...")
-            time.sleep(delay)
-            pyautogui.click((x, y))
-            print(f"[MSPaintMode] Double-click completed at {(x, y)}")
-        else:
-            pyautogui.click((x, y))
-        wait = self.color_button.get('delay', 0.1)
-        print(f"[DEBUG] Waiting {wait} seconds after swatch click...")
-        time.sleep(wait)
+        """Backwards-compatible wrapper for the driver's swatch click."""
+        return self.painter.click_swatch(x, y)
 
     def _enter_rgb_keyboard(self, c):
-        """Fallback: type the RGB values directly into the app's colour dialog."""
-        cc_box = self._custom_colors
-        if cc_box is None:
-            raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
-        center_x = cc_box[0] + cc_box[2] // 2
-        center_y = cc_box[1] + cc_box[3] // 2
-        print(f"[DEBUG] Spectrum not available - clicking center of box at: ({center_x}, {center_y})")
-        pyautogui.click((center_x, center_y), clicks=3, interval=.15)
-        print(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
-        pyautogui.press('tab', presses=7, interval=.05)
-        for val in c:
-            for n in (d for d in str(val)):
-                pyautogui.press(str(n))
-            pyautogui.press('tab')
-        pyautogui.press('tab')
-        pyautogui.press('enter')
-        pyautogui.PAUSE = 0.0
+        """Backwards-compatible wrapper for the driver's RGB keyboard entry."""
+        return self.painter.enter_rgb_keyboard(c)
 
     def _select_color(self, target, force_custom=False):
         """Select ``target`` in the painting app per the profile's strategy.
@@ -242,16 +211,7 @@ class Bot:
         When ``force_custom`` is set (Colour Button Okay enabled) the built-in
         palette is skipped and the custom-colour path is used instead.
         """
-        source = self._color_source(target, force_custom)
-        if source == 'palette':
-            px, py = self._palette.colors_pos[target]
-            self._click_swatch(px, py)
-        elif source == 'calibrated':
-            pos = self.get_calibrated_color_position(target, tolerance=20)
-            if pos:
-                self._click_swatch(pos[0], pos[1])
-        elif source == 'keyboard':
-            self._enter_rgb_keyboard(target)
+        return self.painter.select_color(target, force_custom)
 
     def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None, valid_positions=None, manual_centers=None) -> Palette:
 
@@ -818,130 +778,13 @@ class Bot:
             num_strokes = len(lines)
             print(f"Switching to color {c} - {num_strokes} cached coordinate points")
 
-            # If New Layer is enabled, click the new-layer button with modifiers
-            # Skip on first color when skip_first_color is enabled
-            try:
-                nl = self.new_layer
-                if nl.get('enabled') and nl.get('coords') and not (color_idx == 0 and self.skip_first_color):
-                    nx, ny = nl['coords']
-                    print(f"[NewLayer] attempting click at {(nx, ny)} with mods={nl.get('modifiers')}")
-
-                    # Track which modifiers were pressed so we can release them in reverse order
-                    pressed_modifiers = []
-
-                    # Press modifiers immediately before the click
-                    modifier_keys = [('ctrl', 'ctrl'), ('alt', 'alt'), ('shift', 'shift')]
-                    for mod_key, pygui_key in modifier_keys:
-                        if nl['modifiers'].get(mod_key):
-                            pyautogui.keyDown(pygui_key)
-                            pressed_modifiers.append(pygui_key)
-                            print(f"[NewLayer] pressed modifier: {pygui_key}")
-
-                    # Click the button with modifiers active
-                    print(f"[NewLayer] performing mouseDown at {(nx, ny)}")
-                    pyautogui.mouseDown(nx, ny, button='left')
-                    time.sleep(0.08)
-                    pyautogui.mouseUp(nx, ny, button='left')
-                    print(f"[NewLayer] mouse click performed at {(nx, ny)}")
-
-                    # Release modifiers immediately after the click with robust handling
-                    for pygui_key in reversed(pressed_modifiers):
-                        pyautogui.keyUp(pygui_key)
-                        print(f"[NewLayer] released modifier: {pygui_key}")
-                        time.sleep(0.05)  # Small delay to ensure each key release is registered
-
-                    # Brute-force release all modifiers as backup (in case tracked list missed any)
-                    try:
-                        pyautogui.keyUp('shift')
-                        time.sleep(0.05)
-                        pyautogui.keyUp('alt')
-                        time.sleep(0.05)
-                        pyautogui.keyUp('ctrl')
-                        time.sleep(0.05)
-                        print(f"[NewLayer] force-released all modifiers as backup")
-                    except:
-                        pass
-
-                    # Additional delay to ensure OS processes all key release events
-                    time.sleep(0.1)
-
-                    # Wait for the target app to process the click (without modifiers active)
-                    time.sleep(0.75)
-
-                    # Wait at least 0.75 seconds before starting to paint to ensure new layer is ready
-                    print(f"[NewLayer] waiting 0.75 seconds before painting...")
-                    time.sleep(0.75)
-
-            except Exception as e:
-                print(f"[NewLayer] Error during new layer creation: {e}")
-                # Ensure modifiers are released even if there's an error
-                try:
-                    pyautogui.keyUp('shift')
-                    pyautogui.keyUp('alt')
-                    pyautogui.keyUp('ctrl')
-                except:
-                    pass
+            # If New Layer is enabled, click the new-layer button with modifiers.
+            # Skip on first color when skip_first_color is enabled.
+            if not (color_idx == 0 and self.skip_first_color):
+                self.painter.new_layer()
 
             # If Color Button Mode is enabled, click the color button with modifiers before palette selection
-            try:
-                cb = self.color_button
-                if cb.get('enabled') and cb.get('coords'):
-                    cx, cy = cb['coords']
-                    print(f"[ColorButton] attempting click at {(cx, cy)} with mods={cb.get('modifiers')}, delay={cb.get('delay')}")
-
-                    # Track which modifiers were pressed so we can release them in reverse order
-                    pressed_modifiers = []
-
-                    # Press modifiers immediately before the click
-                    modifier_keys = [('ctrl', 'ctrl'), ('alt', 'alt'), ('shift', 'shift')]
-                    for mod_key, pygui_key in modifier_keys:
-                        if cb['modifiers'].get(mod_key):
-                            pyautogui.keyDown(pygui_key)
-                            pressed_modifiers.append(pygui_key)
-                            print(f"[ColorButton] pressed modifier: {pygui_key}")
-
-                    # Click the button with modifiers active
-                    print(f"[ColorButton] performing mouseDown at {(cx, cy)}")
-                    pyautogui.mouseDown(cx, cy, button='left')
-                    time.sleep(0.08)
-                    pyautogui.mouseUp(cx, cy, button='left')
-                    print(f"[ColorButton] mouse click performed at {(cx, cy)}")
-
-                    # Release modifiers immediately after the click with robust handling
-                    for pygui_key in reversed(pressed_modifiers):
-                        pyautogui.keyUp(pygui_key)
-                        print(f"[ColorButton] released modifier: {pygui_key}")
-                        time.sleep(0.05)  # Small delay to ensure each key release is registered
-
-                    # Brute-force release all modifiers as backup (in case tracked list missed any)
-                    try:
-                        pyautogui.keyUp('shift')
-                        time.sleep(0.05)
-                        pyautogui.keyUp('alt')
-                        time.sleep(0.05)
-                        pyautogui.keyUp('ctrl')
-                        time.sleep(0.05)
-                        print(f"[ColorButton] force-released all modifiers as backup")
-                    except:
-                        pass
-
-                    # Additional delay to ensure OS processes all key release events
-                    time.sleep(0.1)
-
-                    # Wait for the configured delay after clicking the color button
-                    delay = cb.get('delay', 0.1)
-                    print(f"[ColorButton] waiting {delay} seconds before palette selection...")
-                    time.sleep(delay)
-
-            except Exception as e:
-                print(f"[ColorButton] Error during color button click: {e}")
-                # Ensure modifiers are released even if there's an error
-                try:
-                    pyautogui.keyUp('shift')
-                    pyautogui.keyUp('alt')
-                    pyautogui.keyUp('ctrl')
-                except:
-                    pass
+            self.painter.color_button()
 
             # DEBUG: Log color selection details
             print(f"[DEBUG] Selecting color: {c}")
@@ -955,65 +798,7 @@ class Bot:
             self._select_color(c, force_custom=self.color_button_okay.get('enabled', False))
 
             # If Color Button Okay Mode is enabled, click "Set Okay" button after color selection
-            try:
-                cbo = self.color_button_okay
-                if cbo.get('enabled') and cbo.get('coords'):
-                    cx, cy = cbo['coords']
-                    print(f"[ColorButtonOkay] attempting click at {(cx, cy)} with mods={cbo.get('modifiers')}")
-
-                    # Track which modifiers were pressed so we can release them in reverse order
-                    pressed_modifiers = []
-
-                    # Press modifiers immediately before the click
-                    modifier_keys = [('ctrl', 'ctrl'), ('alt', 'alt'), ('shift', 'shift')]
-                    for mod_key, pygui_key in modifier_keys:
-                        if cbo['modifiers'].get(mod_key):
-                            pyautogui.keyDown(pygui_key)
-                            pressed_modifiers.append(pygui_key)
-                            print(f"[ColorButtonOkay] pressed modifier: {pygui_key}")
-
-                    # Click the button with modifiers active
-                    print(f"[ColorButtonOkay] performing mouseDown at {(cx, cy)}")
-                    pyautogui.mouseDown(cx, cy, button='left')
-                    time.sleep(0.08)
-                    pyautogui.mouseUp(cx, cy, button='left')
-                    print(f"[ColorButtonOkay] mouse click performed at {(cx, cy)}")
-
-                    # Release modifiers immediately after the click with robust handling
-                    for pygui_key in reversed(pressed_modifiers):
-                        pyautogui.keyUp(pygui_key)
-                        print(f"[ColorButtonOkay] released modifier: {pygui_key}")
-                        time.sleep(0.05)  # Small delay to ensure each key release is registered
-
-                    # Brute-force release all modifiers as backup (in case tracked list missed any)
-                    try:
-                        pyautogui.keyUp('shift')
-                        time.sleep(0.05)
-                        pyautogui.keyUp('alt')
-                        time.sleep(0.05)
-                        pyautogui.keyUp('ctrl')
-                        time.sleep(0.05)
-                        print(f"[ColorButtonOkay] force-released all modifiers as backup")
-                    except:
-                        pass
-
-                    # Additional delay to ensure OS processes all key release events
-                    time.sleep(0.1)
-
-                    # Wait for the configured delay after clicking the "Set Okay" button (use same delay as Color Button)
-                    delay = self.color_button_okay.get('delay', 0.1)
-                    print(f"[ColorButtonOkay] waiting {delay} seconds before starting to draw...")
-                    time.sleep(delay)
-
-            except Exception as e:
-                print(f"[ColorButtonOkay] Error during color button okay click: {e}")
-                # Ensure modifiers are released even if there's an error
-                try:
-                    pyautogui.keyUp('shift')
-                    pyautogui.keyUp('alt')
-                    pyautogui.keyUp('ctrl')
-                except:
-                    pass
+            self.painter.color_button_okay()
 
             for line_idx, line in enumerate(lines):
                 # Skip lines already drawn if resuming
@@ -1086,39 +871,7 @@ class Bot:
 
                 # Draw line with pause support (complete each stroke before checking pause)
                 end_pos = (line[1][0], line[1][1])
-
-                # Calculate distance
-                dx = end_pos[0] - start_pos[0]
-                dy = end_pos[1] - start_pos[1]
-                distance = (dx**2 + dy**2)**0.5
-
-                if distance < 1:  # Very short line
-                    pyautogui.moveTo(start_pos)
-                    pyautogui.dragTo(end_pos[0], end_pos[1], 0, button='left')
-                else:
-                    # Break into segments for smooth drawing
-                    segments = max(2, min(10, int(distance / 10)))  # 2-10 segments based on length
-                    segment_delay = self.settings[Bot.DELAY] / segments
-
-                    pyautogui.moveTo(start_pos)
-                    pyautogui.mouseDown(button='left')
-
-                    # Always replay the current stroke when resuming from pause
-                    start_segment = 1
-                    if self.draw_state.get('was_paused', False):
-                        print(f"Replaying stroke after pause - ensuring clean result")
-                        self.draw_state['was_paused'] = False
-
-                    for i in range(start_segment, segments + 1):
-                        # Calculate next position
-                        t = i / segments
-                        next_x = start_pos[0] + dx * t
-                        next_y = start_pos[1] + dy * t
-
-                        pyautogui.moveTo(next_x, next_y)
-                        time.sleep(segment_delay)  # Distribute the stroke delay across segments
-
-                    pyautogui.mouseUp()
+                self.painter.execute_stroke(start_pos, end_pos, self.settings[Bot.DELAY])
 
                 # Check for pause after completing the stroke
                 if self.paused or self.terminate:
@@ -1218,67 +971,7 @@ class Bot:
             self._select_color(c, force_custom=self.color_button_okay.get('enabled', False))
 
             # Only click okay button if Color Button Okay is enabled
-            if self.color_button_okay.get('enabled', False):
-                # Click to Color Button Okay button to confirm color selection
-                try:
-                    cbo = self.color_button_okay
-                    if cbo.get('coords'):
-                        cx, cy = cbo['coords']
-                        print(f"[ColorButtonOkay] attempting click at {(cx, cy)} with mods={cbo.get('modifiers')}")
-
-                        # Track which modifiers were pressed so we can release them in reverse order
-                        pressed_modifiers = []
-
-                        # Press modifiers immediately before the click
-                        modifier_keys = [('ctrl', 'ctrl'), ('alt', 'alt'), ('shift', 'shift')]
-                        for mod_key, pygui_key in modifier_keys:
-                            if cbo['modifiers'].get(mod_key):
-                                pyautogui.keyDown(pygui_key)
-                                pressed_modifiers.append(pygui_key)
-                                print(f"[ColorButtonOkay] pressed modifier: {pygui_key}")
-
-                        # Click the button with modifiers active
-                        print(f"[ColorButtonOkay] performing mouseDown at {(cx, cy)}")
-                        pyautogui.mouseDown(cx, cy, button='left')
-                        time.sleep(0.08)
-                        pyautogui.mouseUp(cx, cy, button='left')
-                        print(f"[ColorButtonOkay] mouse click performed at {(cx, cy)}")
-
-                        # Release modifiers immediately after the click with robust handling
-                        for pygui_key in reversed(pressed_modifiers):
-                            pyautogui.keyUp(pygui_key)
-                            print(f"[ColorButtonOkay] released modifier: {pygui_key}")
-                            time.sleep(0.05)  # Small delay to ensure each key release is registered
-
-                        # Brute-force release all modifiers as backup (in case tracked list missed any)
-                        try:
-                            pyautogui.keyUp('shift')
-                            time.sleep(0.05)
-                            pyautogui.keyUp('alt')
-                            time.sleep(0.05)
-                            pyautogui.keyUp('ctrl')
-                            time.sleep(0.05)
-                            print(f"[ColorButtonOkay] force-released all modifiers as backup")
-                        except:
-                            pass
-
-                        # Additional delay to ensure OS processes all key release events
-                        time.sleep(0.1)
-
-                        # Wait for configured delay after clicking the Color Button Okay (use same delay as Color Button)
-                        delay = self.color_button_okay.get('delay', 0.1)
-                        print(f"[ColorButtonOkay] waiting {delay} seconds before starting to draw...")
-                        time.sleep(delay)
-
-                except Exception as e:
-                    print(f"[ColorButtonOkay] Error during color button okay click: {e}")
-                    # Ensure modifiers are released even if there's an error
-                    try:
-                        pyautogui.keyUp('shift')
-                        pyautogui.keyUp('alt')
-                        pyautogui.keyUp('ctrl')
-                    except:
-                        pass
+            self.painter.color_button_okay()
 
             for line_idx, line in enumerate(lines):
                 if lines_drawn >= max_lines:
@@ -1301,16 +994,7 @@ class Bot:
 
                 # Draw the line (simplified, no segmentation for test draw)
                 start_pos, end_pos = line
-                distance = ((end_pos[0] - start_pos[0]) ** 2 + (end_pos[1] - start_pos[1]) ** 2) ** 0.5
-
-                if distance < 1:  # Very short line
-                    pyautogui.moveTo(start_pos)
-                    pyautogui.dragTo(end_pos[0], end_pos[1], 0.2, button='left')
-                else:
-                    # Simple drag for test draw with moderate speed
-                    pyautogui.moveTo(start_pos)
-                    pyautogui.dragTo(end_pos[0], end_pos[1], 0.2, button='left')
-                    time.sleep(0.2)  # Delay between strokes
+                self.painter.execute_test_stroke(start_pos, end_pos)
 
         # Show time comparison for test draw
         actual_time = time.time() - self.start_time

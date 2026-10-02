@@ -20,7 +20,14 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   `to_dict()` / `from_dict()` preset serialization.
 - Headless test suite (`tests/test_profile.py`, `tests/test_pipeline.py`) and
   `conftest.py` so `bot`, `pyaint_profile`, etc. import regardless of cwd.
-  Currently 28 tests, all passing.
+  Now 38 tests, all passing.
+- `pyaint_painter.py`: the `ScreenPainter` seam — `Capabilities` (capability
+  flags derived from the profile), `ColorSelectionChain` (palette / calibrated /
+  keyboard strategies with the same semantics as the old `_color_source`), and
+  all app-specific input actions (modifier clicks, new layer, color button /
+  okay, swatch click, RGB keyboard entry, stroke execution).
+- `tests/test_painter.py`: headless characterization tests for the seam using a
+  fake `pyautogui`.
 - `_color_source()` / `_select_color()` color-selection strategy in `Bot`,
   driven by `Profile.color_selection` (`auto` | `palette` | `custom`) instead
   of ad-hoc conditionals.
@@ -35,6 +42,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 - `bot.py`: extracted the drawing pipeline core into `_encode_rows()`,
   `_emit_run()`, and `_merge_layers()`; `process()` is now I/O + scaling only,
   and `process_region()` reuses the same encoder.
+- `bot.py`: app-specific input moved behind `Bot.painter` (`ScreenPainter`).
+  `draw()` / `test_draw()` now call `painter.new_layer()`, `color_button()`,
+  `color_button_okay()`, and `execute_stroke()` / `execute_test_stroke()`
+  instead of inlining the click/modifier/stroke logic. Colour selection is
+  delegated to the driver's `ColorSelectionChain`. Behaviour is unchanged
+  (verified by the characterization tests).
 - `ui/window.py`: creates/loads the shared `Profile`, saves `config.json` as
   preferences merged with `profile.to_config()`, and passes the shared Profile
   into `SetupWindow` so setup mutations need no merge-back.
