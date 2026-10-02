@@ -18,6 +18,8 @@ from exceptions import (
 )
 from PIL import Image
 
+from pyaint_profile import Profile, box_to_wh
+
 class Palette:
     def __init__(self, colors_pos=None, box=None, rows=None, columns=None, valid_positions=None, manual_centers=None):
         if colors_pos is not None:
@@ -103,7 +105,7 @@ class Bot:
     IGNORE_WHITE = 1 << 0
     USE_CUSTOM_COLORS = 1 << 1
 
-    def __init__(self, config_file='config.json'):
+    def __init__(self, config_file='config.json', profile=None):
         self.terminate = False
         self.paused = False
         self.pause_key = 'p'
@@ -115,6 +117,11 @@ class Bot:
         self.skip_first_color = False  # Skip first color when drawing
         self.jump_threshold = 5  # Pixel distance threshold for jump detection (default 5)
 
+        # The taught environment lives in one shared Profile (pyaint_profile.py).
+        # The UI and this bot reference the same instance, giving a single
+        # source of truth for palette/canvas/colour-selection configuration.
+        self.profile = profile if profile is not None else Profile()
+
         # Drawing state for pause/resume
         self.draw_state = {
             'color_idx': 0,
@@ -124,56 +131,8 @@ class Bot:
             'cmap': None
         }
 
-        # New Layer feature state
-        self.new_layer = {
-            'enabled': False,
-            'coords': None,           # (x, y)
-            'modifiers': {
-                'ctrl': False,
-                'alt': False,
-                'shift': False
-            }
-        }
-
-        # Color Button Mode state
-        self.color_button = {
-            'status': False,          # whether the feature is configured
-            'coords': None,           # [x, y] or null - the location to click first
-            'enabled': False,         # whether the feature is active
-            'delay': 0.1,             # delay in seconds (0.01 to 5.0)
-            'modifiers': {            # optional modifier keys
-                'ctrl': False,
-                'alt': False,
-                'shift': False
-            }
-        }
-
-        # Color Button Okay Mode state (clicked AFTER color selection)
-        self.color_button_okay = {
-            'status': False,          # whether the feature is configured
-            'coords': None,           # [x, y] or null - the location to click
-            'enabled': False,         # whether the feature is active
-            'delay': 0.1,             # delay in seconds (0.01 to 5.0)
-            'modifiers': {            # optional modifier keys
-                'ctrl': False,
-                'alt': False,
-                'shift': False
-            }
-        }
-
-        # MSPaint Mode state (double-click on palette instead of single click)
-        self.mspaint_mode = {
-            'enabled': False,         # whether the feature is active
-            'delay': 0.5              # delay between clicks in seconds (default 0.5)
-        }
-
-        # Canvas and palette will be initialized later
-        self._canvas = None
+        # Live palette object, derived from the profile's Palette geometry.
         self._palette = None
-        self._custom_colors = None
-        
-        # Color calibration map for custom colors: {(r,g,b): (x,y)}
-        self.color_calibration_map = None
 
         # Progress Overlay state
         self.progress_overlay = None
@@ -184,6 +143,115 @@ class Bot:
 
         pyautogui.PAUSE = 0.0
         pyautogui.MINIMUM_DURATION = 0.01
+
+    # ------------------------------------------------------------------
+    # Environment views. The single source of truth is ``self.profile``;
+    # these keep the engine's attribute-style access working unchanged.
+    # ------------------------------------------------------------------
+    @property
+    def new_layer(self):
+        return self.profile['New Layer']
+
+    @property
+    def color_button(self):
+        return self.profile['Color Button']
+
+    @property
+    def color_button_okay(self):
+        return self.profile['Color Button Okay']
+
+    @property
+    def mspaint_mode(self):
+        return self.profile.mspaint_mode
+
+    @property
+    def color_calibration_map(self):
+        return self.profile.calibration
+
+    @color_calibration_map.setter
+    def color_calibration_map(self, value):
+        self.profile.calibration = value
+
+    @property
+    def _canvas(self):
+        return self.profile.canvas_rect()
+
+    @property
+    def _custom_colors(self):
+        return self.profile.custom_colors_rect()
+
+    # ------------------------------------------------------------------
+    # Colour selection strategy (declared by the profile, not inferred)
+    # ------------------------------------------------------------------
+    def _color_source(self, target, force_custom=False):
+        """Decide how ``target`` should be selected, without performing input.
+
+        Returns ``'palette'``, ``'calibrated'``, ``'keyboard'`` or ``'none'``.
+        Honours ``profile.color_selection`` so the strategy is data rather
+        than conditionals scattered through the drawing loop.
+        """
+        selection = self.profile.color_selection
+        if not force_custom and selection != Profile.CUSTOM:
+            if self._palette is not None and target in self._palette.colors:
+                return 'palette'
+        if selection == Profile.PALETTE:
+            return 'none'
+        if self.get_calibrated_color_position(target, tolerance=20):
+            return 'calibrated'
+        if not os.path.exists('color_calibration.json') and self._custom_colors is not None:
+            return 'keyboard'
+        return 'none'
+
+    def _click_swatch(self, x, y):
+        """Click a palette/spectrum swatch, honouring MSPaint double-click mode."""
+        if self.mspaint_mode.get('enabled', False):
+            pyautogui.click((x, y))
+            delay = self.mspaint_mode.get('delay', 0.5)
+            print(f"[MSPaintMode] Waiting {delay} seconds between double-click...")
+            time.sleep(delay)
+            pyautogui.click((x, y))
+            print(f"[MSPaintMode] Double-click completed at {(x, y)}")
+        else:
+            pyautogui.click((x, y))
+        wait = self.color_button.get('delay', 0.1)
+        print(f"[DEBUG] Waiting {wait} seconds after swatch click...")
+        time.sleep(wait)
+
+    def _enter_rgb_keyboard(self, c):
+        """Fallback: type the RGB values directly into the app's colour dialog."""
+        cc_box = self._custom_colors
+        if cc_box is None:
+            raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
+        center_x = cc_box[0] + cc_box[2] // 2
+        center_y = cc_box[1] + cc_box[3] // 2
+        print(f"[DEBUG] Spectrum not available - clicking center of box at: ({center_x}, {center_y})")
+        pyautogui.click((center_x, center_y), clicks=3, interval=.15)
+        print(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
+        pyautogui.press('tab', presses=7, interval=.05)
+        for val in c:
+            for n in (d for d in str(val)):
+                pyautogui.press(str(n))
+            pyautogui.press('tab')
+        pyautogui.press('tab')
+        pyautogui.press('enter')
+        pyautogui.PAUSE = 0.0
+
+    def _select_color(self, target, force_custom=False):
+        """Select ``target`` in the painting app per the profile's strategy.
+
+        When ``force_custom`` is set (Colour Button Okay enabled) the built-in
+        palette is skipped and the custom-colour path is used instead.
+        """
+        source = self._color_source(target, force_custom)
+        if source == 'palette':
+            px, py = self._palette.colors_pos[target]
+            self._click_swatch(px, py)
+        elif source == 'calibrated':
+            pos = self.get_calibrated_color_position(target, tolerance=20)
+            if pos:
+                self._click_swatch(pos[0], pos[1])
+        elif source == 'keyboard':
+            self._enter_rgb_keyboard(target)
 
     def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None, valid_positions=None, manual_centers=None) -> Palette:
 
@@ -207,16 +275,13 @@ class Bot:
         return self._palette
 
     def init_canvas(self, cabox):
-        # self._canvas = pyautogui.locateOnScreen(Bot.RESOURCES[1], confidence=self.settings[Bot.CONF])
-
-        # Just like the old pbox, the bot works on the assumption that the canvas box is stored using the format
-        # (topleftx, toplefty, width, height). Adjustments have been made below to conform with this standard.
-        self._canvas = cabox[0], cabox[1], cabox[2] - cabox[0], cabox[3] - cabox[1]
+        # Store the taught canvas box (corners) in the shared profile. The
+        # ``_canvas`` property derives the (x, y, w, h) view used by the engine.
+        self.profile['Canvas']['box'] = list(cabox)
 
     def init_custom_colors(self, ccbox):
-        # self._custom_colors = pyautogui.locateOnScreen(Bot.RESOURCES[2], confidence=self.settings[Bot.CONF])
-        self._custom_colors = ccbox[0], ccbox[1], ccbox[2] - ccbox[0], ccbox[3] - ccbox[1]
-        
+        self.profile['Custom Colors']['box'] = list(ccbox)
+
         # Scan the custom colors spectrum to create a color-to-position map
         # This allows clicking on specific colors in the spectrum instead of using keyboard input
         self._spectrum_map = self._scan_spectrum(ccbox)
@@ -596,90 +661,36 @@ class Bot:
             img_small = img.resize((tw, th), resample=Image.NEAREST)  # type: ignore
         pix = img_small.load()
         w, h = img_small.size
-        size = w * h
-        start = xo, y
+        return self._encode_rows(pix, w, h, xo, y, step, flags, mode)
 
-        nearest_colors = dict()
-        cmap = dict()
-
-        col_freq = dict()
-        table_lines = list()
-        table_colors = list()
-
-        old_col = None
-
-        # Create interval size from normalized accuracy value
-        # Also setting a lower bound value of 1 to prevent interval_size from reaching 0
-        interval_size = max((1 - self.settings[Bot.ACCURACY]) * 255, 1)
-
-        for i in range(h):
-            if mode is Bot.LAYERED:
-                table_lines.append(list())
-                table_colors.append(set())
-
-            x = xo  # Reset x to start of row
-            for j in range(w):
-                r, g, b = pix[j, i][:3]
-                col = near = (r, g, b)
-
-                # DESIGNATING COLOR OF THE CURRENT PIXEL
-                # Deciding what to do with new RGB triplet
-                if (r, g, b) not in nearest_colors:
-                    if flags & Bot.USE_CUSTOM_COLORS:
-                        # # Find the nearest custom color previously used, if any
-                        # if len(cmap.keys()) > 0:
-                        #     near = min(cmap.keys(), key=lambda c : Palette.dist(c, near))
-                        # # Find the euclidean distance of the furthest color
-                        # max_dist = sum( max( 255 - col[i], col[i] - 0) ** 2 for i in range(len(col)) ) 
-                        # col = near if (max_dist - Palette.dist(near, col)) / max_dist >= self.settings[Bot.ACCURACY] else col
-
-                        # Obtain the closest color
-                        # round(color_component / interval_size) * interval_size
-                        col = tuple(int(round(v / interval_size) * interval_size) for v in col)
-                    else:
-                        # Find the nearest color from the palette
-                        col = self._palette.nearest_color((r, g, b))
-
-                    # Save the nearest color for this RGB triplet to avoid recomputing it
-                    nearest_colors[(r, g, b)] = col
-                else:
-                    col = nearest_colors[(r, g, b)]
-
-                # DESIGNATING COLOR LINES
-                # End brush stroke when...
-                # 1. a new color is encountered 
-                # 2. the brush is at the end of the row
-                if j == w - 1 or (old_col != None and old_col != col):
-                    end = (x, y)
-                    if mode is Bot.SLOTTED and not (old_col == (255, 255, 255) and flags & Bot.IGNORE_WHITE):
-                        lines = cmap.get(old_col, [])
-                        lines.append( (start, end) )
-                        cmap[old_col] = lines
-                    if mode is Bot.LAYERED:
-                        table_lines[i].append((old_col, (start, end)))
-                        table_colors[i].add(old_col)
-                        col_freq[old_col] = col_freq.get(old_col, 0) + end[0] - start[0] + 1
-                    start = (xo, y + step) if j == w - 1 else (x + step, y)
-                
-                self.progress = 100 * (i * w + (j + 1)) / size
-
-                old_col = col
-                x += step
-
-            x = xo
-            y += step
-        
+    # ------------------------------------------------------------------
+    # Shared run-length / layering engine
+    # ------------------------------------------------------------------
+    def _emit_run(self, cmap, table_lines, table_colors, col_freq, row, color, start, end, mode, flags):
+        """Record one horizontal run as a stroke (or a layer-table row)."""
+        if color is None:
+            return
         if mode is Bot.SLOTTED:
-            return cmap
+            if color == (255, 255, 255) and flags & Bot.IGNORE_WHITE:
+                return
+            cmap.setdefault(color, []).append((start, end))
+        else:
+            table_lines[row].append((color, (start, end)))
+            table_colors[row].add(color)
+            col_freq[color] = col_freq.get(color, 0) + end[0] - start[0] + 1
 
-        # Sort colors in decreasing order of their frequency and maintain a height level index for each color
-        col_freq = tuple(k for k, _ in sorted(col_freq.items(), key=lambda item : item [1], reverse=True))
-        col_index = {col_freq[i]: i for i in range(len(col_freq))}     
-    
-        # This loop will attempt to merge lines in favour of reducing the number of brush strokes when drawing.
-        # Lines of lower layer colors can be easily merged into fewer strokes since they will be repainted over
-        # again by colors from a higher layer
-        for idc, col in enumerate(col_freq):
+    def _merge_layers(self, cmap, table_lines, table_colors, col_freq, flags):
+        """Merge lower-layer runs into fewer strokes (LAYERED mode only)."""
+        # Sort colors in decreasing order of their frequency and maintain a
+        # height level index for each color.
+        col_order = tuple(
+            k for k, _ in sorted(col_freq.items(), key=lambda item: item[1], reverse=True)
+        )
+        col_index = {col_order[i]: i for i in range(len(col_order))}
+
+        # Lines of lower layer colors can be merged into fewer strokes since
+        # they will be repainted again by colors from a higher layer.
+        for idc, col in enumerate(col_order):
             for idr, row in enumerate(table_lines):
                 if col not in table_colors[idr] or (col == (255, 255, 255) and flags & Bot.IGNORE_WHITE):
                     continue
@@ -692,12 +703,64 @@ class Bot:
                         exposed = exposed or idc == col_index[line[0]]
                     if start is not None and (idc > col_index[line[0]] or idl == len(row) - 1):
                         if exposed:
-                            lines = cmap.get(col, [])
-                            lines.append((start, end))
-                            cmap[col] = lines
+                            cmap.setdefault(col, []).append((start, end))
                         start, exposed = None, False
-
         return cmap
+
+    def _encode_rows(self, pix, w, h, xo, y0, step, flags, mode):
+        """Run-length encode a downsampled pixel grid into a stroke map.
+
+        A run is closed when the colour changes (ending on the previous pixel)
+        and again at the end of each row (so the final pixel is included).
+        Shared by process() and process_region().
+        """
+        size = w * h
+        nearest_colors = {}
+        cmap = {}
+        col_freq = {}
+        table_lines = []
+        table_colors = []
+        # Interval size from normalized accuracy; lower bound of 1 prevents 0.
+        interval_size = max((1 - self.settings[Bot.ACCURACY]) * 255, 1)
+        y = y0
+
+        for i in range(h):
+            if mode is Bot.LAYERED:
+                table_lines.append(list())
+                table_colors.append(set())
+
+            x = xo
+            start = (x, y)
+            old_col = None
+            for j in range(w):
+                r, g, b = pix[j, i][:3]
+
+                if (r, g, b) not in nearest_colors:
+                    if flags & Bot.USE_CUSTOM_COLORS:
+                        col = tuple(int(round(v / interval_size) * interval_size) for v in (r, g, b))
+                    else:
+                        col = self._palette.nearest_color((r, g, b))
+                    nearest_colors[(r, g, b)] = col
+                else:
+                    col = nearest_colors[(r, g, b)]
+
+                if old_col is not None and old_col != col:
+                    self._emit_run(cmap, table_lines, table_colors, col_freq,
+                                   i, old_col, start, (x - step, y), mode, flags)
+                    start = (x, y)
+
+                old_col = col
+                self.progress = 100 * (i * w + (j + 1)) / size
+                x += step
+
+            # Close the run that contains the final pixel of the row.
+            self._emit_run(cmap, table_lines, table_colors, col_freq,
+                           i, old_col, start, (x - step, y), mode, flags)
+            y += step
+
+        if mode is Bot.SLOTTED:
+            return cmap
+        return self._merge_layers(cmap, table_lines, table_colors, col_freq, flags)
 
     def draw(self, cmap):
         '''
@@ -886,129 +949,10 @@ class Bot:
             print(f"[DEBUG] Color Button enabled: {self.color_button.get('enabled', False)}")
             print(f"[DEBUG] Color Button Okay enabled: {self.color_button_okay.get('enabled', False)}")
             print(f"[DEBUG] Custom colors box: {self._custom_colors}")
-            
-            # Only perform automatic color selection if Color Button Okay is NOT enabled
-            # When Color Button Okay is enabled, user is expected to manually select=color
-            if not self.color_button_okay.get('enabled', False):
-                # Check if palette exists and color is in palette before accessing it
-                if self._palette is not None and c in self._palette.colors:
-                    px, py = self._palette.colors_pos[c]
-                    print(f"[DEBUG] Using palette click at: {(px, py)}")
-                    
-                    # MSPaint Mode: Double-click on palette instead of single click
-                    if self.mspaint_mode.get('enabled', False):
-                        # First click
-                        pyautogui.click((px, py))
-                        # Wait for configured delay between clicks
-                        mspaint_delay = self.mspaint_mode.get('delay', 0.5)
-                        print(f"[MSPaintMode] Waiting {mspaint_delay} seconds between double-click...")
-                        time.sleep(mspaint_delay)
-                        # Second click on the same position
-                        pyautogui.click((px, py))
-                        print(f"[MSPaintMode] Double-click completed at {(px, py)}")
-                        # Use color button delay after double-click
-                        delay = self.color_button.get('delay', 0.1)
-                        print(f"[DEBUG] Waiting {delay} seconds after palette double-click...")
-                        time.sleep(delay)
-                    else:
-                        # Simple click (original behavior)
-                        pyautogui.click((px, py))
-                        # Wait for application to register=color selection
-                        delay = self.color_button.get('delay', 0.1)
-                        print(f"[DEBUG] Waiting {delay} seconds after palette click...")
-                        time.sleep(delay)
-                else:
-                    # Try to find the color in the spectrum map with tolerance
-                    # Use tolerance of 20 (same as calibration default) to ensure accurate color selection
-                    spectrum_pos = self.get_calibrated_color_position(c, tolerance=20)
-                    if spectrum_pos:
-                        print(f"[DEBUG] Using spectrum click at: {spectrum_pos}")
-                        pyautogui.click(spectrum_pos)
-                        # Wait for the application to register the color selection (use same delay as color button)
-                        delay = self.color_button.get('delay', 0.1)
-                        print(f"[DEBUG] Waiting {delay} seconds after spectrum click...")
-                        time.sleep(delay)
-                    else:
-                        # Check if manual color selection occurred (color_calibration.json exists)
-                        # If so, skip the keyboard input method since user already selected the color
-                        if not os.path.exists('color_calibration.json'):
-                            # Fallback to keyboard input method
-                            try:
-                                cc_box = self._custom_colors
-                                center_x = cc_box[0] + cc_box[2] // 2
-                                center_y = cc_box[1] + cc_box[3] // 2
-                                print(f"[DEBUG] Spectrum not available - clicking center of box at: ({center_x}, {center_y})")
-                                pyautogui.click((center_x, center_y), clicks=3, interval=.15)
-                            except:
-                                raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
-                            print(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
-                            pyautogui.press('tab', presses=7, interval=.05)
-                            for val in c:
-                                numbers = (d for d in str(val))
-                                for n in numbers:
-                                    pyautogui.press(str(n))
-                                pyautogui.press('tab')
-                            pyautogui.press('tab')
-                            pyautogui.press('enter')
-                            pyautogui.PAUSE = 0.0
-                        else:
-                            print(f"[DEBUG] Color calibration file exists - skipping keyboard input method")
-            else:
-                # Color Button Okay is enabled, but we still need to select color in spectrum before clicking okay
-                print(f"[DEBUG] Color Button Okay enabled - selecting color in spectrum before clicking okay")
-                
-                # Try to find the color in the spectrum map
-                spectrum_pos = self.get_calibrated_color_position(c, tolerance=20)
-                if spectrum_pos:
-                    print(f"[DEBUG] Using spectrum click at: {spectrum_pos}")
-                    
-                    # MSPaint Mode: Double-click on spectrum instead of single click
-                    if self.mspaint_mode.get('enabled', False):
-                        # First click
-                        pyautogui.click(spectrum_pos)
-                        # Wait for configured delay between clicks
-                        mspaint_delay = self.mspaint_mode.get('delay', 0.5)
-                        print(f"[MSPaintMode] Waiting {mspaint_delay} seconds between double-click...")
-                        time.sleep(mspaint_delay)
-                        # Second click on the same position
-                        pyautogui.click(spectrum_pos)
-                        print(f"[MSPaintMode] Double-click completed at {spectrum_pos}")
-                        # Use color button delay after double-click
-                        delay = self.color_button.get('delay', 0.1)
-                        print(f"[DEBUG] Waiting {delay} seconds after spectrum double-click...")
-                        time.sleep(delay)
-                    else:
-                        # Simple click (original behavior)
-                        pyautogui.click(spectrum_pos)
-                        # Wait for the application to register the color selection (use same delay as color button)
-                        delay = self.color_button.get('delay', 0.1)
-                        print(f"[DEBUG] Waiting {delay} seconds after spectrum click...")
-                        time.sleep(delay)
-                else:
-                    # Check if manual color selection occurred (color_calibration.json exists)
-                    # If so, skip keyboard input method since user already selected the color
-                    if not os.path.exists('color_calibration.json'):
-                        # Fallback to keyboard input method
-                        try:
-                            cc_box = self._custom_colors
-                            center_x = cc_box[0] + cc_box[2] // 2
-                            center_y = cc_box[1] + cc_box[3] // 2
-                            print(f"[DEBUG] Spectrum not available - clicking center of box at: ({center_x}, {center_y})")
-                            pyautogui.click((center_x, center_y), clicks=3, interval=.15)
-                        except:
-                            raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
-                        print(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
-                        pyautogui.press('tab', presses=7, interval=.05)
-                        for val in c:
-                            numbers = (d for d in str(val))
-                            for n in numbers:
-                                pyautogui.press(str(n))
-                                pyautogui.press('tab')
-                        pyautogui.press('tab')
-                        pyautogui.press('enter')
-                        pyautogui.PAUSE = 0.0
-                    else:
-                        print(f"[DEBUG] Color calibration file exists - skipping keyboard input method")
+
+            # Resolve the selection strategy from the profile and apply it.
+            # Colour Button Okay bypasses the built-in palette on purpose.
+            self._select_color(c, force_custom=self.color_button_okay.get('enabled', False))
 
             # If Color Button Okay Mode is enabled, click "Set Okay" button after color selection
             try:
@@ -1172,7 +1116,7 @@ class Bot:
                         next_y = start_pos[1] + dy * t
 
                         pyautogui.moveTo(next_x, next_y)
-                        time.sleep(segment_delay / segments)  # Distribute delay
+                        time.sleep(segment_delay)  # Distribute the stroke delay across segments
 
                     pyautogui.mouseUp()
 
@@ -1269,68 +1213,9 @@ class Bot:
             print(f"[DEBUG] Color Button Okay enabled: {self.color_button_okay.get('enabled', False)}")
             print(f"Switching to color {c} for test draw")
 
-            # Only perform automatic color selection if Color Button Okay is NOT enabled
-            # When Color Button Okay is enabled, user is expected to manually select the color
-            if not self.color_button_okay.get('enabled', False):
-                # Check if palette exists and color is in palette before accessing it
-                if self._palette is not None and c in self._palette.colors:
-                    px, py = self._palette.colors_pos[c]
-                    print(f"[DEBUG] Using palette click at: {(px, py)}")
-                    # Use mouseDown/mouseUp with delay for more reliable clicks (like color button mode)
-                    pyautogui.mouseDown(px, py, button='left')
-                    time.sleep(0.08)
-                    pyautogui.mouseUp(px, py, button='left')
-                else:
-                    # Try to find the color in the spectrum map
-                    # Use tolerance of 20 (same as calibration default) to ensure accurate color selection
-                    spectrum_pos = self.get_calibrated_color_position(c, tolerance=20)
-                    if spectrum_pos:
-                        print(f"[DEBUG] Using spectrum click at: {spectrum_pos}")
-                        
-                        # MSPaint Mode: Double-click on spectrum instead of single click
-                        if self.mspaint_mode.get('enabled', False):
-                            # First click
-                            pyautogui.click(spectrum_pos)
-                            # Wait for configured delay between clicks
-                            mspaint_delay = self.mspaint_mode.get('delay', 0.5)
-                            print(f"[MSPaintMode] Waiting {mspaint_delay} seconds between double-click...")
-                            time.sleep(mspaint_delay)
-                            # Second click on the same position
-                            pyautogui.click(spectrum_pos)
-                            print(f"[MSPaintMode] Double-click completed at {spectrum_pos}")
-                            # Use color button delay after double-click
-                            delay = self.color_button.get('delay', 0.1)
-                            print(f"[DEBUG] Waiting {delay} seconds after spectrum double-click...")
-                            time.sleep(delay)
-                        else:
-                            # Simple click (original behavior)
-                            pyautogui.click(spectrum_pos)
-                            # Wait for the application to register the color selection (use same delay as color button)
-                            delay = self.color_button.get('delay', 0.1)
-                            time.sleep(delay)
-                    else:
-                        # Check if color_calibration.json exists (calibration data available)
-                        # If so, skip the keyboard input method since calibration should find the color
-                        if not os.path.exists('color_calibration.json'):
-                            # Fallback to keyboard input method
-                            try:
-                                cc_box = self._custom_colors
-                                print(f"[DEBUG] Using keyboard input method - clicking center of box at: ({cc_box[0] + cc_box[2] // 2}, {cc_box[1] + cc_box[3] // 2})")
-                                pyautogui.click((cc_box[0] + cc_box[2] // 2, cc_box[1] + cc_box[3] // 2), clicks=3, interval=.15)
-                            except:
-                                raise NoCustomColorsError('Bot could not continue because custom colors are not initialized')
-                            print(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
-                            pyautogui.press('tab', presses=7, interval=.05)
-                            for val in c:
-                                numbers = (d for d in str(val))
-                                for n in numbers:
-                                    pyautogui.press(str(n))
-                                pyautogui.press('tab')
-                            pyautogui.press('tab')
-                            pyautogui.press('enter')
-                            pyautogui.PAUSE = 0.0
-                        else:
-                            print(f"[DEBUG] Color calibration file exists - skipping keyboard input method")
+            # Resolve the selection strategy from the profile and apply it.
+            # Colour Button Okay bypasses the built-in palette on purpose.
+            self._select_color(c, force_custom=self.color_button_okay.get('enabled', False))
 
             # Only click okay button if Color Button Okay is enabled
             if self.color_button_okay.get('enabled', False):
@@ -1453,16 +1338,16 @@ class Bot:
 
     def get_cache_filename(self, image_path, flags=0, mode=LAYERED):
         """Generate a unique cache filename based on image and settings"""
-        # Read image file to compute hash
-        with open(image_path, 'rb') as f:
-            image_data = f.read()
-        image_hash = hashlib.md5(image_data).hexdigest()[:8]
-
-        # Create settings hash - handle case where canvas isn't initialized yet
+        # Canvas must exist to key the cache, so check before touching the file.
         canvas_info = getattr(self, '_canvas', None)
         if canvas_info is None:
             # Canvas not initialized, can't generate cache filename
             return None
+
+        # Read image file to compute hash
+        with open(image_path, 'rb') as f:
+            image_data = f.read()
+        image_hash = hashlib.md5(image_data).hexdigest()[:8]
 
         settings_str = f"{self.settings}_{flags}_{mode}_{canvas_info}"
         settings_hash = hashlib.md5(settings_str.encode()).hexdigest()[:8]
@@ -1687,99 +1572,7 @@ class Bot:
             img_small = img_cropped.resize((tw, th), resample=Image.NEAREST)  # type: ignore
         pix = img_small.load()
         w, h = img_small.size
-        start = xo, y_start
-
-        nearest_colors = dict()
-        cmap = dict()
-
-        col_freq = dict()
-        table_lines = list()
-        table_colors = list()
-
-        old_col = None
-
-        # Create interval size from normalized accuracy value
-        # Also setting a lower bound value of 1 to prevent interval_size from reaching 0
-        interval_size = max((1 - self.settings[Bot.ACCURACY]) * 255, 1)
-
-        for i in range(h):
-            if mode is Bot.LAYERED:
-                table_lines.append(list())
-                table_colors.append(set())
-
-            for j in range(w):
-                r, g, b = pix[j, i][:3]
-                col = near = (r, g, b)
-
-                # DESIGNATING COLOR OF THE CURRENT PIXEL
-                # Deciding what to do with new RGB triplet
-                if (r, g, b) not in nearest_colors:
-                    if flags & Bot.USE_CUSTOM_COLORS:
-                        # Obtain the closest color
-                        # round(color_component / interval_size) * interval_size
-                        col = tuple(int(round(v / interval_size) * interval_size) for v in col)
-                    else:
-                        # Find the nearest color from the palette
-                        col = self._palette.nearest_color((r, g, b))
-
-                    # Save the nearest color for this RGB triplet to avoid recomputing it
-                    nearest_colors[(r, g, b)] = col
-                else:
-                    col = nearest_colors[(r, g, b)]
-
-                # DESIGNATING COLOR LINES
-                # End brush stroke when...
-                # 1. a new color is encountered
-                # 2. the brush is at the end of the row
-                if j == w - 1 or (old_col != None and old_col != col):
-                    end = (x, y_start)
-                    if mode is Bot.SLOTTED and not (old_col == (255, 255, 255) and flags & Bot.IGNORE_WHITE):
-                        lines = cmap.get(old_col, [])
-                        lines.append( (start, end) )
-                        cmap[old_col] = lines
-                    if mode is Bot.LAYERED:
-                        table_lines[i].append((old_col, (start, end)))
-                        table_colors[i].add(old_col)
-                        col_freq[old_col] = col_freq.get(old_col, 0) + end[0] - start[0] + 1
-                    start = (xo, y_start + step) if j == w - 1 else (x + step, y_start)
-
-                self.progress = 100 * (i * w + (j + 1)) / (w * h)
-
-                old_col = col
-                x += step
-
-            x = xo
-            y_start += step
-
-        if mode is Bot.SLOTTED:
-            return cmap
-
-        # Sort colors in decreasing order of their frequency and maintain a height level index for each color
-        col_freq = tuple(k for k, _ in sorted(col_freq.items(), key=lambda item : item [1], reverse=True))
-        col_index = {col_freq[i]: i for i in range(len(col_freq))}
-
-        # This loop will attempt to merge lines in favour of reducing the number of brush strokes when drawing.
-        # Lines of lower layer colors can be easily merged into fewer strokes since they will be repainted over
-        # again by colors from a higher layer
-        for idc, col in enumerate(col_freq):
-            for idr, row in enumerate(table_lines):
-                if col not in table_colors[idr] or (col == (255, 255, 255) and flags & Bot.IGNORE_WHITE):
-                    continue
-
-                start, end, exposed = None, None, False
-                for idl, line in enumerate(row):
-                    if idc <= col_index[line[0]]:
-                        start = line[1][0] if start is None else start
-                        end = line[1][1]
-                        exposed = exposed or idc == col_index[line[0]]
-                    if start is not None and (idc > col_index[line[0]] or idl == len(row) - 1):
-                        if exposed:
-                            lines = cmap.get(col, [])
-                            lines.append((start, end))
-                            cmap[col] = lines
-                        start, exposed = None, False
-
-        return cmap
+        return self._encode_rows(pix, w, h, xo, y_start, step, flags, mode)
 
     def simple_test_draw(self):
         '''

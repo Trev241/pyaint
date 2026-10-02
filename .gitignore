@@ -130,6 +130,9 @@ dmypy.json
 /pyaint-env
 /cache
 
+# Agent workspace (analysis, notes, specs, progress for future sessions)
+/AGENTS/
+
 # IDEs
 .vscode/
 .idea/
@@ -145,6 +148,7 @@ Thumbs.db
 config.json
 /__pycache__
 /ui/__pycache__
+/tests/__pycache__
 color_calibration.json
 .roo/memory.md
 assets/Canvas_preview.png

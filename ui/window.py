@@ -7,6 +7,7 @@ import urllib.request
 import urllib.error as urllib_error
 import utils
 
+from pyaint_profile import Profile, ENV_CONFIG_KEYS
 from ui.setup import SetupWindow
 from tkinter import filedialog
 from bot import Bot
@@ -112,7 +113,13 @@ class Window:
         self.title = title
         self.busy = False
 
-        # Initialize tools dict early so _init_ipanel can access it
+        # The taught environment. This is the single source of truth and is
+        # shared with the bot (see pyaint_profile.py).
+        self.profile = Profile()
+        self.bot.profile = self.profile
+
+        # Non-environment preferences (drawing knobs, options, pause key).
+        # Initialize early so _init_ipanel can access it.
         self.tools = {}
         
         # TOOLTIP PANEL    :    [1, 0]
@@ -534,13 +541,7 @@ class Window:
                 # Save the URL for persistence
                 self._last_url = input_text
                 self.tools['last_image_url'] = input_text
-                try:
-                    if not getattr(self, '_initializing', False):
-                        with open(self._config_path, 'w', encoding='utf-8') as f:
-                            json.dump(self.tools, f, ensure_ascii=False, indent=4)
-                        print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
-                except Exception as e:
-                    print(f"Failed to save config: {e}")
+                self._save_config()
 
             self._set_img(path=path)
             self.tlabel['text'] = f'Image loaded successfully'
@@ -567,76 +568,28 @@ class Window:
         else:
             self.draw_options &= ~option
 
-        # Save drawing options to config
-        if 'drawing_options' not in self.tools:
-            self.tools['drawing_options'] = {}
-        self.tools['drawing_options']['ignore_white_pixels'] = bool(self.draw_options & Bot.IGNORE_WHITE)
-        self.tools['drawing_options']['use_custom_colors'] = bool(self.draw_options & Bot.USE_CUSTOM_COLORS)
-        try:
-            if not getattr(self, '_initializing', False):
-                with open(self._config_path, 'w', encoding='utf-8') as f:
-                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
-                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
-        except Exception as e:
-            print(f"Failed to save config: {e}")
+        self._store_drawing_options()
+        self._save_config()
 
     def _on_newlayer_toggle(self):
-        enabled = bool(self._newlayer_var.get())
-        # Update bot state and tools dict
-        self.bot.new_layer['enabled'] = enabled
-        if 'New Layer' not in self.tools:
-            self.tools['New Layer'] = {'status': False, 'coords': None, 'modifiers': {'ctrl': False, 'alt': False, 'shift': False}}
-        self.tools['New Layer']['enabled'] = enabled
-        try:
-            if not getattr(self, '_initializing', False):
-                with open(self._config_path, 'w', encoding='utf-8') as f:
-                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
-                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
-        except Exception as e:
-            print(f"Failed to save config: {e}")
+        # bot.new_layer is the same dict as profile['New Layer']
+        self.profile['New Layer']['enabled'] = bool(self._newlayer_var.get())
+        self._save_config()
 
     def _on_colorbutton_toggle(self):
-        enabled = bool(self._colorbutton_var.get())
-        # Update bot state and tools dict
-        self.bot.color_button['enabled'] = enabled
-        if 'Color Button' not in self.tools:
-            self.tools['Color Button'] = {'status': False, 'coords': None, 'enabled': False, 'delay': 0.1, 'modifiers': {'ctrl': False, 'alt': False, 'shift': False}}
-        self.tools['Color Button']['enabled'] = enabled
-        try:
-            if not getattr(self, '_initializing', False):
-                with open(self._config_path, 'w', encoding='utf-8') as f:
-                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
-                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
-        except Exception as e:
-            print(f"Failed to save config: {e}")
+        self.profile['Color Button']['enabled'] = bool(self._colorbutton_var.get())
+        self._save_config()
 
     def _on_skip_first_color_toggle(self):
         enabled = bool(self._skip_first_color_var.get())
         # Update bot state and tools dict
         self.bot.skip_first_color = enabled
         self.tools['skip_first_color'] = enabled
-        try:
-            if not getattr(self, '_initializing', False):
-                with open(self._config_path, 'w', encoding='utf-8') as f:
-                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
-                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
-        except Exception as e:
-            print(f"Failed to save config: {e}")
+        self._save_config()
 
     def _on_mspaint_mode_toggle(self):
-        enabled = bool(self._mspaint_mode_var.get())
-        # Update bot state and tools dict
-        self.bot.mspaint_mode['enabled'] = enabled
-        if 'MSPaint Mode' not in self.tools:
-            self.tools['MSPaint Mode'] = {'enabled': False, 'delay': 0.5}
-        self.tools['MSPaint Mode']['enabled'] = enabled
-        try:
-            if not getattr(self, '_initializing', False):
-                with open(self._config_path, 'w', encoding='utf-8') as f:
-                    json.dump(self.tools, f, ensure_ascii=False, indent=4)
-                print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
-        except Exception as e:
-            print(f"Failed to save config: {e}")
+        self.profile.mspaint_mode['enabled'] = bool(self._mspaint_mode_var.get())
+        self._save_config()
 
     def _on_mspaint_delay_change(self, event=None):
         """Handle changes to MSPaint Mode delay entry field with validation"""
@@ -655,20 +608,9 @@ class Window:
                 val = 5.0
                 self._mspaint_delay_var.set(str(val))
             
-            # Update bot state
-            self.bot.mspaint_mode['delay'] = round(val, 3)
-            
-            # Save to tools config
-            if 'MSPaint Mode' not in self.tools:
-                self.tools['MSPaint Mode'] = {'enabled': False, 'delay': 0.5}
-            self.tools['MSPaint Mode']['delay'] = self.bot.mspaint_mode['delay']
-            
-            try:
-                if not getattr(self, '_initializing', False):
-                    with open(self._config_path, 'w', encoding='utf-8') as f:
-                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
-            except Exception as e:
-                print(f"Failed to save config: {e}")
+            # Update bot state (shared with the profile)
+            self.profile.mspaint_mode['delay'] = round(val, 3)
+            self._save_config()
             
             self.tlabel['text'] = 'MSPaint Mode delay updated. This is the wait time between double-clicks on the palette.'
             
@@ -698,22 +640,9 @@ class Window:
             self.bot.settings[0] = round(val, 3)
             self._optlabl[0]['text'] = f"{self._options[0][0]}: {val:.2f}"
             
-            # Save drawing settings to config
-            if 'drawing_settings' not in self.tools:
-                self.tools['drawing_settings'] = {}
-            self.tools['drawing_settings']['delay'] = self.bot.settings[0]
-            self.tools['drawing_settings']['pixel_size'] = self.bot.settings[1]
-            self.tools['drawing_settings']['precision'] = self.bot.settings[2]
-            self.tools['drawing_settings']['jump_delay'] = self.bot.settings[3]
-            
-            try:
-                if not getattr(self, '_initializing', False):
-                    with open(self._config_path, 'w', encoding='utf-8') as f:
-                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
-                    print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
-            except Exception as e:
-                print(f"Failed to save config: {e}")
-            
+            self._store_drawing_settings()
+            self._save_config()
+
             self.tlabel['text'] = Window._SLIDER_TOOLTIPS[0]
             
         except ValueError:
@@ -735,29 +664,8 @@ class Window:
             self.bot.settings[index] = round(val, 3)
             self._optlabl[index]['text'] = f"{self._options[index][0]}: {val:.2f}"
 
-        # Save drawing settings to config
-        if 'drawing_settings' not in self.tools:
-            self.tools['drawing_settings'] = {}
-        self.tools['drawing_settings']['delay'] = self.bot.settings[0]
-        self.tools['drawing_settings']['pixel_size'] = self.bot.settings[1]
-        self.tools['drawing_settings']['precision'] = self.bot.settings[2]
-        self.tools['drawing_settings']['jump_delay'] = self.bot.settings[3]
-
-        try:
-            try:
-                if not getattr(self, '_initializing', False):
-                    with open(self._config_path, 'w', encoding='utf-8') as f:
-                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
-                else:
-                    # Skip saving during initialization
-                    pass
-            except Exception as e:
-                print(f"Failed to save config: {e}")
-            else:
-                if not getattr(self, '_initializing', False):
-                    print(f"Saved config to {self._config_path}; keys={list(self.tools.keys())}")
-        except Exception as e:
-            print(f"Failed to save config: {e}")
+        self._store_drawing_settings()
+        self._save_config()
 
         self.tlabel['text'] = Window._SLIDER_TOOLTIPS[index]
 
@@ -781,18 +689,9 @@ class Window:
             # Update bot state
             self.bot.jump_threshold = val
             
-            # Save to tools config
-            if 'drawing_settings' not in self.tools:
-                self.tools['drawing_settings'] = {}
-            self.tools['drawing_settings']['jump_threshold'] = val
-            
-            try:
-                if not getattr(self, '_initializing', False):
-                    with open(self._config_path, 'w', encoding='utf-8') as f:
-                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
-            except Exception as e:
-                print(f"Failed to save config: {e}")
-            
+            self.tools.setdefault('drawing_settings', {})['jump_threshold'] = val
+            self._save_config()
+
             self.tlabel['text'] = f'Jump threshold updated to {val} pixels. Cursor jumps larger than this will trigger delay.'
             
         except ValueError:
@@ -817,18 +716,9 @@ class Window:
                 val = 10
                 self._calib_step_var.set(str(val))
             
-            # Save to tools config
-            if 'calibration_settings' not in self.tools:
-                self.tools['calibration_settings'] = {}
-            self.tools['calibration_settings']['step_size'] = val
-            
-            try:
-                if not getattr(self, '_initializing', False):
-                    with open(self._config_path, 'w', encoding='utf-8') as f:
-                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
-            except Exception as e:
-                print(f"Failed to save config: {e}")
-            
+            self.tools.setdefault('calibration_settings', {})['step_size'] = val
+            self._save_config()
+
             self.tlabel['text'] = 'Calibration step size updated. Lower values = more accurate but slower.'
             
         except ValueError:
@@ -858,12 +748,7 @@ class Window:
 
             # Save pause key to config file
             self.tools['pause_key'] = key_name
-            try:
-                if not getattr(self, '_initializing', False):
-                    with open(self._config_path, 'w', encoding='utf-8') as f:
-                        json.dump(self.tools, f, ensure_ascii=False, indent=4)
-            except Exception as e:
-                print(f"Failed to save config: {e}")
+            self._save_config()
 
             return "break"
 
@@ -871,12 +756,60 @@ class Window:
         print(f"Unexpected pause key press while busy={self.busy}")
         return "break"
 
+    def _save_config(self):
+        """Persist preferences and the environment profile to config.json."""
+        if getattr(self, '_initializing', False):
+            return
+        payload = dict(self.tools)
+        payload.update(self.profile.to_config())
+        try:
+            with open(self._config_path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=4)
+            print(f"Saved config to {self._config_path}; keys={list(payload.keys())}")
+        except Exception as e:
+            print(f"Failed to save config: {e}")
+
+    def _store_drawing_settings(self):
+        """Copy the live drawing settings into the preferences dict."""
+        settings = self.tools.setdefault('drawing_settings', {})
+        settings['delay'] = self.bot.settings[0]
+        settings['pixel_size'] = self.bot.settings[1]
+        settings['precision'] = self.bot.settings[2]
+        settings['jump_delay'] = self.bot.settings[3]
+
+    def _store_drawing_options(self):
+        """Copy the live drawing option flags into the preferences dict."""
+        options = self.tools.setdefault('drawing_options', {})
+        options['ignore_white_pixels'] = bool(self.draw_options & Bot.IGNORE_WHITE)
+        options['use_custom_colors'] = bool(self.draw_options & Bot.USE_CUSTOM_COLORS)
+
+    def _sync_env_ui(self):
+        """Reflect the environment profile into the main window's widgets."""
+        self._newlayer_var.set(1 if self.profile['New Layer'].get('enabled') else 0)
+        cb = self.profile['Color Button']
+        self._colorbutton_var.set(1 if cb.get('enabled') else 0)
+        self._colorbutton_cb.config(state='normal' if cb.get('status') else 'disabled')
+        self._skip_first_color_var.set(1 if self.bot.skip_first_color else 0)
+        self._mspaint_mode_var.set(1 if self.profile.mspaint_mode.get('enabled') else 0)
+        self._mspaint_delay_var.set(str(self.profile.mspaint_mode.get('delay', 0.5)))
+
     def load_config(self):
         try:
             with open(self._config_path, 'r', encoding='utf-8') as f:
-                self.tools = json.load(f)
-            print(f"Loaded config from {self._config_path}; keys={list(self.tools.keys())}")
+                config = json.load(f)
+            print(f"Loaded config from {self._config_path}; keys={list(config.keys())}")
+        except Exception as e:
+            config = {}
+            print(f"Config file missing or invalid ({e}); using defaults")
 
+        # Split persisted state into the taught environment (Profile) and user
+        # preferences (self.tools). The bot shares this exact Profile instance.
+        self.profile = Profile.from_config(config)
+        self.bot.profile = self.profile
+        self.tools = {k: v for k, v in config.items() if k not in ENV_CONFIG_KEYS}
+        self.tools.setdefault('pause_key', 'p')
+
+        try:
             # Load pause key first
             self.bot.pause_key = self.tools.get('pause_key', 'p')
             self._pause_key_entry.delete(0, END)
@@ -949,8 +882,8 @@ class Window:
 
             # Try to load old setup data (Palette, Canvas, Custom Colors) if available
             try:
-                if 'Palette' in self.tools:
-                    palette_config = self.tools['Palette']
+                if self.profile.get('Palette'):
+                    palette_config = self.profile['Palette']
                     
                     # If we have valid_positions, use them to reconstruct palette
                     # This handles case where user has manually edited color positions
@@ -988,10 +921,10 @@ class Window:
                             }
                         )
                 
-                if 'Canvas' in self.tools and self.tools['Canvas'].get('box'):
-                    self.bot.init_canvas(self.tools['Canvas']['box'])
-                if 'Custom Colors' in self.tools and self.tools['Custom Colors'].get('box'):
-                    self.bot.init_custom_colors(self.tools['Custom Colors']['box'])
+                if self.profile['Canvas'].get('box'):
+                    self.bot.init_canvas(self.profile['Canvas']['box'])
+                if self.profile['Custom Colors'].get('box'):
+                    self.bot.init_custom_colors(self.profile['Custom Colors']['box'])
 
                 self.tlabel['text'] = 'Successfully loaded setup from config file.'
             except Exception:
@@ -1010,7 +943,7 @@ class Window:
 
         # Apply New Layer settings to bot if present
         try:
-            nl = self.tools.get('New Layer')
+            nl = self.profile.get('New Layer')
             if nl:
                 # coords may be stored as list
                 coords = nl.get('coords')
@@ -1030,7 +963,7 @@ class Window:
 
         # Apply Color Button settings to bot if present
         try:
-            cb = self.tools.get('Color Button')
+            cb = self.profile.get('Color Button')
             if cb:
                 # coords may be stored as list
                 coords = cb.get('coords')
@@ -1063,7 +996,7 @@ class Window:
 
         # Apply MSPaint Mode settings to bot if present
         try:
-            mm = self.tools.get('MSPaint Mode')
+            mm = self.profile.mspaint_mode
             if mm:
                 self.bot.mspaint_mode['enabled'] = bool(mm.get('enabled', False))
                 self.bot.mspaint_mode['delay'] = float(mm.get('delay', 0.5))
@@ -1074,7 +1007,7 @@ class Window:
 
         # Apply Color Button Okay settings to bot if present
         try:
-            cbo = self.tools.get('Color Button Okay')
+            cbo = self.profile.get('Color Button Okay')
             if cbo:
                 # coords may be stored as list
                 coords = cbo.get('coords')
@@ -1096,190 +1029,32 @@ class Window:
     @is_free
     def setup(self):
         self.load_config()
-        # Ensure setup tools exist with default structure if missing
-        default_tools = {
-            'Palette': {
-                'status': False,
-                'box': None,
-                'rows': 6,
-                'cols': 8,
-                'color_coords': None,
-                'preview': None,
-            },
-            'Canvas': {
-                'status': False,
-                'box': None,
-                'preview': None,
-            },
-            'Custom Colors': {
-                'status': False,
-                'box': None,
-                'preview': None,
-            },
-            'New Layer': {
-                'status': False,
-                'coords': None,
-                'enabled': False,
-                'modifiers': {
-                    'ctrl': False,
-                    'alt': False,
-                    'shift': False
-                }
-            },
-            'Color Button': {
-                'status': False,
-                'coords': None,
-                'enabled': False,
-                'delay': 0.1,
-                'modifiers': {
-                    'ctrl': False,
-                    'alt': False,
-                    'shift': False
-                }
-            },
-            'Color Button Okay': {
-                'status': False,
-                'coords': None,
-                'enabled': False,
-                'modifiers': {
-                    'ctrl': False,
-                    'alt': False,
-                    'shift': False
-                }
-            },
-            'color_preview_spot': {
-                'name': 'Color Preview Spot',
-                'button': None,
-                'enabled': False,
-                'coords': None,
-                'data': None,
-                'modifiers': {
-                    'ctrl': False,
-                    'alt': False,
-                    'shift': False
-                },
-                'status': False
-            }
-        }
-
-        # Build a dedicated setup_tools mapping (only tools) so that
-        # SetupWindow doesn't iterate non-tool keys (like drawing_settings).
-        setup_tools = {}
-        for tool_name in ['Palette', 'Canvas', 'Custom Colors', 'New Layer', 'Color Button', 'Color Button Okay', 'color_preview_spot']:
-            existing = self.tools.get(tool_name, {})
-            merged = default_tools[tool_name].copy()
-            merged.update(existing if isinstance(existing, dict) else {})
-            setup_tools[tool_name] = merged
-
-        # Keep a reference so we can merge results back into self.tools
-        self._setup_tools = setup_tools
-        self._iwindow = SetupWindow(parent=self._root, bot=self.bot, tools=self._setup_tools, on_complete=self._on_complete_setup, title='Setup')
+        # The Profile is the single source of truth; SetupWindow mutates it in
+        # place, so there is nothing to merge back afterwards.
+        self._iwindow = SetupWindow(parent=self._root, bot=self.bot, tools=self.profile, on_complete=self._on_complete_setup, title='Setup')
 
     def _on_complete_setup(self):
-        # If SetupWindow returned modified setup data, merge it back into self.tools
-        if hasattr(self, '_setup_tools'):
-            for k, v in self._setup_tools.items():
-                self.tools[k] = v
+        # SetupWindow mutated the shared Profile in place, so the bot already
+        # sees the new environment. Refresh the widgets and persist.
+        self.bot.profile = self.profile
+        self._sync_env_ui()
 
-        # If New Layer was configured during setup, apply it to bot state
-        try:
-            nl = self.tools.get('New Layer')
-            if nl:
-                coords = nl.get('coords')
-                if isinstance(coords, list) and len(coords) >= 2:
-                    self.bot.new_layer['coords'] = (int(coords[0]), int(coords[1]))
-                elif isinstance(coords, tuple):
-                    self.bot.new_layer['coords'] = coords
-                self.bot.new_layer['enabled'] = bool(nl.get('enabled', nl.get('status', False)))
-                mods = nl.get('modifiers', {})
-                self.bot.new_layer['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
-                self.bot.new_layer['modifiers']['alt'] = bool(mods.get('alt', False))
-                self.bot.new_layer['modifiers']['shift'] = bool(mods.get('shift', False))
-                # Update main UI checkbox to reflect new state
-                try:
-                    self._newlayer_var.set(1 if self.bot.new_layer['enabled'] else 0)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        # If Color Button was configured during setup, apply it to bot state
-        try:
-            cb = self.tools.get('Color Button')
-            if cb:
-                coords = cb.get('coords')
-                if isinstance(coords, list) and len(coords) >= 2:
-                    self.bot.color_button['coords'] = (int(coords[0]), int(coords[1]))
-                elif isinstance(coords, tuple):
-                    self.bot.color_button['coords'] = coords
-                self.bot.color_button['enabled'] = bool(cb.get('enabled', False))
-                self.bot.color_button['delay'] = float(cb.get('delay', 0.1))
-                mods = cb.get('modifiers', {})
-                self.bot.color_button['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
-                self.bot.color_button['modifiers']['alt'] = bool(mods.get('alt', False))
-                self.bot.color_button['modifiers']['shift'] = bool(mods.get('shift', False))
-                # Update main UI checkbox to reflect new state
-                try:
-                    self._colorbutton_var.set(1 if self.bot.color_button['enabled'] else 0)
-                    # Enable checkbox only if Color Button is configured (status: true)
-                    self._colorbutton_cb.config(state='normal' if cb.get('status', False) else 'disabled')
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # If Color Button Okay was configured during setup, apply it to bot state
-        try:
-            cbo = self.tools.get('Color Button Okay')
-            if cbo:
-                coords = cbo.get('coords')
-                if isinstance(coords, list) and len(coords) >= 2:
-                    self.bot.color_button_okay['coords'] = (int(coords[0]), int(coords[1]))
-                elif isinstance(coords, tuple):
-                    self.bot.color_button_okay['coords'] = coords
-                self.bot.color_button_okay['enabled'] = bool(cbo.get('enabled', False))
-                mods = cbo.get('modifiers', {})
-                self.bot.color_button_okay['modifiers']['ctrl'] = bool(mods.get('ctrl', False))
-                self.bot.color_button_okay['modifiers']['alt'] = bool(mods.get('alt', False))
-                self.bot.color_button_okay['modifiers']['shift'] = bool(mods.get('shift', False))
-        except Exception:
-            pass
-
-        # The SetupWindow has already modified self._setup_tools, so save everything
         self.tools['pause_key'] = self._pause_key_entry.get().strip() or 'p'
         self.bot.pause_key = self.tools['pause_key']
 
-        # Convert tuples to lists for JSON serialization
-        for tool_name in ['Canvas', 'Custom Colors']:
-            if tool_name in self.tools and 'box' in self.tools[tool_name]:
-                box = self.tools[tool_name]['box']
-                if isinstance(box, tuple):
-                    self.tools[tool_name]['box'] = list(box)
+        # Normalise tuple boxes for JSON serialization.
+        for tool_name in ('Canvas', 'Custom Colors'):
+            box = self.profile[tool_name].get('box')
+            if isinstance(box, tuple):
+                self.profile[tool_name]['box'] = list(box)
 
-        # Save current drawing settings
-        if 'drawing_settings' not in self.tools:
-            self.tools['drawing_settings'] = {}
-        self.tools['drawing_settings']['delay'] = self.bot.settings[0]
-        self.tools['drawing_settings']['pixel_size'] = self.bot.settings[1]
-        self.tools['drawing_settings']['precision'] = self.bot.settings[2]
-        self.tools['drawing_settings']['jump_delay'] = self.bot.settings[3]
-
-        # Save current drawing options
-        if 'drawing_options' not in self.tools:
-            self.tools['drawing_options'] = {}
-        self.tools['drawing_options']['ignore_white_pixels'] = bool(self.draw_options & Bot.IGNORE_WHITE)
-        self.tools['drawing_options']['use_custom_colors'] = bool(self.draw_options & Bot.USE_CUSTOM_COLORS)
-
-        # Save current URL if any
-        if hasattr(self, '_last_url') and self._last_url:
+        self._store_drawing_settings()
+        self._store_drawing_options()
+        if getattr(self, '_last_url', None):
             self.tools['last_image_url'] = self._last_url
 
-        try:
-            with open(self._config_path, 'w', encoding='utf-8') as f:
-                json.dump(self.tools, f, ensure_ascii=False, indent=4)
-            self.tlabel['text'] = 'Setup saved.'
-        except Exception as e:
-            self.tlabel['text'] = f'Failed to save config: {str(e)}'
-
+        self._save_config()
+        self.tlabel['text'] = 'Setup saved.'
         self._set_busy(False)
 
     @is_free
@@ -1359,13 +1134,13 @@ class Window:
     def start_calibration_thread(self):
         """Start color calibration process in a separate thread"""
         # Check if required tools are configured
-        custom_colors_data = self.tools.get('Custom Colors', {}).get('box')
+        custom_colors_data = self.profile['Custom Colors'].get('box')
         if not custom_colors_data or (isinstance(custom_colors_data, list) and len(custom_colors_data) == 0):
             messagebox.showerror(self.title, "Custom Colors tool not configured. Please run Setup first.")
             self._set_busy(False)
             return
         
-        preview_spot_coords = self.tools.get('color_preview_spot', {}).get('coords')
+        preview_spot_coords = self.profile['color_preview_spot'].get('coords')
         if not preview_spot_coords:
             messagebox.showerror(self.title, "Color Preview Spot tool not configured. Please run Setup first.")
             self._set_busy(False)
@@ -1405,7 +1180,7 @@ class Window:
         """
         try:
             # Get custom color box location for positioning
-            custom_colors_box = self.tools.get('Custom Colors', {}).get('box')
+            custom_colors_box = self.profile['Custom Colors'].get('box')
             if not custom_colors_box:
                 # Fallback to top center of screen if box location not available
                 screen_width = self._root.winfo_screenwidth()
@@ -1553,8 +1328,8 @@ class Window:
         """Execute color calibration process"""
         try:
             # Get grid_box and preview_point from tools
-            grid_box = self.tools.get('Custom Colors', {}).get('box')
-            preview_point = self.tools.get('color_preview_spot', {}).get('coords')
+            grid_box = self.profile['Custom Colors'].get('box')
+            preview_point = self.profile['color_preview_spot'].get('coords')
             
             if not grid_box or not preview_point:
                 self.tlabel['text'] = 'Error: Missing calibration configuration data'
