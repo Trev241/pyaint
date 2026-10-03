@@ -16,7 +16,8 @@ Complete guide to configuring Pyaint's settings and tools.
 
 ### File Location
 
-**Path:** `config.json` (in project root, same level as `main.py`)
+**Path:** `config.json`, next to the executable (the repo root for a source
+checkout). When using the release `.exe`, put it in its own folder.
 
 **Format:** JSON (UTF-8 encoded)
 
@@ -108,6 +109,8 @@ Complete guide to configuring Pyaint's settings and tools.
     "enabled": false,
     "delay": 0.5
   },
+  "color_selection": "auto",
+  "target": "generic",
   "color_preview_spot": {
     "name": "Color Preview Spot",
     "status": true,
@@ -122,6 +125,13 @@ Complete guide to configuring Pyaint's settings and tools.
   "last_image_url": "https://..."
 }
 ```
+
+The first group of keys (`Palette`, `Canvas`, `Custom Colors`, `New Layer`,
+`Color Button`, `Color Button Okay`, `color_preview_spot`, `MSPaint Mode`,
+`color_selection`, `target`) is the **taught environment**, owned by the shared
+`Profile`. The rest are **preferences** owned by the window. `color_selection`
+is `auto`, `palette`, or `custom`; `target` is the selected recipe id (see
+`targets/README.md`).
 
 ---
 

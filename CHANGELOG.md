@@ -13,6 +13,17 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Phase 4 — distribution & feedback:**
+  - `pyaint.spec` + `scripts/build_exe.py`: a PyInstaller build producing a
+    standalone `dist/pyaint.exe` (user data stored next to the executable).
+  - GitHub Actions: `.github/workflows/tests.yml` runs the headless suite on
+    Windows (Python 3.9 and 3.12); `.github/workflows/release.yml` builds the
+    executable and attaches it to a GitHub Release when a `v*` tag is pushed.
+  - Community/feedback files: issue forms (bug report, feature request, target
+    recipe submission), a Discussions contact link, a PR template, and
+    `CONTRIBUTING.md`.
+  - `pyproject.toml`: classifiers, keywords, project URLs, and `[build]` /
+    `[dev]` optional dependency groups.
 - `pyaint_profile.py`: a `Profile` mapping that is the single source of truth
   for the taught environment (palette, canvas, custom colors, layer/color
   buttons, MSPaint mode, and the color-selection strategy). Includes
@@ -107,6 +118,16 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   notes) and this `CHANGELOG.md`.
 
 ### Changed
+- **Phase 4 — distribution & docs:**
+  - Rewrote `README.md` as a front door: demo videos, supported-apps table,
+    release/pip/source quick starts, a skribbl-focused 60-second quickstart,
+    FAQ, and an intended-use disclaimer.
+  - Refreshed the user docs (`Docs/README.md`, `Docs/api.md`,
+    `Docs/architecture.md`) to match the current `pyaint/` package, and fixed
+    stale launch commands and paths in the other guides.
+  - `pyaint/paths.py` now resolves `PROJECT_ROOT` to the executable directory
+    when frozen, so `config.json`, `cache/`, and `targets/` persist across runs
+    of the packaged `.exe`.
 - `bot.py`: environment state now lives in the shared `Profile`; legacy
   `Bot` attributes are exposed as read-only `@property` views
   (`new_layer`, `color_button`, `color_button_okay`, `mspaint_mode`,

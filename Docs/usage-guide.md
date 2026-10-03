@@ -26,13 +26,15 @@ Step-by-step instructions for using Pyaint effectively.
 
 3. **Run application**:
    ```bash
-   python main.py
+   python -m pyaint     # or: python main.py
    ```
 
+   Or install the release `pyaint.exe` and run it — no Python required.
+
 **Requirements:**
-- Python 3.8 or higher
-- Windows operating system
-- Drawing application (MS Paint, Clip Studio Paint, etc.) running
+- Windows 10/11
+- Python 3.8 or higher (only for source/PyPI installs)
+- Drawing application (MS Paint, GIMP, skribbl.io, etc.) running
 
 ## Initial Setup
 

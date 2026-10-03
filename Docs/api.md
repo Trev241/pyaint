@@ -1,457 +1,216 @@
 # Pyaint API Reference
 
-Complete API documentation for Pyaint's core components.
+Reference for the public surface of the `pyaint` package. Imports are absolute
+(`from pyaint.bot import Bot`). For how the pieces fit together, see
+[architecture.md](architecture.md).
 
-## Table of Contents
+## Contents
 
-- [Bot Class](#bot-class)
-- [Utility Functions](#utility-functions)
-- [Exception Classes](#exception-classes)
-- [UI Components](#ui-components)
-- [Configuration](#configuration)
+- [Profile](#profile)
+- [Bot](#bot)
+- [Palette](#palette)
+- [ScreenPainter](#screenpainter)
+- [Targets](#targets)
+- [Locators](#locators)
+- [Calibration](#calibration)
+- [Cache](#cache)
+- [Config](#config)
+- [Utils & errors](#utils--errors)
 
 ---
 
-## Bot Class
+## Profile
 
-The main `Bot` class handles all drawing automation operations.
-
-### Constructor
+`pyaint.profile.Profile` — the single source of truth for the taught
+environment. It behaves as a `Mapping` over tool entries.
 
 ```python
-Bot()
+Profile(
+    tools=None,               # {tool_name: {...}} overrides
+    mspaint_mode=None,        # {"enabled": bool, "delay": float}
+    color_selection="auto",   # "auto" | "palette" | "custom"
+    calibration=None,         # {(r, g, b): (x, y)} or None
+    target="generic",         # selected recipe id
+)
 ```
 
-Creates a new Bot instance with default settings.
+Tool keys: `Palette`, `Canvas`, `Custom Colors`, `New Layer`, `Color Button`,
+`Color Button Okay`, `color_preview_spot`. Access via `profile["Palette"]`, and
+check `profile.is_ready("Canvas")` for the `status` flag.
+
+| Member | Description |
+|--------|-------------|
+| `from_config(config)` / `to_config()` | Environment subset of `config.json` (excludes calibration) |
+| `to_dict()` / `from_dict(data)` | Full versioned, shareable preset (includes calibration) |
+| `canvas_rect()` / `palette_rect()` / `custom_colors_rect()` | `(x, y, w, h)` or `None` (converts the stored corner box) |
+| `box_to_wh(box)` | Module helper: `[x1,y1,x2,y2]` → `(x,y,w,h)` |
+| `ENV_CONFIG_KEYS` | Keys owned by the profile (not preferences) |
+
+## Bot
+
+`pyaint.bot.Bot` — the drawing engine facade. Inherits `CalibrationMixin` and
+`CacheMixin`.
+
+```python
+Bot(config_file="config.json", profile=None)
+```
+
+### Constants
+
+| Name | Value | Meaning |
+|------|-------|---------|
+| `DELAY`, `STEP`, `ACCURACY`, `JUMP_DELAY` | `0..3` | Indices into `settings` |
+| `SLOTTED`, `LAYERED` | `"slotted"`, `"layered"` | Processing modes |
+| `IGNORE_WHITE` | `1` | Flag bit |
+| `USE_CUSTOM_COLORS` | `2` | Flag bit |
 
 ### Attributes
 
-#### Public Attributes
+`settings = [delay, pixel_size, precision, jump_delay]`, `terminate`, `paused`,
+`pause_key`, `drawing`, `skip_first_color`, `jump_threshold`, `progress`,
+`profile`, `painter`, `draw_state`, `progress_overlay_enabled`.
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `delay` | float | Duration of each brush stroke (seconds) |
-| `pixel_size` | int | Detail level - pixels between sample points |
-| `precision` | float | Color accuracy threshold (0.0 - 1.0) |
-| `jump_delay` | float | Delay on cursor jumps > jump_threshold |
-| `jump_threshold` | int | Pixel distance threshold for jump delay |
-| `drawing_options` | dict | Drawing feature toggles |
-| `terminate` | bool | Flag to stop all operations |
-| `paused` | bool | Flag to pause/resume drawing |
-| `drawing` | bool | Flag indicating if currently drawing |
+Legacy views onto the profile: `new_layer`, `color_button`,
+`color_button_okay`, `mspaint_mode`, `color_calibration_map` (settable),
+`_canvas`, `_custom_colors`.
 
-#### Drawing Options
+### Environment
 
-The `drawing_options` dictionary contains:
+| Method | Description |
+|--------|-------------|
+| `init_palette(colors_pos=None, prows=None, pcols=None, pbox=None, valid_positions=None, manual_centers=None)` | Build the live `Palette`; `pbox` is `(x, y, w, h)` |
+| `init_canvas(cabox)` | Store the canvas **corner** box and enable it |
+| `init_custom_colors(ccbox)` | Store the custom-colour box and scan the spectrum |
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `ignore_white_pixels` | bool | false | Skip drawing white pixels |
-| `use_custom_colors` | bool | false | Use custom color spectrum |
-| `skip_first_color` | bool | false | Skip first color when drawing |
+### Detection
 
-### Methods
+| Method | Description |
+|--------|-------------|
+| `capture_screen()` | Return the current screen as a PIL image |
+| `detect_target(recipe=None)` | Run the recipe's locators → `Detection` |
+| `apply_detection(detection)` | Write a `Detection` into the profile/palette |
 
-#### Drawing Methods
+### Processing
 
-##### `draw(image, region=None)`
+| Method | Description |
+|--------|-------------|
+| `process(file, flags=0, mode=LAYERED)` | Return `cmap: {(r,g,b): [((x1,y1),(x2,y2)), ...]}` |
+| `process_region(file, region, flags=0, mode=LAYERED, canvas_target=None)` | Process a sub-region, optionally into a target rect |
+| `estimate_drawing_time(cmap)` | Human-readable estimate |
 
-Draws an image on the canvas.
+### Drawing
 
-**Parameters:**
-- `image` (PIL.Image): Image to draw
-- `region` (tuple, optional): Region to draw as (x1, y1, x2, y2)
+| Method | Description |
+|--------|-------------|
+| `draw(cmap)` | Draw the full map; returns `"success"` or `"terminated"` |
+| `test_draw(cmap, max_lines=20)` | Draw the first N strokes |
+| `simple_test_draw()` | Draw five short lines to tune brush size |
 
-**Returns:** None
+## Palette
 
-**Behavior:**
-- Processes image into draw commands
-- Executes drawing with current settings
-- Can be interrupted with ESC
-- Can be paused/resumed with pause_key
-
-##### `draw_test(image, lines=20)`
-
-Draws a test sample of the image.
-
-**Parameters:**
-- `image` (PIL.Image): Image to test draw
-- `lines` (int, optional): Number of lines to draw (default: 20)
-
-**Returns:** None
-
-**Behavior:**
-- Draws only first N lines of the image
-- Includes color switching
-- Useful for testing brush size and settings
-
-##### `simple_test_draw(width=4)`
-
-Draws simple horizontal lines without color picking.
-
-**Parameters:**
-- `width` (int, optional): Width of lines as fraction of canvas (default: 4)
-
-**Returns:** None
-
-**Behavior:**
-- Draws 5 horizontal lines
-- Uses currently selected color only
-- Useful for testing brush size only
-
-##### `draw_region(region, image)`
-
-Draws a specific region of an image.
-
-**Parameters:**
-- `region` (tuple): Region bounds as (x1, y1, x2, y2)
-- `image` (PIL.Image): Source image
-
-**Returns:** None
-
-**Behavior:**
-- Draws only the specified region
-- Useful for fixing mistakes or adding details
-
-#### Color Methods
-
-##### `pick_palette_color(color)`
-
-Selects a color from the palette.
-
-**Parameters:**
-- `color` (tuple): RGB color tuple (r, g, b)
-
-**Returns:** None
-
-**Behavior:**
-- Finds nearest palette color
-- Clicks on palette to select color
-- Supports MSPaint Mode (double-click)
-
-##### `pick_custom_color(color)`
-
-Selects a color from the custom color spectrum.
-
-**Parameters:**
-- `color` (tuple): RGB color tuple (r, g, b)
-
-**Returns:** None
-
-**Behavior:**
-- Finds nearest position in color spectrum
-- Clicks on spectrum to select color
-- Uses keyboard input if spectrum not available
-- Supports color button and confirmation clicks
-
-#### Processing Methods
-
-##### `precompute_image(image)`
-
-Pre-processes image for faster subsequent draws.
-
-**Parameters:**
-- `image` (PIL.Image): Image to pre-process
-
-**Returns:** Processed data structure
-
-**Behavior:**
-- Processes image based on current mode (slotted/layered)
-- Caches results for instant reuse
-- Returns data structure for drawing
-
-##### `estimate_time(processed_data)`
-
-Estimates drawing time from pre-processed data.
-
-**Parameters:**
-- `processed_data`: Data from `precompute_image()`
-
-**Returns:** Estimated time in seconds (float)
-
----
-
-## Utility Functions
-
-### `adjusted_img_size(img, ad)`
-
-Recalculates image dimensions to fit within available space.
-
-**Parameters:**
-- `img` (PIL.Image): Source image
-- `ad` (tuple): Available dimensions as (width, height)
-
-**Returns:** Tuple of (adjusted_width, adjusted_height)
-
-**Behavior:**
-- Maintains aspect ratio
-- Returns dimensions that fit within available space
-- May result in dead space if aspect ratios don't match
-
----
-
-## Exception Classes
-
-### `PyaintException`
-
-Base exception class for all Pyaint errors.
-
-### `NotInitializedError`
-
-Raised when a required tool is not initialized.
-
-**Example:**
-```python
-raise NotInitializedError("Palette not initialized")
-```
-
-### `ConfigurationError`
-
-Raised when configuration is invalid or missing.
-
-**Example:**
-```python
-raise ConfigurationError("Config file missing or invalid")
-```
-
-### `DrawingError`
-
-Raised when a drawing operation fails.
-
-**Example:**
-```python
-raise DrawingError("Failed to draw: Canvas not initialized")
-```
-
----
-
-## UI Components
-
-### Window Class
-
-Main application window (`ui/window.py`).
-
-#### Constructor
+`pyaint.palette.Palette` — swatches and their screen coordinates.
 
 ```python
-Window(title, bot, width, height, screen_x, screen_y)
+Palette(colors_pos=None, box=None, rows=None, columns=None,
+        valid_positions=None, manual_centers=None)
 ```
 
-**Parameters:**
-- `title` (str): Window title
-- `bot` (Bot): Bot instance
-- `width` (int): Window width
-- `height` (int): Window height
-- `screen_x` (int): Screen x offset
-- `screen_y` (int): Screen y offset
+- `colors_pos`: explicit `{(r,g,b): (x,y)}` (no screen access).
+- `box`: `(x, y, w, h)` screenshot region sampled at cell centres.
+- `valid_positions`: indices to sample; `manual_centers`: `{index: (x, y)}`.
 
-#### Key Methods
+`nearest_color(rgb)` returns the closest swatch by **squared** Euclidean
+distance; `Palette.dist(a, b)` exposes the metric.
 
-##### `run()`
+## ScreenPainter
 
-Starts the main application loop.
+`pyaint.painter.ScreenPainter(bot)` — all app-specific synthetic input lives
+here; `Bot` owns one as `bot.painter`.
 
-**Returns:** None
+| Member | Description |
+|--------|-------------|
+| `capabilities` | `Capabilities` flags derived from the profile |
+| `resolve_color_source(target, force_custom=False)` | Choose `palette`/`calibrated`/`keyboard`/`none` without input |
+| `select_color(target, force_custom=False)` | Perform the selection |
+| `click_swatch(x, y)` | Click a swatch (honours MSPaint double-click mode) |
+| `enter_rgb_keyboard(rgb)` | Type RGB into a colour dialog |
+| `new_layer()` / `color_button()` / `color_button_okay()` | Optional modifier-clicks |
+| `execute_stroke(start, end, delay)` / `execute_test_stroke(start, end)` | Draw a run |
 
-##### `update_tooltip(message)`
+`ColorSelectionChain` holds the ordered palette → calibrated → keyboard
+strategies.
 
-Updates the status tooltip at bottom of window.
+## Targets
 
-**Parameters:**
-- `message` (str): Status message to display
+`pyaint.targets` — declarative recipes.
 
-**Returns:** None
+| Member | Description |
+|--------|-------------|
+| `Recipe` | Dataclass: `tools`, `color_selection`, capability flags, `drawing_settings`, `drawing_options`, `detection`, `extends`, `hidden` |
+| `RecipeRegistry` | `register`, `add_from_dict` (resolves `extends`), `get`, `all`, `load_dir` |
+| `get_recipe(id)` / `list_recipes()` | Look up built-ins and loaded recipes |
+| `load_user_recipes(paths=None)` | Load JSON from `targets/` and `~/.pyaint/targets/` |
+| `apply_profile_defaults(profile, recipe)` | Apply a recipe's environment defaults in place |
+| `validate_recipe(recipe)` / `recipe_is_valid(recipe)` | Static self-tests (`pyaint.validation`) |
 
-### SetupWindow Class
+## Locators
 
-Setup window for configuring tools (`ui/setup.py`).
+`pyaint.locators` — pure functions over a PIL image; `None` when not found.
 
-#### Key Methods
+- `find_white_rect`, `find_color_rect`, `find_center_rect`,
+  `find_color_grid`, `find_color_signature`
+- `window_relative_rect(window, normalized)`, `get_window_rect(title)`
+- `detect_target(recipe, image, window_provider=None)` → `Detection`
+- `Detection` — `canvas`, `palette`, `palette_rows`, `palette_cols`; falsy when
+  empty
 
-##### `run()`
+New locator types register with `register_locator(name, allowed_params)` and are
+introspectable via `available_locators()` / `locator_params(name)`.
 
-Opens and runs the setup configuration dialog.
+## Calibration
 
-**Returns:** None
+`pyaint.calibration.CalibrationMixin` (mixed into `Bot`).
 
----
+| Method | Description |
+|--------|-------------|
+| `calibrate_custom_colors(grid_box, preview_point, step=2)` | Scan the spectrum → `{(r,g,b): (x,y)}`; cancellable via `terminate` |
+| `save_color_calibration(filepath)` / `load_color_calibration(filepath)` | JSON form `{"r,g,b": [x, y]}` |
+| `get_calibrated_color_position(target_rgb, tolerance=20, k_neighbors=4)` | Tolerance match, then inverse-distance-weighted kNN |
 
-## Configuration
+## Cache
 
-### Configuration File Structure
+`pyaint.cache.CacheMixin` (mixed into `Bot`).
 
-Pyaint uses `config.json` for persistent configuration.
+| Method | Description |
+|--------|-------------|
+| `get_cache_filename(image_path, flags=0, mode=LAYERED)` | `cache/{image}_{settings}.json`, or `None` without a canvas |
+| `precompute(image_path, flags=0, mode=LAYERED)` | Process and write the cache |
+| `load_cached(cache_file)` | Validated cache dict (settings, canvas, age) or `None` |
+| `get_cached_status(image_path, flags=0, mode=LAYERED)` | `(bool, cache_file)` |
 
-```json
-{
-  "drawing_settings": {
-    "delay": 0.1,
-    "pixel_size": 12,
-    "precision": 0.9,
-    "jump_delay": 0.5
-  },
-  "drawing_options": {
-    "ignore_white_pixels": false,
-    "use_custom_colors": false,
-    "skip_first_color": false
-  },
-  "pause_key": "p",
-  "calibration_settings": {
-    "step_size": 2
-  },
-  "Palette": {
-    "status": true,
-    "box": [x1, y1, x2, y2],
-    "rows": 6,
-    "cols": 8,
-    "color_coords": {
-      "(r,g,b)": [x, y]
-    },
-    "valid_positions": [0, 1, 2, ...],
-    "manual_centers": {
-      "0": [x, y]
-    },
-    "preview": "assets/Palette_preview.png"
-  },
-  "Canvas": {
-    "status": true,
-    "box": [x1, y1, x2, y2],
-    "preview": "assets/Canvas_preview.png"
-  },
-  "Custom Colors": {
-    "status": true,
-    "box": [x1, y1, x2, y2],
-    "preview": "assets/Custom Colors_preview.png"
-  },
-  "New Layer": {
-    "status": true,
-    "coords": [x, y],
-    "enabled": false,
-    "modifiers": {
-      "ctrl": false,
-      "alt": false,
-      "shift": true
-    }
-  },
-  "Color Button": {
-    "status": true,
-    "coords": [x, y],
-    "enabled": false,
-    "delay": 0.1,
-    "modifiers": {
-      "ctrl": false,
-      "alt": false,
-      "shift": false
-    }
-  },
-  "Color Button Okay": {
-    "status": true,
-    "coords": [x, y],
-    "enabled": false,
-    "delay": 0.1,
-    "modifiers": {
-      "ctrl": false,
-      "alt": false,
-      "shift": false
-    }
-  },
-  "MSPaint Mode": {
-    "enabled": false,
-    "delay": 0.5
-  },
-  "color_preview_spot": {
-    "name": "Color Preview Spot",
-    "status": true,
-    "coords": [x, y],
-    "enabled": false,
-    "modifiers": {
-      "ctrl": false,
-      "alt": false,
-      "shift": false
-    }
-  },
-  "last_image_url": "https://..."
-}
-```
+## Config
 
-### Configuration Loading
+`pyaint.config` — `config.json` I/O.
 
-Configuration is loaded automatically from `config.json` on startup.
+| Function | Description |
+|----------|-------------|
+| `load_config(path)` | Dict, or `{}` if missing/invalid |
+| `save_config(path, payload)` | Write JSON; `bool` success |
+| `split_preferences(config)` | Non-environment keys |
+| `build_payload(preferences, profile)` | Merge preferences with `profile.to_config()` |
 
-If the file is missing or invalid, default values are used.
+## Utils & errors
 
-### Configuration Saving
+`pyaint.utils`: `adjusted_img_size(img, (w, h))`, `format_duration(seconds)`,
+`format_estimate(seconds)`, `estimate_drawing_seconds(cmap, delay, jump_delay,
+jump_threshold)`.
 
-Configuration is saved automatically:
-- After tool configuration completion
-- After drawing setting changes
-- After checkbox toggles
+`pyaint.errors`:
 
-### Color Calibration File
-
-Color calibration data is stored in `color_calibration.json`.
-
-Structure:
-```json
-{
-  "calibration_map": {
-    "r,g,b": [x, y]
-  },
-  "timestamp": "YYYY-MM-DD HH:MM:SS"
-}
-```
-
----
-
-## Main Entry Point
-
-### `main.py`
-
-The main entry point for the application.
-
-**Behavior:**
-1. Creates Bot instance
-2. Sets up pynput keyboard listener for ESC and pause key
-3. Launches main Window
-4. Cleans up listener on exit
-
-**Controls:**
-- ESC: Terminates all operations
-- pause_key: Toggles pause/resume during drawing
-
----
-
-## Module Overview
-
-### `bot.py`
-
-Contains the `Bot` class - the core drawing automation engine.
-
-### `utils.py`
-
-Utility functions for image processing.
-
-### `exceptions.py`
-
-Custom exception classes for error handling.
-
-### `main.py`
-
-Application entry point with keyboard control setup.
-
-### `ui/window.py`
-
-Main application window and UI.
-
-### `ui/setup.py`
-
-Setup window for tool configuration.
-
----
-
-## See Also
-
-- [Architecture Documentation](./architecture.md) - System architecture details
-- [Configuration Guide](./configuration.md) - Configuration options
-- [Tutorial](./tutorial.md) - Step-by-step usage guide
-- [Troubleshooting](./troubleshooting.md) - Common issues and solutions
+| Exception | Raised when |
+|-----------|-------------|
+| `NoToolError` | Base for "a required tool is missing" |
+| `NoPaletteError` | Palette missing or has faulty dimensions |
+| `NoCanvasError` | Canvas is not initialized |
+| `NoCustomColorsError` | Custom colours are required but not initialized |
+| `CorruptConfigError` | Reserved for invalid configuration |

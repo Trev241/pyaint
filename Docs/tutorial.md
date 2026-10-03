@@ -63,7 +63,7 @@ Pyaint is a Python-based automation tool designed to recreate digital images thr
 
 4. Run application:
    ```bash
-   python main.py
+   python -m pyaint     # or: python main.py
    ```
 
 ---
