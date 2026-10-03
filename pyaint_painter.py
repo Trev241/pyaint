@@ -15,6 +15,7 @@ The ``Painter`` talks to the bot through a duck-typed reference (no import of
 """
 
 from __future__ import annotations
+from pyaint_log import log
 
 import os
 import time
@@ -199,14 +200,14 @@ class ScreenPainter:
         if bot.mspaint_mode.get("enabled", False):
             pyautogui.click((x, y))
             delay = bot.mspaint_mode.get("delay", 0.5)
-            print(f"[MSPaintMode] Waiting {delay} seconds between double-click...")
+            log.info(f"[MSPaintMode] Waiting {delay} seconds between double-click...")
             time.sleep(delay)
             pyautogui.click((x, y))
-            print(f"[MSPaintMode] Double-click completed at {(x, y)}")
+            log.info(f"[MSPaintMode] Double-click completed at {(x, y)}")
         else:
             pyautogui.click((x, y))
         wait = bot.color_button.get("delay", 0.1)
-        print(f"[DEBUG] Waiting {wait} seconds after swatch click...")
+        log.debug(f"[DEBUG] Waiting {wait} seconds after swatch click...")
         time.sleep(wait)
 
     def enter_rgb_keyboard(self, c: Iterable[int]) -> None:
@@ -218,9 +219,9 @@ class ScreenPainter:
             )
         center_x = cc_box[0] + cc_box[2] // 2
         center_y = cc_box[1] + cc_box[3] // 2
-        print(f"[DEBUG] Spectrum not available - clicking center of box at: ({center_x}, {center_y})")
+        log.debug(f"[DEBUG] Spectrum not available - clicking center of box at: ({center_x}, {center_y})")
         pyautogui.click((center_x, center_y), clicks=3, interval=.15)
-        print(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
+        log.debug(f"[DEBUG] Using keyboard input method - typing RGB: {c}")
         pyautogui.press("tab", presses=7, interval=.05)
         for val in c:
             for n in (d for d in str(val)):
@@ -240,7 +241,7 @@ class ScreenPainter:
             except Exception:
                 pass
         if label:
-            print(f"[{label}] force-released all modifiers as backup")
+            log.info(f"[{label}] force-released all modifiers as backup")
 
     def _click_with_modifiers(
         self,
@@ -261,17 +262,17 @@ class ScreenPainter:
             if modifiers.get(mod_key):
                 pyautogui.keyDown(pygui_key)
                 pressed.append(pygui_key)
-                print(f"[{label}] pressed modifier: {pygui_key}")
+                log.info(f"[{label}] pressed modifier: {pygui_key}")
 
-        print(f"[{label}] performing mouseDown at {(x, y)}")
+        log.info(f"[{label}] performing mouseDown at {(x, y)}")
         pyautogui.mouseDown(x, y, button="left")
         time.sleep(0.08)
         pyautogui.mouseUp(x, y, button="left")
-        print(f"[{label}] mouse click performed at {(x, y)}")
+        log.info(f"[{label}] mouse click performed at {(x, y)}")
 
         for pygui_key in reversed(pressed):
             pyautogui.keyUp(pygui_key)
-            print(f"[{label}] released modifier: {pygui_key}")
+            log.info(f"[{label}] released modifier: {pygui_key}")
             time.sleep(0.05)
 
         self._release_all_modifiers(label)
@@ -285,15 +286,15 @@ class ScreenPainter:
             return
         try:
             nx, ny = nl["coords"]
-            print(f"[NewLayer] attempting click at {(nx, ny)} with mods={nl.get('modifiers')}")
+            log.info(f"[NewLayer] attempting click at {(nx, ny)} with mods={nl.get('modifiers')}")
             self._click_with_modifiers((nx, ny), nl.get("modifiers", {}), "NewLayer")
             # Wait for the target app to process the click, then ensure the
             # layer is ready before painting.
             time.sleep(0.75)
-            print("[NewLayer] waiting 0.75 seconds before painting...")
+            log.info("[NewLayer] waiting 0.75 seconds before painting...")
             time.sleep(0.75)
         except Exception as e:
-            print(f"[NewLayer] Error during new layer creation: {e}")
+            log.info(f"[NewLayer] Error during new layer creation: {e}")
             self._release_all_modifiers()
 
     def color_button(self) -> None:
@@ -303,13 +304,13 @@ class ScreenPainter:
             return
         try:
             cx, cy = cb["coords"]
-            print(f"[ColorButton] attempting click at {(cx, cy)} with mods={cb.get('modifiers')}, delay={cb.get('delay')}")
+            log.info(f"[ColorButton] attempting click at {(cx, cy)} with mods={cb.get('modifiers')}, delay={cb.get('delay')}")
             self._click_with_modifiers((cx, cy), cb.get("modifiers", {}), "ColorButton")
             delay = cb.get("delay", 0.1)
-            print(f"[ColorButton] waiting {delay} seconds before palette selection...")
+            log.info(f"[ColorButton] waiting {delay} seconds before palette selection...")
             time.sleep(delay)
         except Exception as e:
-            print(f"[ColorButton] Error during color button click: {e}")
+            log.info(f"[ColorButton] Error during color button click: {e}")
             self._release_all_modifiers()
 
     def color_button_okay(self) -> None:
@@ -319,13 +320,13 @@ class ScreenPainter:
             return
         try:
             cx, cy = cbo["coords"]
-            print(f"[ColorButtonOkay] attempting click at {(cx, cy)} with mods={cbo.get('modifiers')}")
+            log.info(f"[ColorButtonOkay] attempting click at {(cx, cy)} with mods={cbo.get('modifiers')}")
             self._click_with_modifiers((cx, cy), cbo.get("modifiers", {}), "ColorButtonOkay")
             delay = cbo.get("delay", 0.1)
-            print(f"[ColorButtonOkay] waiting {delay} seconds before starting to draw...")
+            log.info(f"[ColorButtonOkay] waiting {delay} seconds before starting to draw...")
             time.sleep(delay)
         except Exception as e:
-            print(f"[ColorButtonOkay] Error during color button okay click: {e}")
+            log.info(f"[ColorButtonOkay] Error during color button okay click: {e}")
             self._release_all_modifiers()
 
     # -- stroke execution ------------------------------------------------
@@ -358,7 +359,7 @@ class ScreenPainter:
 
         # Always replay the current stroke when resuming from pause
         if self.bot.draw_state.get("was_paused", False):
-            print("Replaying stroke after pause - ensuring clean result")
+            log.info("Replaying stroke after pause - ensuring clean result")
             self.bot.draw_state["was_paused"] = False
 
         for i in range(1, segments + 1):

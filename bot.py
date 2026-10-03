@@ -1,3 +1,4 @@
+from pyaint_log import log
 import pyautogui
 import time
 import utils
@@ -178,16 +179,16 @@ class Bot(CalibrationMixin, CacheMixin):
         # Scan the custom colors spectrum to create a color-to-position map
         # This allows clicking on specific colors in the spectrum instead of using keyboard input
         self._spectrum_map = self._scan_spectrum(ccbox)
-        print(f"[Spectrum] Scanned {len(self._spectrum_map)} unique colors from custom colors spectrum")
+        log.info(f"[Spectrum] Scanned {len(self._spectrum_map)} unique colors from custom colors spectrum")
         
         # Load color calibration data if file exists
         if os.path.exists('color_calibration.json'):
             try:
                 with open('color_calibration.json', 'r') as f:
                     calibration_json = json.load(f)
-                print(f"[Color Calibration] Loaded {len(calibration_json)} mapped colors")
+                log.info(f"[Color Calibration] Loaded {len(calibration_json)} mapped colors")
             except Exception as e:
-                print(f"[Color Calibration] Error loading calibration data: {e}")
+                log.info(f"[Color Calibration] Error loading calibration data: {e}")
     
     # ------------------------------------------------------------------
     # Auto-detection (Phase 2)
@@ -388,12 +389,12 @@ class Bot(CalibrationMixin, CacheMixin):
         # Load calibration data if file exists - always load if file exists to ensure latest data is used
         if os.path.exists('color_calibration.json'):
             if self.color_calibration_map is None or not self.color_calibration_map:
-                print("[Calibration] Loading calibration data from color_calibration.json")
+                log.info("[Calibration] Loading calibration data from color_calibration.json")
                 self.load_color_calibration('color_calibration.json')
             else:
-                print(f"[Calibration] Calibration data already loaded from color_calibration.json ({len(self.color_calibration_map)} colors)")
+                log.info(f"[Calibration] Calibration data already loaded from color_calibration.json ({len(self.color_calibration_map)} colors)")
         else:
-            print("[Calibration] No calibration data available")
+            log.info("[Calibration] No calibration data available")
 
         # Create progress overlay window
         self.create_progress_overlay()
@@ -407,12 +408,12 @@ class Bot(CalibrationMixin, CacheMixin):
         last_stroke_end = None  # Track last stroke position for jump detection
         self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
         estimated_str = self._format_time(self.estimated_time_seconds)
-        print(f"Estimated drawing time: {estimated_str}")
+        log.info(f"Estimated drawing time: {estimated_str}")
 
         for color_idx, (c, lines) in enumerate(cmap.items()):
             # Skip the first color if skip_first_color is enabled
             if color_idx == 0 and self.skip_first_color:
-                print(f"[Skip First Color] Skipping first color: {c}")
+                log.info(f"[Skip First Color] Skipping first color: {c}")
                 continue
 
             # Skip colors already drawn if resuming
@@ -422,11 +423,11 @@ class Bot(CalibrationMixin, CacheMixin):
             # If resuming and we have a specific color to resume with, use that instead
             if self.draw_state['current_color'] is not None and color_idx == self.draw_state['color_idx']:
                 c = self.draw_state['current_color']
-                print(f"Resuming with saved color {c}")
+                log.info(f"Resuming with saved color {c}")
 
             # Log color change with cached coordinate info
             num_strokes = len(lines)
-            print(f"Switching to color {c} - {num_strokes} cached coordinate points")
+            log.info(f"Switching to color {c} - {num_strokes} cached coordinate points")
 
             # If New Layer is enabled, click the new-layer button with modifiers.
             # Skip on first color when skip_first_color is enabled.
@@ -437,11 +438,11 @@ class Bot(CalibrationMixin, CacheMixin):
             self.painter.color_button()
 
             # DEBUG: Log color selection details
-            print(f"[DEBUG] Selecting color: {c}")
-            print(f"[DEBUG] Color in palette: {self._palette is not None and c in self._palette.colors}")
-            print(f"[DEBUG] Color Button enabled: {self.color_button.get('enabled', False)}")
-            print(f"[DEBUG] Color Button Okay enabled: {self.color_button_okay.get('enabled', False)}")
-            print(f"[DEBUG] Custom colors box: {self._custom_colors}")
+            log.debug(f"[DEBUG] Selecting color: {c}")
+            log.debug(f"[DEBUG] Color in palette: {self._palette is not None and c in self._palette.colors}")
+            log.debug(f"[DEBUG] Color Button enabled: {self.color_button.get('enabled', False)}")
+            log.debug(f"[DEBUG] Color Button Okay enabled: {self.color_button_okay.get('enabled', False)}")
+            log.debug(f"[DEBUG] Custom colors box: {self._custom_colors}")
 
             # Resolve the selection strategy from the profile and apply it.
             # Colour Button Okay bypasses the built-in palette on purpose.
@@ -481,8 +482,8 @@ class Bot(CalibrationMixin, CacheMixin):
 
                 # Log stroke progress with time remaining and strokes left
                 progress_percent = ((line_idx + 1) / len(lines)) * 100
-                print(f"Drawing stroke {line_idx + 1}/{len(lines)} for color {c} - {progress_percent:.1f}% complete")
-                print(f"Total progress: {self.completed_strokes}/{self.total_strokes} strokes - {time_remaining} remaining")
+                log.info(f"Drawing stroke {line_idx + 1}/{len(lines)} for color {c} - {progress_percent:.1f}% complete")
+                log.info(f"Total progress: {self.completed_strokes}/{self.total_strokes} strokes - {time_remaining} remaining")
 
                 # Update overlay with progress and ETA
                 if self.overlay_window:
@@ -493,7 +494,7 @@ class Bot(CalibrationMixin, CacheMixin):
                 if last_stroke_end is not None:
                     jump_distance = ((start_pos[0] - last_stroke_end[0]) ** 2 + (start_pos[1] - last_stroke_end[1]) ** 2) ** 0.5
                     if jump_distance > self.jump_threshold:
-                        print(f"Large jump detected ({jump_distance:.1f} pixels) - adding {self.settings[Bot.JUMP_DELAY]}s delay")
+                        log.info(f"Large jump detected ({jump_distance:.1f} pixels) - adding {self.settings[Bot.JUMP_DELAY]}s delay")
                         time.sleep(self.settings[Bot.JUMP_DELAY])
 
                 # Wait if paused - detect when we come out of pause for stroke replay
@@ -535,7 +536,7 @@ class Bot(CalibrationMixin, CacheMixin):
                         self.close_progress_overlay()  # Close overlay on termination
                         return 'terminated'
                     # Wait for resume
-                    print("Paused after completing stroke - press resume to continue")
+                    log.info("Paused after completing stroke - press resume to continue")
                     while self.paused and not self.terminate:
                         time.sleep(0.1)
                     if self.terminate:
@@ -543,7 +544,7 @@ class Bot(CalibrationMixin, CacheMixin):
                         self.close_progress_overlay()  # Close overlay on termination
                         return 'terminated'
                     # Resume - replay the current stroke to ensure clean result
-                    print(f"Resuming - replaying current stroke for color {c}")
+                    log.info(f"Resuming - replaying current stroke for color {c}")
                     self.draw_state['was_paused'] = True
 
                 # Update last stroke position for jump detection
@@ -561,12 +562,12 @@ class Bot(CalibrationMixin, CacheMixin):
         else:
             diff_str = f"Extra: {self._format_time(abs(diff_seconds))}"
         
-        print("=" * 50)
-        print(f"Drawing completed!")
-        print(f"Estimated: {estimated_str}")
-        print(f"Actual:   {actual_str}")
-        print(f"{diff_str}")
-        print("=" * 50)
+        log.info("=" * 50)
+        log.info(f"Drawing completed!")
+        log.info(f"Estimated: {estimated_str}")
+        log.info(f"Actual:   {actual_str}")
+        log.info(f"{diff_str}")
+        log.info("=" * 50)
         
         # Close progress overlay
         self.close_progress_overlay()
@@ -593,12 +594,12 @@ class Bot(CalibrationMixin, CacheMixin):
         # Load calibration data if file exists - always load if file exists to ensure latest data is used
         if os.path.exists('color_calibration.json'):
             if self.color_calibration_map is None or not self.color_calibration_map:
-                print("[Calibration] Loading calibration data from color_calibration.json")
+                log.info("[Calibration] Loading calibration data from color_calibration.json")
                 self.load_color_calibration('color_calibration.json')
             else:
-                print(f"[Calibration] Calibration data already loaded from color_calibration.json ({len(self.color_calibration_map)} colors)")
+                log.info(f"[Calibration] Calibration data already loaded from color_calibration.json ({len(self.color_calibration_map)} colors)")
         else:
-            print("[Calibration] No calibration data available")
+            log.info("[Calibration] No calibration data available")
 
         # Create progress overlay window
         self.create_progress_overlay()
@@ -608,15 +609,15 @@ class Bot(CalibrationMixin, CacheMixin):
         # Estimate time for the full cmap (not just test lines)
         self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
         estimated_str = self._format_time(self.estimated_time_seconds)
-        print(f"Estimated drawing time (full): {estimated_str}")
+        log.info(f"Estimated drawing time (full): {estimated_str}")
 
         for color_idx, (c, lines) in enumerate(cmap.items()):
             if lines_drawn >= max_lines:
                 break
 
             # Log color change
-            print(f"[DEBUG] Color Button Okay enabled: {self.color_button_okay.get('enabled', False)}")
-            print(f"Switching to color {c} for test draw")
+            log.debug(f"[DEBUG] Color Button Okay enabled: {self.color_button_okay.get('enabled', False)}")
+            log.info(f"Switching to color {c} for test draw")
 
             # Resolve the selection strategy from the profile and apply it.
             # Colour Button Okay bypasses the built-in palette on purpose.
@@ -631,7 +632,7 @@ class Bot(CalibrationMixin, CacheMixin):
 
                 # Log progress
                 lines_drawn += 1
-                print(f"Drawing test line {lines_drawn}/{max_lines} for color {c}")
+                log.info(f"Drawing test line {lines_drawn}/{max_lines} for color {c}")
 
                 # Update overlay progress
                 if self.overlay_window:
@@ -659,12 +660,12 @@ class Bot(CalibrationMixin, CacheMixin):
         else:
             diff_str = f"Extra: {self._format_time(abs(diff_seconds))}"
         
-        print("=" * 50)
-        print(f"Test draw completed: {lines_drawn} lines drawn")
-        print(f"Estimated (full): {self._format_time(self.estimated_time_seconds)}")
-        print(f"Actual (test):   {actual_str}")
-        print(f"{diff_str}")
-        print("=" * 50)
+        log.info("=" * 50)
+        log.info(f"Test draw completed: {lines_drawn} lines drawn")
+        log.info(f"Estimated (full): {self._format_time(self.estimated_time_seconds)}")
+        log.info(f"Actual (test):   {actual_str}")
+        log.info(f"{diff_str}")
+        log.info("=" * 50)
         
         # Close progress overlay
         self.close_progress_overlay()
@@ -822,7 +823,7 @@ class Bot(CalibrationMixin, CacheMixin):
             raise NoCanvasError('Bot could not continue because canvas is not initialized')
 
         self.drawing = True
-        print("Starting simple test draw...")
+        log.info("Starting simple test draw...")
 
         # Calculate 1/4 of canvas width
         quarter_width = canvas_w // 4
@@ -837,7 +838,7 @@ class Bot(CalibrationMixin, CacheMixin):
             end_x = canvas_x + quarter_width
             end_y = canvas_y + y_offset
 
-            print(f"Drawing line {i + 1}/5: from ({start_x}, {start_y}) to ({end_x}, {end_y})")
+            log.info(f"Drawing line {i + 1}/5: from ({start_x}, {start_y}) to ({end_x}, {end_y})")
 
             # Move to start position
             pyautogui.moveTo(start_x, start_y)
@@ -851,7 +852,7 @@ class Bot(CalibrationMixin, CacheMixin):
             # Small delay between lines
             time.sleep(0.2)
 
-        print("Simple test draw completed!")
+        log.info("Simple test draw completed!")
         self.drawing = False
         return 'success'
 
@@ -916,11 +917,11 @@ class Bot(CalibrationMixin, CacheMixin):
             # Keep window responsive
             self.overlay_window.update()
 
-            print("[ProgressOverlay] Overlay window created")
+            log.info("[ProgressOverlay] Overlay window created")
             return self.overlay_window
 
         except Exception as e:
-            print(f"[ProgressOverlay] Error creating overlay: {e}")
+            log.info(f"[ProgressOverlay] Error creating overlay: {e}")
             return None
 
     def update_progress_overlay(self, completed, total, eta_seconds):
@@ -951,7 +952,7 @@ class Bot(CalibrationMixin, CacheMixin):
             self.overlay_window.update()
 
         except Exception as e:
-            print(f"[ProgressOverlay] Error updating overlay: {e}")
+            log.info(f"[ProgressOverlay] Error updating overlay: {e}")
 
     def close_progress_overlay(self):
         '''
@@ -968,9 +969,9 @@ class Bot(CalibrationMixin, CacheMixin):
                 self.overlay_window = None
                 self.overlay_label = None
                 self.overlay_frame = None
-                print("[ProgressOverlay] Overlay window closed")
+                log.info("[ProgressOverlay] Overlay window closed")
             except Exception as e:
-                print(f"[ProgressOverlay] Error closing overlay: {e}")
+                log.info(f"[ProgressOverlay] Error closing overlay: {e}")
                 # Force cleanup
                 self.overlay_window = None
                 self.overlay_label = None

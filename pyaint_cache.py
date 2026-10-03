@@ -3,6 +3,7 @@
 Extracted from ``bot.py`` into a mixin. Cluster into separate modules as
 useful. The methods use ``self.settings`` / ``self._canvas`` / ``self._palette``.
 """
+from pyaint_log import log
 
 import hashlib
 import json
@@ -41,7 +42,7 @@ class CacheMixin:
         if cache_file is None:
             raise RuntimeError("Cannot precompute: canvas not initialized")
 
-        print("Pre-computing image...")
+        log.info("Pre-computing image...")
 
         start_time = time.time()
 
@@ -69,8 +70,8 @@ class CacheMixin:
             json.dump(cache_data, f, indent=2)
 
         actual_time = time.time() - start_time
-        print(f"Pre-computation completed in {actual_time:.2f} seconds")
-        print(f"Cache saved to: {cache_file}")
+        log.info(f"Pre-computation completed in {actual_time:.2f} seconds")
+        log.info(f"Cache saved to: {cache_file}")
 
         return cache_file
     def load_cached(self, cache_file):

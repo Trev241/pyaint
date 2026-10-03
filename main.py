@@ -1,3 +1,4 @@
+from pyaint_log import log
 from bot import Bot
 from ui.window import Window
 
@@ -26,11 +27,11 @@ def on_pynput_key(key):
             # Check if it matches the pause key
             if key_name == bot.pause_key.lower():
                 bot.paused = not bot.paused
-                print(f"Pause toggled: {bot.paused}")
+                log.info(f"Pause toggled: {bot.paused}")
                 return
 
     except Exception as e:
-        print(f"Keyboard error: {e}")
+        log.info(f"Keyboard error: {e}")
 
 if __name__ == '__main__':
     # Start pynput keyboard listener in background

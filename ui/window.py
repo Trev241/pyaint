@@ -1,3 +1,4 @@
+from pyaint_log import log
 import json
 import os
 import time
@@ -160,9 +161,9 @@ class Window:
             cache_dir = 'cache'
             if os.path.exists(cache_dir):
                 shutil.rmtree(cache_dir)
-                print(f"Cleaned up cache directory: {cache_dir}")
+                log.info(f"Cleaned up cache directory: {cache_dir}")
         except Exception as e:
-            print(f"Warning: Could not clean up cache directory: {e}")
+            log.info(f"Warning: Could not clean up cache directory: {e}")
         
     def _init_cpanel(self):
         # CONTROL PANEL FRAME
@@ -508,7 +509,7 @@ class Window:
             recipe = self._pending_recipe
             image = self.bot.capture_screen()
             detection = detect_target(recipe, image)
-            print(f"[AutoDetect] {recipe.id}: screen={image.size} canvas={detection.canvas} "
+            log.info(f"[AutoDetect] {recipe.id}: screen={image.size} canvas={detection.canvas} "
                   f"palette={detection.palette} rows={detection.palette_rows} cols={detection.palette_cols}")
             self._root.deiconify()
             self._root.wm_state('normal')
@@ -557,7 +558,7 @@ class Window:
                 draw.rectangle([x, y, x + w, y + h], outline='lime', width=3)
             self._set_img(image=annotated)
         except Exception as e:
-            print(f'[AutoDetect] Could not render preview: {e}')
+            log.info(f'[AutoDetect] Could not render preview: {e}')
 
     def _init_ipanel(self):
         # IMAGE PREVIEW FRAME
@@ -672,7 +673,7 @@ class Window:
             except urllib_error.HTTPError as e:
                 if e.code == 429:  # Rate limited
                     wait_time = min(2 ** attempt, 10)  # Exponential backoff, max 10s
-                    print(f"Rate limited, waiting {wait_time}s before retry {attempt + 1}/{retries}")
+                    log.info(f"Rate limited, waiting {wait_time}s before retry {attempt + 1}/{retries}")
                     time.sleep(wait_time)
                     continue
                 elif e.code >= 400:
@@ -917,7 +918,7 @@ class Window:
             return "break"
 
         # This should never be reached when not busy, but just in case
-        print(f"Unexpected pause key press while busy={self.busy}")
+        log.info(f"Unexpected pause key press while busy={self.busy}")
         return "break"
 
     def _save_config(self):
@@ -929,9 +930,9 @@ class Window:
         try:
             with open(self._config_path, 'w', encoding='utf-8') as f:
                 json.dump(payload, f, ensure_ascii=False, indent=4)
-            print(f"Saved config to {self._config_path}; keys={list(payload.keys())}")
+            log.info(f"Saved config to {self._config_path}; keys={list(payload.keys())}")
         except Exception as e:
-            print(f"Failed to save config: {e}")
+            log.info(f"Failed to save config: {e}")
 
     def _store_drawing_settings(self):
         """Copy the live drawing settings into the preferences dict."""
@@ -961,10 +962,10 @@ class Window:
         try:
             with open(self._config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-            print(f"Loaded config from {self._config_path}; keys={list(config.keys())}")
+            log.info(f"Loaded config from {self._config_path}; keys={list(config.keys())}")
         except Exception as e:
             config = {}
-            print(f"Config file missing or invalid ({e}); using defaults")
+            log.info(f"Config file missing or invalid ({e}); using defaults")
 
         # Split persisted state into the taught environment (Profile) and user
         # preferences (self.tools). The bot shares this exact Profile instance.
@@ -1423,11 +1424,11 @@ class Window:
             # Keep window responsive
             self._calib_overlay_window.update()
 
-            print("[CalibrationOverlay] Overlay window created")
+            log.info("[CalibrationOverlay] Overlay window created")
             return self._calib_overlay_window
 
         except Exception as e:
-            print(f"[CalibrationOverlay] Error creating overlay: {e}")
+            log.info(f"[CalibrationOverlay] Error creating overlay: {e}")
             return None
 
     def _close_calibration_overlay(self):
@@ -1437,9 +1438,9 @@ class Window:
                 self._calib_overlay_window.destroy()
                 self._calib_overlay_window = None
                 self._calib_overlay_label = None
-                print("[CalibrationOverlay] Overlay window closed")
+                log.info("[CalibrationOverlay] Overlay window closed")
         except Exception as e:
-            print(f"[CalibrationOverlay] Error closing overlay: {e}")
+            log.info(f"[CalibrationOverlay] Error closing overlay: {e}")
 
     def _manage_calibration_thread(self):
         """Manage calibration thread and update progress"""
@@ -1474,7 +1475,7 @@ class Window:
                             try:
                                 self._calib_overlay_window.update()  # Force UI update
                             except Exception as e:
-                                print(f"[CalibrationOverlay] Error updating window: {e}")
+                                log.info(f"[CalibrationOverlay] Error updating window: {e}")
                     self.tlabel['text'] = f"Calibrating: {current}/{total} colors ({percent:.1f}%) - ETA: {eta_str}"
                 else:
                     elapsed_time = time.time() - self._calibration_start_time
@@ -1484,7 +1485,7 @@ class Window:
                             try:
                                 self._calib_overlay_window.update()  # Force UI update
                             except Exception as e:
-                                print(f"[CalibrationOverlay] Error updating window: {e}")
+                                log.info(f"[CalibrationOverlay] Error updating window: {e}")
                     self.tlabel['text'] = f"Calibrating: {current} colors... (Time: {elapsed_time:.0f}s)"
         elif self.busy:
             # Calibration finished or cancelled
@@ -1601,7 +1602,7 @@ class Window:
             has_cache, cache_file = self.bot.get_cached_status(self._imname, flags=self.draw_options, mode=self._mode)
             if has_cache:
                 # Load from cache
-                print(f"Loading from cache: {cache_file}")
+                log.info(f"Loading from cache: {cache_file}")
                 cache_data = self.bot.load_cached(cache_file)
                 if cache_data:
                     cmap = cache_data['cmap']
@@ -1609,23 +1610,23 @@ class Window:
                     num_colors = len(cmap)
                     total_points = sum(len(lines) for lines in cmap.values())
                     cache_time = time.ctime(cache_data['timestamp'])
-                    print(f"Cache loaded - {num_colors} colors, {total_points} coordinate points")
-                    print(f"Cached on: {cache_time}")
-                    print(f"Settings: Delay={cache_data['settings'][0]}, PixelSize={cache_data['settings'][1]}")
+                    log.info(f"Cache loaded - {num_colors} colors, {total_points} coordinate points")
+                    log.info(f"Cached on: {cache_time}")
+                    log.info(f"Settings: Delay={cache_data['settings'][0]}, PixelSize={cache_data['settings'][1]}")
                     self.tlabel['text'] = f"Using cached computation for test draw"
                 else:
                     # Cache invalid, fall back to processing
-                    print("Cache file invalid, processing live...")
+                    log.info("Cache file invalid, processing live...")
                     cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
             else:
                 # No cache, process normally
-                print("No cache available, processing live...")
+                log.info("No cache available, processing live...")
                 cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
 
             # Count total lines and limit to first 20 (or fewer if less available)
             total_lines = sum(len(lines) for lines in cmap.values())
             test_lines = min(20, total_lines)
-            print(f"Test drawing first {test_lines} lines out of {total_lines} total")
+            log.info(f"Test drawing first {test_lines} lines out of {total_lines} total")
 
             messagebox.showinfo(self.title, f'Test drawing first {test_lines} lines. Adjust your brush size in the painting app, then use the full "Start" button.')
             self._root.iconify()
@@ -1699,7 +1700,7 @@ class Window:
         """Handle mouse clicks for redraw region selection (like setup canvas selection)"""
         if pressed:
             self._root.bell()
-            print(x, y)
+            log.info(x, y)
             self._clicks += 1
             self._coords += x, y
 
@@ -1709,7 +1710,7 @@ class Window:
                 top_left = min(self._coords[0], self._coords[2]), min(self._coords[1], self._coords[3])
                 bot_right = max(self._coords[0], self._coords[2]), max(self._coords[1], self._coords[3])
                 box = top_left + bot_right
-                print(f'Capturing box: {box}')
+                log.info(f'Capturing box: {box}')
 
                 # Store selected region coordinates
                 self._redraw_region = box
@@ -1780,12 +1781,12 @@ class Window:
                     self.tlabel['text'] = "Color calibration file removed successfully."
                     # Clear calibration data from bot
                     self.bot.color_calibration_map = None
-                    print(f"[File Management] Removed calibration file: {calib_path}")
+                    log.info(f"[File Management] Removed calibration file: {calib_path}")
                 else:
                     self.tlabel['text'] = "No calibration file found to remove."
             except Exception as e:
                 self.tlabel['text'] = f"Error removing calibration file: {str(e)}"
-                print(f"[File Management] Error: {e}")
+                log.info(f"[File Management] Error: {e}")
 
     def _on_reset_config(self):
         """Delete config.json file to reset to defaults"""
@@ -1797,12 +1798,12 @@ class Window:
                 if os.path.exists(config_path):
                     os.remove(config_path)
                     self.tlabel['text'] = "Config file removed successfully. Please restart the application to use defaults."
-                    print(f"[File Management] Removed config file: {config_path}")
+                    log.info(f"[File Management] Removed config file: {config_path}")
                 else:
                     self.tlabel['text'] = "No config file found to remove."
             except Exception as e:
                 self.tlabel['text'] = f"Error removing config file: {str(e)}"
-                print(f"[File Management] Error: {e}")
+                log.info(f"[File Management] Error: {e}")
 
     @is_free
     def _redraw_draw_thread(self):
@@ -1838,8 +1839,8 @@ class Window:
             canvas_region = self._redraw_region  # (x1, y1, x2, y2) in canvas coordinates
             image_region = self._canvas_to_image_region(canvas_region)
 
-            print(f"Canvas region: {canvas_region}")
-            print(f"Image region: {image_region}")
+            log.info(f"Canvas region: {canvas_region}")
+            log.info(f"Image region: {image_region}")
 
             # Process only the selected region of the image and draw it at the selected canvas location
             canvas_target = (canvas_region[0], canvas_region[1], canvas_region[2] - canvas_region[0], canvas_region[3] - canvas_region[1])
@@ -1851,7 +1852,7 @@ class Window:
 
             # Show drawing time estimate
             drawing_eta = self.bot.estimate_drawing_time(cmap)
-            print(f"Estimated redraw time: {drawing_eta}")
+            log.info(f"Estimated redraw time: {drawing_eta}")
             self.tlabel['text'] = f"Starting redraw - ETA: {drawing_eta}"
 
             messagebox.showwarning(self.title, f'Redrawing the selected region.\nPress ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')
@@ -1945,8 +1946,8 @@ class Window:
         click_count = 0
         last_mouse_state = False
 
-        print("Mouse capture started. Press 'ESC' to cancel.")
-        print("Move mouse to first point and click...")
+        log.info("Mouse capture started. Press 'ESC' to cancel.")
+        log.info("Move mouse to first point and click...")
 
         try:
             while click_count < 2 and not keyboard.is_pressed('esc'):
@@ -1959,10 +1960,10 @@ class Window:
                     click_count += 1
 
                     if click_count == 1:
-                        print(f"First point captured: ({x}, {y})")
-                        print("Now move to bottom-right point and click...")
+                        log.info(f"First point captured: ({x}, {y})")
+                        log.info("Now move to bottom-right point and click...")
                     elif click_count == 2:
-                        print(f"Second point captured: ({x}, {y})")
+                        log.info(f"Second point captured: ({x}, {y})")
 
                     # Small delay to debounce
                     time.sleep(0.3)
@@ -1991,17 +1992,17 @@ class Window:
                 self._root.deiconify()
                 self._root.wm_state('normal')
 
-                print(f"Region selected: ({min_x}, {min_y}) to ({max_x}, {max_y})")
+                log.info(f"Region selected: ({min_x}, {min_y}) to ({max_x}, {max_y})")
                 messagebox.showinfo(self.title, f"Region selected!\n\nTop-left: ({min_x}, {min_y})\nBottom-right: ({max_x}, {max_y})\n\nYou can now click 'Draw Region' to redraw this area.")
 
         except KeyboardInterrupt:
-            print("Mouse capture cancelled by user")
+            log.info("Mouse capture cancelled by user")
             self._cancel_redraw_pick()
             # Restore UI
             self._root.deiconify()
             self._root.wm_state('normal')
         except Exception as e:
-            print(f"Error during mouse capture: {e}")
+            log.info(f"Error during mouse capture: {e}")
             self._cancel_redraw_pick()
             # Restore UI
             self._root.deiconify()
@@ -2015,7 +2016,7 @@ class Window:
             has_cache, cache_file = self.bot.get_cached_status(self._imname, flags=self.draw_options, mode=self._mode)
             if has_cache:
                 # Load from cache
-                print(f"Loading from cache: {cache_file}")
+                log.info(f"Loading from cache: {cache_file}")
                 cache_data = self.bot.load_cached(cache_file)
                 if cache_data:
                     cmap = cache_data['cmap']
@@ -2023,22 +2024,22 @@ class Window:
                     num_colors = len(cmap)
                     total_points = sum(len(lines) for lines in cmap.values())
                     cache_time = time.ctime(cache_data['timestamp'])
-                    print(f"Cache loaded - {num_colors} colors, {total_points} coordinate points")
-                    print(f"Cached on: {cache_time}")
-                    print(f"Settings: Delay={cache_data['settings'][0]}, PixelSize={cache_data['settings'][1]}")
+                    log.info(f"Cache loaded - {num_colors} colors, {total_points} coordinate points")
+                    log.info(f"Cached on: {cache_time}")
+                    log.info(f"Settings: Delay={cache_data['settings'][0]}, PixelSize={cache_data['settings'][1]}")
                     self.tlabel['text'] = f"Using cached computation"
                 else:
                     # Cache invalid, fall back to processing
-                    print("Cache file invalid, processing live...")
+                    log.info("Cache file invalid, processing live...")
                     cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
             else:
                 # No cache, process normally
-                print("No cache available, processing live...")
+                log.info("No cache available, processing live...")
                 cmap = self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
 
             # Show drawing time estimate
             drawing_eta = self.bot.estimate_drawing_time(cmap)
-            print(f"Estimated drawing time: {drawing_eta}")
+            log.info(f"Estimated drawing time: {drawing_eta}")
             self.tlabel['text'] = f"Starting draw - ETA: {drawing_eta}"
 
             messagebox.showwarning(self.title, f'Press ESC to stop the bot. Press {self.bot.pause_key} to pause/resume.')

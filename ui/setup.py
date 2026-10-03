@@ -1,3 +1,4 @@
+from pyaint_log import log
 import re
 import utils
 
@@ -515,7 +516,7 @@ class SetupWindow:
         self._current_picking_index = index
         
         # Start listening for mouse click (no confirmation dialog for continuous picking)
-        print(f'Picking center for color {index + 1}... Press ESC to stop.')
+        log.info(f'Picking center for color {index + 1}... Press ESC to stop.')
         self._listener = Listener(on_click=self._on_center_pick_click)
         self._listener.start()
         
@@ -541,7 +542,7 @@ class SetupWindow:
                     except:
                         pass
                     self._color_sel_window.deiconify()
-                    print('Center picking cancelled by ESC key')
+                    log.info('Center picking cancelled by ESC key')
         except AttributeError:
             pass  # Ignore special keys that don't have char attribute
     
@@ -583,7 +584,7 @@ class SetupWindow:
             except:
                 pass
         
-        print(f'Auto-estimated centers for {len(self._manual_centers)} colors')
+        log.info(f'Auto-estimated centers for {len(self._manual_centers)} colors')
     
     def _start_precision_estimate(self):
         """Start precision estimate mode using reference point selection"""
@@ -723,7 +724,7 @@ class SetupWindow:
         """Handle click for precision estimate point selection"""
         if pressed:
             self._color_sel_window.bell()
-            print(x, y)
+            log.info(x, y)
             self._clicks += 1
             self._coords += x, y
             
@@ -737,10 +738,10 @@ class SetupWindow:
                 })
                 
                 # DEBUG: Log detailed information
-                print(f'[DEBUG] Screen click: ({x}, {y})')
-                print(f'[DEBUG] Palette box: {self.palette_box}')
-                print(f'[DEBUG] Relative center: ({center_x}, {center_y})')
-                print(f'[DEBUG] Point type: {self._current_point_type}')
+                log.info(f'[DEBUG] Screen click: ({x}, {y})')
+                log.info(f'[DEBUG] Palette box: {self.palette_box}')
+                log.info(f'[DEBUG] Relative center: ({center_x}, {center_y})')
+                log.info(f'[DEBUG] Point type: {self._current_point_type}')
                 
                 # Move to next step
                 self._precision_step += 1
@@ -772,7 +773,7 @@ class SetupWindow:
                         # Build point types from dynamically generated instructions
                         point_types = [pt for _, pt in self._precision_instructions]
                     self._current_point_type = point_types[self._precision_step]
-                    print(f'Waiting for next click: {self._current_point_type}')
+                    log.info(f'Waiting for next click: {self._current_point_type}')
     
     def _calculate_precision_centers(self):
         """Calculate all centers based on precision estimate reference points"""
@@ -917,11 +918,11 @@ class SetupWindow:
                     
                     # DEBUG: Log first center calculation
                     if i == min(self._valid_positions):
-                        print(f'[DEBUG] First valid position: {i}')
-                        print(f'[DEBUG] Row: {row_idx}, Col: {col}, Col pos: {col_pos}')
-                        print(f'[DEBUG] first_row_first_col: {first_row_first_col}')
-                        print(f'[DEBUG] avg_col_spacing: {avg_col_spacing}, avg_row_spacing: {avg_row_spacing}')
-                        print(f'[DEBUG] Calculated center for pos {i}: ({center_x}, {center_y})')
+                        log.info(f'[DEBUG] First valid position: {i}')
+                        log.info(f'[DEBUG] Row: {row_idx}, Col: {col}, Col pos: {col_pos}')
+                        log.info(f'[DEBUG] first_row_first_col: {first_row_first_col}')
+                        log.info(f'[DEBUG] avg_col_spacing: {avg_col_spacing}, avg_row_spacing: {avg_row_spacing}')
+                        log.info(f'[DEBUG] Calculated center for pos {i}: ({center_x}, {center_y})')
                     
                     self._manual_centers[i] = (center_x, center_y)
             
@@ -967,7 +968,7 @@ class SetupWindow:
         # Check if window still exists before deiconifying
         if hasattr(self, '_color_sel_window') and self._color_sel_window.winfo_exists():
             self._color_sel_window.deiconify()
-        print('Precision estimate cancelled')
+        log.info('Precision estimate cancelled')
     
     def _show_centers_overlay(self):
         """Show overlay circles on screen at estimated center positions"""
@@ -998,9 +999,9 @@ class SetupWindow:
             
             # DEBUG: Log drawing coordinates
             if i == min(self._manual_centers.keys()):
-                print(f'[DEBUG] Drawing first dot at canvas pos: ({center_x}, {center_y})')
-                print(f'[DEBUG] Overlay window position: ({palette_x}, {palette_y})')
-                print(f'[DEBUG] Expected screen position: ({palette_x + center_x}, {palette_y + center_y})')
+                log.info(f'[DEBUG] Drawing first dot at canvas pos: ({center_x}, {center_y})')
+                log.info(f'[DEBUG] Overlay window position: ({palette_x}, {palette_y})')
+                log.info(f'[DEBUG] Expected screen position: ({palette_x + center_x}, {palette_y + center_y})')
             
             # Draw black dot (filled circle)
             canvas.create_oval(
@@ -1022,7 +1023,7 @@ class SetupWindow:
         
         # Show for 5 seconds then close
         self._root.after(5000, lambda: overlay.destroy())
-        print('Showing estimated centers overlay for 5 seconds...')
+        log.info('Showing estimated centers overlay for 5 seconds...')
         
         # Show info dialog after overlay closes
         self._root.after(5100, lambda: messagebox.showinfo(
@@ -1083,7 +1084,7 @@ class SetupWindow:
         
         # Show for 5 seconds then close
         self._root.after(5000, lambda: overlay.destroy())
-        print('Showing custom centers overlay for 5 seconds...')
+        log.info('Showing custom centers overlay for 5 seconds...')
         
         # Show info dialog after overlay closes
         self._root.after(5100, lambda: messagebox.showinfo(
@@ -1103,13 +1104,13 @@ class SetupWindow:
             except:
                 pass  # Ignore errors when stopping
             self._color_sel_window.deiconify()
-            print('Center picking cancelled by ESC key')
+            log.info('Center picking cancelled by ESC key')
     
     def _on_center_pick_click(self, x, y, _, pressed):
         """Handle click for picking center point"""
         if pressed:
             self._root.bell()
-            print(x, y)
+            log.info(x, y)
             self._clicks += 1
             self._coords += x, y
             
@@ -1123,7 +1124,7 @@ class SetupWindow:
                 if self._current_picking_index in self._grid_buttons:
                     self._grid_buttons[self._current_picking_index].config(bg='yellow', text='✓')
                 
-                print(f'Picked center for color {self._current_picking_index + 1}: ({center_x}, {center_y})')
+                log.info(f'Picked center for color {self._current_picking_index + 1}: ({center_x}, {center_y})')
                 
                 # Find next valid color that doesn't have a center yet
                 next_index = None
@@ -1138,7 +1139,7 @@ class SetupWindow:
                     self._clicks = 0
                     self._coords = []
                     # Don't show messagebox, just continue picking
-                    print(f'Continuing to color {next_index + 1}...')
+                    log.info(f'Continuing to color {next_index + 1}...')
                 else:
                     # All valid colors have centers
                     self._listener.stop()
@@ -1200,7 +1201,7 @@ class SetupWindow:
     def _on_click(self, x, y, _, pressed):
         if pressed:
             self._root.bell()
-            print(x, y)
+            log.info(x, y)
             self._clicks += 1
             self._coords += x, y
 
@@ -1218,7 +1219,7 @@ class SetupWindow:
                     top_left = (min(self._coords[0], self._coords[2]), min(self._coords[1], self._coords[3]))
                     bot_right = (max(self._coords[0], self._coords[2]), max(self._coords[1], self._coords[3]))
                     box = (top_left[0], top_left[1], bot_right[0], bot_right[1])
-                    print(f'Capturing box: {box}')
+                    log.info(f'Capturing box: {box}')
 
                     if self._tool_name == 'Palette':
                         p = init_functions['Palette'](prows=self.rows, pcols=self.cols, pbox=box)
@@ -1241,7 +1242,7 @@ class SetupWindow:
                     # Single-click tools like New Layer
                     # Save the clicked point as coords
                     coords = (int(self._coords[0]), int(self._coords[1]))
-                    print(f'Captured point: {coords}')
+                    log.info(f'Captured point: {coords}')
                     # Store as simple coords and mark status
                     self._current_tool['coords'] = list(coords)
                     self._current_tool['status'] = True

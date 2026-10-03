@@ -4,6 +4,7 @@ Extracted from ``bot.py`` into a mixin so the engine module stays cohesive.
 ``Bot`` inherits :class:`CalibrationMixin`; the methods keep using ``self`` and
 resolve ``color_calibration_map`` through ``Bot``'s property.
 """
+from pyaint_log import log
 
 import json
 import math
@@ -36,7 +37,7 @@ class CalibrationMixin:
         sample_step = 4  # Sample every 4th pixel
         spectrum_map = {}
         
-        print(f"[Spectrum] Scanning spectrum box: ({left}, {top}, {width}, {height})")
+        log.info(f"[Spectrum] Scanning spectrum box: ({left}, {top}, {width}, {height})")
         
         for y in range(0, height, sample_step):
             for x in range(0, width, sample_step):
@@ -53,7 +54,7 @@ class CalibrationMixin:
                     # Skip invalid pixels
                     continue
         
-        print(f"[Spectrum] Created spectrum map with {len(spectrum_map)} color positions")
+        log.info(f"[Spectrum] Created spectrum map with {len(spectrum_map)} color positions")
         return spectrum_map
     def _find_nearest_spectrum_color(self, target_color):
         """
@@ -70,7 +71,7 @@ class CalibrationMixin:
         )
         
         distance = Palette.dist(nearest_color, target_color)
-        print(f"[Spectrum] Target: {target_color}, Nearest found: {nearest_color}, Distance: {distance:.1f}")
+        log.info(f"[Spectrum] Target: {target_color}, Nearest found: {nearest_color}, Distance: {distance:.1f}")
         
         return self._spectrum_map[nearest_color]
     def calibrate_custom_colors(self, grid_box: Any, preview_point: Any, step: int = 2) -> Dict[Tuple[int, int, int], Tuple[int, int]]:
@@ -119,10 +120,10 @@ class CalibrationMixin:
         # Define the bbox for 1x1 pixel capture at preview point
         preview_bbox = (preview_x, preview_y, preview_x + 1, preview_y + 1)
         
-        print(f"[Calibration] Starting calibration of custom colors grid...")
-        print(f"[Calibration] Grid area: ({grid_x}, {grid_y}, {grid_width}, {grid_height})")
-        print(f"[Calibration] Preview point: ({preview_x}, {preview_y})")
-        print(f"[Calibration] Step size: {step}")
+        log.info(f"[Calibration] Starting calibration of custom colors grid...")
+        log.info(f"[Calibration] Grid area: ({grid_x}, {grid_y}, {grid_width}, {grid_height})")
+        log.info(f"[Calibration] Preview point: ({preview_x}, {preview_y})")
+        log.info(f"[Calibration] Step size: {step}")
         
         # Press mouse down at the start of grid (to grab the slider)
         start_x = grid_x
@@ -169,11 +170,11 @@ class CalibrationMixin:
                     else:
                         eta_str = "calculating..."
 
-                    print(f"[Calibration] Progress: {current_step}/{total_steps} ({progress_percent:.1f}%) - {len(self.color_calibration_map)} colors mapped - ETA: {eta_str}")
+                    log.info(f"[Calibration] Progress: {current_step}/{total_steps} ({progress_percent:.1f}%) - {len(self.color_calibration_map)} colors mapped - ETA: {eta_str}")
                     last_progress = progress_percent
                 # Check for termination (ESC key pressed)
                 if self.terminate:
-                    print("[Calibration] Calibration cancelled by user")
+                    log.info("[Calibration] Calibration cancelled by user")
                     # Release mouse before exiting
                     try:
                         pyautogui.mouseUp(button='left')
@@ -194,7 +195,7 @@ class CalibrationMixin:
                     # Store the calibration data
                     self.color_calibration_map[color] = (x, y)
                 except Exception as e:
-                    print(f"[Calibration] Error capturing pixel at ({x}, {y}): {e}")
+                    log.info(f"[Calibration] Error capturing pixel at ({x}, {y}): {e}")
                     continue
         
         # Release mouse up at the end
@@ -213,8 +214,8 @@ class CalibrationMixin:
             minutes = int((actual_time % 3600) // 60)
             actual_str = f"{hours}:{minutes:02.0f}h"
         
-        print(f"[Calibration] Calibration complete. Mapped {len(self.color_calibration_map)} colors.")
-        print(f"[Calibration] Total time: {actual_str}")
+        log.info(f"[Calibration] Calibration complete. Mapped {len(self.color_calibration_map)} colors.")
+        log.info(f"[Calibration] Total time: {actual_str}")
         
         return self.color_calibration_map
     def save_color_calibration(self, filepath: str) -> bool:
@@ -228,7 +229,7 @@ class CalibrationMixin:
             True on success, False on failure
         """
         if self.color_calibration_map is None:
-            print("[Calibration] No calibration data to save.")
+            log.info("[Calibration] No calibration data to save.")
             return False
         
         try:
@@ -242,10 +243,10 @@ class CalibrationMixin:
             with open(filepath, 'w') as f:
                 json.dump(calibration_json, f, indent=2)
             
-            print(f"[Calibration] Calibration data saved to: {filepath}")
+            log.info(f"[Calibration] Calibration data saved to: {filepath}")
             return True
         except Exception as e:
-            print(f"[Calibration] Error saving calibration data: {e}")
+            log.info(f"[Calibration] Error saving calibration data: {e}")
             return False
     def load_color_calibration(self, filepath: str) -> bool:
         """
@@ -268,14 +269,14 @@ class CalibrationMixin:
                 r, g, b = map(int, key.split(','))
                 self.color_calibration_map[(r, g, b)] = tuple(value)
             
-            print(f"[Calibration] Calibration data loaded from: {filepath}")
-            print(f"[Calibration] Loaded {len(self.color_calibration_map)} color mappings.")
+            log.info(f"[Calibration] Calibration data loaded from: {filepath}")
+            log.info(f"[Calibration] Loaded {len(self.color_calibration_map)} color mappings.")
             return True
         except FileNotFoundError:
-            print(f"[Calibration] Calibration file not found: {filepath}")
+            log.info(f"[Calibration] Calibration file not found: {filepath}")
             return False
         except Exception as e:
-            print(f"[Calibration] Error loading calibration data: {e}")
+            log.info(f"[Calibration] Error loading calibration data: {e}")
             return False
     def get_calibrated_color_position(self, target_rgb: Tuple[int, int, int], tolerance: int = 20, k_neighbors: int = 4) -> Optional[Tuple[int, int]]:
         """
@@ -292,18 +293,18 @@ class CalibrationMixin:
             (x, y) coordinates of the best match, or None if no calibration data exists
         """
         if self.color_calibration_map is None or not self.color_calibration_map:
-            print(f"[Calibration] ERROR: Calibration map is empty or None!")
+            log.info(f"[Calibration] ERROR: Calibration map is empty or None!")
             return None
         
-        print(f"[Calibration] Looking up target color {target_rgb}")
-        print(f"[Calibration] Calibration map has {len(self.color_calibration_map)} entries")
+        log.info(f"[Calibration] Looking up target color {target_rgb}")
+        log.info(f"[Calibration] Calibration map has {len(self.color_calibration_map)} entries")
         
         # First, try to find exact match within tolerance using Manhattan distance
         for color, pos in self.color_calibration_map.items():
             diff = abs(color[0] - target_rgb[0]) + abs(color[1] - target_rgb[1]) + abs(color[2] - target_rgb[2])
             if diff <= tolerance:
                 # Found exact match within tolerance
-                print(f"[Calibration] Exact match found: {target_rgb} ~ {color} (diff={diff}) at {pos}")
+                log.info(f"[Calibration] Exact match found: {target_rgb} ~ {color} (diff={diff}) at {pos}")
                 return pos
         
         # If no exact match, use k-nearest neighbors with weighted spatial interpolation
@@ -338,7 +339,7 @@ class CalibrationMixin:
         # Log the interpolation details
         nearest_color = neighbors[0][1]
         nearest_dist = neighbors[0][0]
-        print(f"[Calibration] Target: {target_rgb}, Nearest: {nearest_color} (dist={nearest_dist:.2f})")
-        print(f"[Calibration] Using {k_neighbors}-nearest interpolation to ({weighted_x:.1f}, {weighted_y:.1f})")
+        log.info(f"[Calibration] Target: {target_rgb}, Nearest: {nearest_color} (dist={nearest_dist:.2f})")
+        log.info(f"[Calibration] Using {k_neighbors}-nearest interpolation to ({weighted_x:.1f}, {weighted_y:.1f})")
         
         return (int(weighted_x), int(weighted_y))

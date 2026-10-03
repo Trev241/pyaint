@@ -64,6 +64,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   `bot.py` into cohesive mixins behind the unchanged `Bot` API.
 - `tests/test_calibration.py` and `tests/test_timing.py`: characterization tests
   added before the move.
+- `pyaint_log.py`: a tiny logging shim (`log.info/debug/...`) with a
+  `PYAINT_LOG_LEVEL` env override; default level `debug` preserves the previous
+  console output.
 - Recipe `detection` specs: skribbl auto-detects its canvas (white 800x600 / 4:3,
   with a `color_rect` fallback that is also aspect-checked) and its exact 2x13
   palette (26 sampled colours, `gap: 0`); MS Paint auto-detects its canvas.
@@ -107,6 +110,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 - `bot.py`: shrunk by moving `Palette` to `pyaint_palette.py`, then calibration
   (`pyaint_calibration.py`) and the cache (`pyaint_cache.py`) into mixins.
   `Bot` is now ~978 lines (from ~1475).
+- Replaced 171 `print()` calls across `bot.py`, the extracted modules, `main.py`,
+  `ui/window.py` and `ui/setup.py` with `pyaint_log` calls (identical default
+  output; can be silenced with `PYAINT_LOG_LEVEL`).
 - `bot.py`: added `capture_screen()`, `detect_target()`, and
   `apply_detection()` so a recipe's locators can populate the canvas/palette
   without manual teaching.
