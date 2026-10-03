@@ -59,6 +59,11 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 - Recipe-default helpers in `pyaint_targets.py` (`merge_drawing_settings`,
   `merge_drawing_options`, `disabled_tools`, `apply_profile_defaults`) with unit
   tests, so applying a target is no longer buried in the UI.
+- `pyaint_calibration.py` (`CalibrationMixin`) and `pyaint_cache.py`
+  (`CacheMixin`): the calibration and pre-computation cache code moved out of
+  `bot.py` into cohesive mixins behind the unchanged `Bot` API.
+- `tests/test_calibration.py` and `tests/test_timing.py`: characterization tests
+  added before the move.
 - Recipe `detection` specs: skribbl auto-detects its canvas (white 800x600 / 4:3,
   with a `color_rect` fallback that is also aspect-checked) and its exact 2x13
   palette (26 sampled colours, `gap: 0`); MS Paint auto-detects its canvas.
@@ -99,7 +104,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   recipe uses (e.g. skribbl shows just Palette and Canvas).
 - `ui/window.py`: `_apply_recipe` now delegates to the pure helpers in
   `pyaint_targets` instead of inlining settings/option merging.
-- `bot.py`: shrunk by moving `Palette` to `pyaint_palette.py`.
+- `bot.py`: shrunk by moving `Palette` to `pyaint_palette.py`, then calibration
+  (`pyaint_calibration.py`) and the cache (`pyaint_cache.py`) into mixins.
+  `Bot` is now ~978 lines (from ~1475).
 - `bot.py`: added `capture_screen()`, `detect_target()`, and
   `apply_detection()` so a recipe's locators can populate the canvas/palette
   without manual teaching.
