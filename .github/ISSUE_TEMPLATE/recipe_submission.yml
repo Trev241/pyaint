@@ -1,0 +1,48 @@
+name: Target recipe submission
+description: Share a recipe so Pyaint can drive another drawing app.
+title: "[Recipe]: "
+labels: ["recipe"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Recipes are data, not code. See
+        [`targets/README.md`](https://github.com/Trev241/pyaint/blob/main/targets/README.md)
+        for the schema. You can also just post this in Discussions.
+  - type: input
+    id: app
+    attributes:
+      label: App and version
+      placeholder: Krita 5.2
+    validations:
+      required: true
+  - type: textarea
+    id: recipe
+    attributes:
+      label: Recipe JSON
+      render: json
+    validations:
+      required: true
+  - type: dropdown
+    id: tested
+    attributes:
+      label: Have you drawn a full image with it?
+      options:
+        - "Yes"
+        - "Partially"
+        - "Not yet"
+    validations:
+      required: true
+  - type: input
+    id: resolution
+    attributes:
+      label: Screen resolution / scaling used
+      placeholder: 1920x1080 at 100%
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes (detection quirks, required settings, screenshots)
+    validations:
+      required: false

@@ -6,9 +6,16 @@ shift them.
 """
 
 import os
+import sys
 
-# ``<repo>/pyaint/paths.py`` -> ``<repo>``
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if getattr(sys, "frozen", False):
+    # PyInstaller (onefile/onedir): ``__file__`` points inside the temporary
+    # extraction dir, which is deleted on exit. Persist user data next to the
+    # executable instead so config/targets survive a run.
+    PROJECT_ROOT = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    # ``<repo>/pyaint/paths.py`` -> ``<repo>``
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
 TARGETS_DIR = os.path.join(PROJECT_ROOT, "targets")

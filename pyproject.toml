@@ -9,6 +9,33 @@ description = "Transform images into automated brush strokes"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Trev241" }]
+keywords = [
+    "automation",
+    "pyautogui",
+    "image",
+    "drawing",
+    "skribbl",
+    "ms-paint",
+    "gimp",
+    "rpa",
+    "tkinter",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Artistic Software",
+    "Topic :: Multimedia :: Graphics",
+]
 dependencies = [
     "keyboard",
     "Pillow",
@@ -16,6 +43,16 @@ dependencies = [
     "PyAutoGUI",
     "pynput",
 ]
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.0"]
+dev = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/Trev241/pyaint"
+Repository = "https://github.com/Trev241/pyaint"
+Issues = "https://github.com/Trev241/pyaint/issues"
+Changelog = "https://github.com/Trev241/pyaint/blob/main/CHANGELOG.md"
 
 [project.scripts]
 pyaint = "pyaint.__main__:main"
