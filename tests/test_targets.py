@@ -8,9 +8,13 @@ from pyaint_targets import (
     DEFAULT_RECIPE_ID,
     Recipe,
     RecipeRegistry,
+    apply_profile_defaults,
+    disabled_tools,
     get_recipe,
     list_recipes,
     load_user_recipes,
+    merge_drawing_options,
+    merge_drawing_settings,
 )
 import pytest
 
@@ -62,6 +66,43 @@ def test_recipe_from_dict_invalid_color_selection_falls_back():
 def test_recipe_from_dict_requires_id():
     with pytest.raises(ValueError):
         Recipe.from_dict({"name": "no id"})
+
+
+# ---------------------------------------------------------------------------
+# Applying recipe defaults
+# ---------------------------------------------------------------------------
+def test_merge_drawing_settings_overlays_present_keys_only():
+    base = [0.1, 12, 0.9, 0.5]
+    assert merge_drawing_settings(base, {"delay": 0.2, "pixel_size": 8}) == [
+        0.2,
+        8,
+        0.9,
+        0.5,
+    ]
+    assert merge_drawing_settings(base, {}) == base
+
+
+def test_merge_drawing_options_sets_and_clears_bits():
+    ignore, custom = 1, 2
+    assert merge_drawing_options(0, {"ignore_white_pixels": True}, ignore, custom) == ignore
+    assert merge_drawing_options(3, {"use_custom_colors": False}, ignore, custom) == ignore
+    assert merge_drawing_options(0, {}, ignore, custom) == 0
+
+
+def test_apply_profile_defaults_disables_unused_tools():
+    recipe = get_recipe("skribbl")
+    assert set(disabled_tools(recipe)) == {
+        "New Layer",
+        "Color Button",
+        "Color Button Okay",
+    }
+    profile = Profile()
+    profile["New Layer"]["enabled"] = True
+    profile.mspaint_mode["enabled"] = True
+    apply_profile_defaults(profile, recipe)
+    assert profile.color_selection == "palette"
+    assert profile["New Layer"]["enabled"] is False
+    assert profile.mspaint_mode["enabled"] is False
 
 
 # ---------------------------------------------------------------------------

@@ -51,6 +51,14 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   `<repo>/targets` and `~/.pyaint/targets` (invalid files skipped); the main
   window loads them at startup so a target can be added with data only. See
   `targets/README.md`.
+- `pyaint_palette.py`: the `Palette` class, moved out of `bot.py` (re-exported
+  from `bot` for compatibility).
+- `tests/test_draw.py`: headless characterization tests for `Bot.draw()` /
+  `test_draw()` using a fake `ScreenPainter` (colour selection, stroke ordering,
+  skip-first-colour, resume-skip, force-custom, termination, test-draw limit).
+- Recipe-default helpers in `pyaint_targets.py` (`merge_drawing_settings`,
+  `merge_drawing_options`, `disabled_tools`, `apply_profile_defaults`) with unit
+  tests, so applying a target is no longer buried in the UI.
 - Recipe `detection` specs: skribbl auto-detects its canvas (white 800x600 / 4:3,
   with a `color_rect` fallback that is also aspect-checked) and its exact 2x13
   palette (26 sampled colours, `gap: 0`); MS Paint auto-detects its canvas.
@@ -89,6 +97,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   profile, `from_config`/`to_config`, and the preset `to_dict`/`from_dict`.
 - `ui/setup.py`: the Setup window now only lists the tools the selected target
   recipe uses (e.g. skribbl shows just Palette and Canvas).
+- `ui/window.py`: `_apply_recipe` now delegates to the pure helpers in
+  `pyaint_targets` instead of inlining settings/option merging.
+- `bot.py`: shrunk by moving `Palette` to `pyaint_palette.py`.
 - `bot.py`: added `capture_screen()`, `detect_target()`, and
   `apply_detection()` so a recipe's locators can populate the canvas/palette
   without manual teaching.
@@ -103,6 +114,8 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   background is itself saturated, so the palette is found via `color_signature`
   over the real 2x13 swatch colours with `gap: 0` (dilation previously merged
   the palette into the white canvas panel).
+- `Bot.draw()` now clears `self.drawing` on every termination path (the
+  post-stroke path previously returned `'terminated'` but left `drawing` set).
 
 ### Removed
 - Duplicated per-pixel run-length/layering logic between `process()` and

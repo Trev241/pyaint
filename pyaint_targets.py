@@ -106,6 +106,65 @@ class Recipe:
         }
 
 
+# ---------------------------------------------------------------------------
+# Applying a recipe's defaults
+# ---------------------------------------------------------------------------
+def merge_drawing_settings(
+    current: Sequence[float], updates: Mapping[str, Any]
+) -> List[float]:
+    """Return ``current`` with only the recipe-provided settings overlaid."""
+    merged = list(current)
+    if not updates:
+        return merged
+    if len(merged) > 0:
+        merged[0] = updates.get("delay", merged[0])
+    if len(merged) > 1:
+        merged[1] = updates.get("pixel_size", merged[1])
+    if len(merged) > 2:
+        merged[2] = updates.get("precision", merged[2])
+    if len(merged) > 3:
+        merged[3] = updates.get("jump_delay", merged[3])
+    return merged
+
+
+def merge_drawing_options(
+    flags: int,
+    updates: Mapping[str, bool],
+    ignore_white_bit: int,
+    use_custom_bit: int,
+) -> int:
+    """Apply ``ignore_white_pixels`` / ``use_custom_colors`` to a flag bitmask."""
+    if "ignore_white_pixels" in updates:
+        if updates["ignore_white_pixels"]:
+            flags |= ignore_white_bit
+        else:
+            flags &= ~ignore_white_bit
+    if "use_custom_colors" in updates:
+        if updates["use_custom_colors"]:
+            flags |= use_custom_bit
+        else:
+            flags &= ~use_custom_bit
+    return flags
+
+
+def disabled_tools(recipe: "Recipe") -> Tuple[str, ...]:
+    """Tools that should be switched off because the recipe does not use them."""
+    return tuple(
+        tool
+        for tool in ("New Layer", "Color Button", "Color Button Okay")
+        if tool not in recipe.tools
+    )
+
+
+def apply_profile_defaults(profile: Any, recipe: "Recipe") -> None:
+    """Apply the environment-side recipe defaults to a ``Profile`` in place."""
+    profile.color_selection = recipe.color_selection
+    for tool in disabled_tools(recipe):
+        profile[tool]["enabled"] = False
+    if not recipe.supports_mspaint_mode:
+        profile.mspaint_mode["enabled"] = False
+
+
 # skribbl.io's fixed 2x13 palette (top row then bottom row), sampled from a
 # real screenshot. Used only to *locate* the palette grid; the drawing colours
 # are still sampled from the screen.

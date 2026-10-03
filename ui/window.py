@@ -8,7 +8,14 @@ import urllib.error as urllib_error
 import utils
 
 from pyaint_profile import Profile, ENV_CONFIG_KEYS
-from pyaint_targets import get_recipe, list_recipes, load_user_recipes
+from pyaint_targets import (
+    apply_profile_defaults,
+    get_recipe,
+    list_recipes,
+    load_user_recipes,
+    merge_drawing_options,
+    merge_drawing_settings,
+)
 from pyaint_locators import detect_target
 from ui.setup import SetupWindow
 from tkinter import filedialog
@@ -436,39 +443,19 @@ class Window:
 
     def _apply_recipe(self, recipe):
         """Apply a recipe's defaults to the live profile/bot and refresh widgets."""
-        self.profile.color_selection = recipe.color_selection
+        apply_profile_defaults(self.profile, recipe)
 
-        # Disable tools this target does not use so stale enables cannot fire.
-        for tool in ('New Layer', 'Color Button', 'Color Button Okay'):
-            if tool not in recipe.tools:
-                self.profile[tool]['enabled'] = False
-        if not recipe.supports_mspaint_mode:
-            self.profile.mspaint_mode['enabled'] = False
-
-        # Drawing settings.
         settings = recipe.drawing_settings or {}
-        if settings:
-            current = self.bot.settings
-            current[0] = settings.get('delay', current[0])
-            current[1] = settings.get('pixel_size', current[1])
-            current[2] = settings.get('precision', current[2])
-            current[3] = settings.get('jump_delay', current[3])
-            if 'jump_threshold' in settings:
-                self.bot.jump_threshold = settings['jump_threshold']
+        self.bot.settings[:] = merge_drawing_settings(self.bot.settings, settings)
+        if 'jump_threshold' in settings:
+            self.bot.jump_threshold = settings['jump_threshold']
 
-        # Drawing options (bit flags).
-        options = recipe.drawing_options or {}
-        if 'ignore_white_pixels' in options:
-            if options['ignore_white_pixels']:
-                self.draw_options |= Bot.IGNORE_WHITE
-            else:
-                self.draw_options &= ~Bot.IGNORE_WHITE
-        if 'use_custom_colors' in options:
-            if options['use_custom_colors']:
-                self.draw_options |= Bot.USE_CUSTOM_COLORS
-            else:
-                self.draw_options &= ~Bot.USE_CUSTOM_COLORS
-
+        self.draw_options = merge_drawing_options(
+            self.draw_options,
+            recipe.drawing_options or {},
+            Bot.IGNORE_WHITE,
+            Bot.USE_CUSTOM_COLORS,
+        )
         self.bot.skip_first_color = bool(recipe.skip_first_color)
 
         self._refresh_drawing_widgets()
