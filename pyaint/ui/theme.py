@@ -174,6 +174,10 @@ def stylesheet(tokens: dict | None = None) -> str:
         font-size: 11px;
         padding: 0 12px;
     }}
+    #FieldHint {{
+        color: {t['fg_muted']};
+        font-size: 11px;
+    }}
     #FieldValue {{
         color: {t['fg']};
         font-size: 11px;
@@ -367,6 +371,21 @@ def stylesheet(tokens: dict | None = None) -> str:
         color: {t['fg_muted']};
         font-size: 11px;
         padding: 0 2px;
+    }}
+
+    /* --- Floating progress overlay -------------------------------------- */
+    #ProgressOverlay {{
+        background: {t['bg_card']};
+        border: 1px solid {t['border_input']};
+        border-radius: 8px;
+    }}
+    #OverlayText {{
+        color: {t['fg']};
+        font-weight: 600;
+    }}
+    #OverlayHint {{
+        color: {t['fg_dim']};
+        font-size: 11px;
     }}
 
     /* --- Lists (setup dialog) ------------------------------------------ */

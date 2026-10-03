@@ -59,7 +59,8 @@ from pyaint.targets import (
 )
 from pyaint.ui import theme
 from pyaint.ui.icons import icon
-from pyaint.ui.widgets import ImagePreview, Section, SliderField, pil_to_qpixmap
+from pyaint.ui.overlay import ProgressOverlay
+from pyaint.ui.widgets import ImagePreview, Section, SliderField, ToolControls, pil_to_qpixmap
 from pyaint.validation import validate_recipe
 
 _PANELS = (("Draw", "target"), ("Image", "image"), ("Settings", "sliders"))
@@ -123,6 +124,7 @@ class MainWindow(QMainWindow):
             theme.apply(app, self.tokens)
 
         self._build_ui()
+        self._overlay = ProgressOverlay()
         self._load_recipes()
         self.load_config()
         self._load_default_image()
@@ -249,15 +251,17 @@ class MainWindow(QMainWindow):
         layout.insertWidget(layout.count() - 1, options)
 
         tools = Section("App tools", "Enable only what your target app provides.")
-        self._chk_newlayer = QCheckBox("New layer")
-        self._chk_colorbutton = QCheckBox("Color button")
-        self._chk_mspaint = QCheckBox("MS Paint double-click")
-        for box, name in (
-            (self._chk_newlayer, "New Layer"),
-            (self._chk_colorbutton, "Color Button"),
+        self._tool_controls = []
+        for name, supports_delay in (
+            ("New Layer", False),
+            ("Color Button", True),
+            ("Color Button Okay", True),
         ):
-            box.toggled.connect(lambda checked, n=name: self._on_profile_toggle(n, checked))
-            tools.add(box)
+            control = ToolControls(name, lambda n=name: self.profile[n], supports_delay=supports_delay)
+            control.changed.connect(self._on_tool_controls_changed)
+            tools.add(control)
+            self._tool_controls.append(control)
+        self._chk_mspaint = QCheckBox("MS Paint double-click")
         self._chk_mspaint.toggled.connect(self._on_mspaint_toggled)
         tools.add(self._chk_mspaint)
         self._mspaint_delay = QSpinBox()
@@ -640,10 +644,8 @@ class MainWindow(QMainWindow):
         self._chk_skip.setChecked(bool(self.bot.skip_first_color))
 
     def _sync_env_ui(self) -> None:
-        self._chk_newlayer.setChecked(bool(self.profile["New Layer"].get("enabled")))
-        self._chk_colorbutton.setChecked(bool(self.profile["Color Button"].get("enabled")))
-        enabled = bool(self.profile["Color Button"].get("status"))
-        self._chk_colorbutton.setEnabled(enabled)
+        for control in self._tool_controls:
+            control.refresh()
         self._chk_mspaint.setChecked(bool(self.profile.mspaint_mode.get("enabled")))
         self._mspaint_delay.setValue(int(float(self.profile.mspaint_mode.get("delay", 0.5)) * 1000))
         self._mspaint_delay.setEnabled(self._chk_mspaint.isChecked())
@@ -691,11 +693,9 @@ class MainWindow(QMainWindow):
         self.bot.skip_first_color = bool(checked)
         self._save_config()
 
-    def _on_profile_toggle(self, name: str, checked: bool) -> None:
-        if self._initializing:
-            return
-        self.profile[name]["enabled"] = bool(checked)
-        self._save_config()
+    def _on_tool_controls_changed(self) -> None:
+        if not self._initializing:
+            self._save_config()
 
     def _on_mspaint_toggled(self, checked: bool) -> None:
         if self._initializing:
@@ -763,18 +763,21 @@ class MainWindow(QMainWindow):
         # Called from the drawing worker thread; Qt queues this onto the loop.
         self.signals.progress.emit(int(completed), int(total), float(eta))
 
-    def _on_progress(self, completed: int, total: int, _eta: float) -> None:
+    def _on_progress(self, completed: int, total: int, eta: float) -> None:
         if total > 0:
             self._progress.setValue(int(100 * completed / total))
+        self._overlay.update_progress(completed, total, eta)
         self._set_status(f"Drawing {completed}/{total} strokes")
 
-    def _start_task(self, name: str, work, minimize: bool = False) -> None:
+    def _start_task(self, name: str, work, minimize: bool = False, overlay: bool = False) -> None:
         if self._busy:
             return
         self._busy = True
         self._set_running(True)
         self._progress.setValue(0)
         self._set_status(f"{name}…")
+        if overlay:
+            self._overlay.show_overlay(f"{name}…", self.bot.pause_key or "p")
         if minimize:
             self.showMinimized()
 
@@ -793,6 +796,7 @@ class MainWindow(QMainWindow):
     def _on_task_finished(self, _name: str) -> None:
         self._busy = False
         self._set_running(False)
+        self._overlay.hide_overlay()
         if self.isMinimized():
             self.showNormal()
             self.raise_()
@@ -1043,7 +1047,7 @@ class MainWindow(QMainWindow):
     def _on_test_draw(self) -> None:
         if not self._require_image():
             return
-        self._start_task("Test draw", self._test_draw_work, minimize=True)
+        self._start_task("Test draw", self._test_draw_work, minimize=True, overlay=True)
 
     def _test_draw_work(self) -> None:
         cmap = self._resolve_cmap()
@@ -1074,7 +1078,7 @@ class MainWindow(QMainWindow):
             self, self.title,
             f"Press ESC to stop.\nPress {self.bot.pause_key or 'p'} to pause/resume.",
         )
-        self._start_task("Drawing", self._draw_work, minimize=True)
+        self._start_task("Drawing", self._draw_work, minimize=True, overlay=True)
 
     def _draw_work(self) -> None:
         start = time.time()
@@ -1124,7 +1128,7 @@ class MainWindow(QMainWindow):
         if self._redraw_region is None:
             QMessageBox.warning(self, self.title, "Pick a region first.")
             return
-        self._start_task("Region redraw", self._redraw_work, minimize=True)
+        self._start_task("Region redraw", self._redraw_work, minimize=True, overlay=True)
 
     def _redraw_work(self) -> None:
         region = self._redraw_region
@@ -1210,6 +1214,7 @@ class MainWindow(QMainWindow):
         self._side_title.setText(_PANELS[index][0].upper())
 
     def closeEvent(self, event):  # noqa: N802
+        self._overlay.hide_overlay()
         try:
             cache_dir = os.path.join(paths.PROJECT_ROOT, "cache")
             if os.path.exists(cache_dir):

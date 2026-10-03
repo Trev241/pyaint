@@ -13,6 +13,15 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Floating progress overlay** (`pyaint/ui/overlay.py`): a click-through,
+  always-on-top card shown during drawing/region-redraw with the stroke count,
+  ETA, a progress bar, and ESC/pause hints. `MainWindow` shows it around long
+  tasks and hides it when they finish.
+- **Per-tool controls in the main panel** (`ToolControls` in
+  `pyaint/ui/widgets.py`): New Layer, Color Button, and Color Button Okay now
+  expose enable, Ctrl/Alt/Shift modifiers, and delay — matching what Setup
+  teaches. The enable/modifier controls stay disabled until the tool is
+  configured.
 - **Palette cell-centre overlay in the auto-detect preview** (`pyaint/annotate.py`):
   the detection preview now draws a white dot at every palette cell centre, in
   addition to the canvas/palette outlines, so the user can confirm colours will

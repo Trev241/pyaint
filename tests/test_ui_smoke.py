@@ -39,6 +39,51 @@ def test_main_window_builds(app, tmp_path, monkeypatch):
         window.close()
 
 
+def test_main_window_has_tool_controls(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        assert len(window._tool_controls) == 3  # New Layer / Color Button / Okay
+    finally:
+        window.close()
+
+
+def test_progress_overlay_updates(app):
+    from pyaint.ui.overlay import ProgressOverlay
+
+    overlay = ProgressOverlay()
+    try:
+        overlay.show_overlay("Drawing…", "p")
+        overlay.update_progress(5, 10, 30.0)
+        assert overlay._bar.value() == 50
+        assert "5/10" in overlay._label.text()
+        assert overlay._hint.text().startswith("ESC stop")
+    finally:
+        overlay.close()
+
+
+def test_tool_controls_mutate_profile(app):
+    from pyaint.ui.widgets import ToolControls
+
+    entry = {
+        "status": True,
+        "enabled": False,
+        "modifiers": {"ctrl": False, "alt": False, "shift": False},
+        "delay": 0.1,
+    }
+    control = ToolControls("Color Button", lambda: entry, supports_delay=True)
+    try:
+        control._enable.setChecked(True)
+        control._mods["shift"].setChecked(True)
+        control._delay.setValue(250)
+        assert entry["enabled"] is True
+        assert entry["modifiers"]["shift"] is True
+        assert entry["delay"] == 0.25
+    finally:
+        control.close()
+
+
 def test_theme_resolution_and_stylesheet():
     from pyaint.ui import theme
 
