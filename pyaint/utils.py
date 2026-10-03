@@ -15,6 +15,25 @@ def adjusted_img_size(img, ad):
     return ew, eh
 
 
+def grid_centers(box, rows, cols):
+    """Absolute ``(x, y)`` centre of every cell in a ``rows`` x ``cols`` grid.
+
+    ``box`` is ``(x, y, width, height)``. Uses the same integer maths as
+    ``Palette``'s automatic centre calculation, so an on-screen preview matches
+    exactly where colours are sampled and clicked.
+    """
+    x, y, width, height = (int(v) for v in box)
+    if rows <= 0 or cols <= 0:
+        return []
+    cell_w = width // cols
+    cell_h = height // rows
+    return [
+        (x + col * cell_w + cell_w // 2, y + row * cell_h + cell_h // 2)
+        for row in range(rows)
+        for col in range(cols)
+    ]
+
+
 def format_duration(seconds):
     """Format seconds as ``30s``, ``1:30`` or ``1:00h``."""
     if seconds < 60:

@@ -13,6 +13,11 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Palette cell-centre overlay in the auto-detect preview** (`pyaint/annotate.py`):
+  the detection preview now draws a white dot at every palette cell centre, in
+  addition to the canvas/palette outlines, so the user can confirm colours will
+  be sampled from the middle of each swatch before applying. Pure over PIL and
+  unit-tested (`tests/test_annotate.py`).
 - **Theme system (dark / light / auto):** `pyaint/ui/theme.py` now ships VS
   Code "Dark Modern" and "Light Modern" token sets, an `auto` mode that follows
   the OS colour scheme (`QGuiApplication.styleHints().colorScheme()`), and a
@@ -124,6 +129,15 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   notes) and this `CHANGELOG.md`.
 
 ### Changed
+- **Palette sampling robustness:** `Palette` now samples the median of a small
+  (3×3 where cells are large enough) neighbourhood instead of a single pixel,
+  making colour reads robust to anti-aliased borders/gaps. `utils.grid_centers()`
+  centralises the cell-centre maths shared by sampling and the preview overlay.
+- **Dropped the manual/precision palette-centering workflow.** It solved a
+  loose-box problem that auto-detection already solves, at a high usability
+  cost. The engine still accepts `valid_positions`/`manual_centers` for config
+  compatibility, but there is no UI for centre calibration; the visible preview
+  overlay replaces it.
 - **PySide6 UI:**
   - `pyaint/bot.py` no longer imports `tkinter` or creates/manages progress
     overlays. It reports progress through `progress_callback`, removing the

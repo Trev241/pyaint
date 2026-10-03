@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 
 from pyaint import config as pyaint_config
 from pyaint import paths
+from pyaint.annotate import annotate_detection
 from pyaint.bot import Bot
 from pyaint.locators import detect_target
 from pyaint.log import log
@@ -943,7 +944,9 @@ class MainWindow(QMainWindow):
             self._show_detection_preview(image, detection)
             answer = QMessageBox.question(
                 self, self.title,
-                f"Detected: {detection.summary()}\n\nApply these regions?",
+                f"Detected: {detection.summary()}\n\n"
+                "White dots mark the palette cell centres that will be sampled; "
+                "check they sit inside the swatches.\n\nApply these regions?",
             )
             if answer == QMessageBox.StandardButton.Yes:
                 applied = self.bot.apply_detection(detection)
@@ -962,17 +965,7 @@ class MainWindow(QMainWindow):
 
     def _show_detection_preview(self, image, detection) -> None:
         try:
-            from PIL import ImageDraw
-
-            annotated = image.convert("RGB").copy()
-            draw = ImageDraw.Draw(annotated)
-            if detection.canvas:
-                x, y, w, h = detection.canvas
-                draw.rectangle([x, y, x + w, y + h], outline=(241, 76, 76), width=4)
-            if detection.palette:
-                x, y, w, h = detection.palette
-                draw.rectangle([x, y, x + w, y + h], outline=(78, 201, 176), width=4)
-            self._preview.set_pixmap(pil_to_qpixmap(annotated))
+            self._preview.set_pixmap(pil_to_qpixmap(annotate_detection(image, detection)))
         except Exception as exc:  # noqa: BLE001
             log.info(f"[AutoDetect] preview failed: {exc}")
 
