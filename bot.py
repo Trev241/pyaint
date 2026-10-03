@@ -2,15 +2,10 @@ from pyaint_log import log
 import pyautogui
 import time
 import utils
-import hashlib
 import json
 import os
-import math
 import threading
 import tkinter as tk
-from tkinter import ttk
-from typing import Optional, Tuple, Dict, List, Any
-from PIL import ImageGrab
 
 from exceptions import (
     NoCanvasError,
@@ -18,7 +13,7 @@ from exceptions import (
 )
 from PIL import Image
 
-from pyaint_profile import Profile, box_to_wh
+from pyaint_profile import Profile
 from pyaint_painter import ScreenPainter
 from pyaint_locators import detect_target
 from pyaint_palette import Palette
@@ -27,12 +22,7 @@ from pyaint_cache import CacheMixin
 
 class Bot(CalibrationMixin, CacheMixin):
     DELAY, STEP, ACCURACY, JUMP_DELAY = tuple(i for i in range(4))
-    # RESOURCES = (
-    #     'assets/palette.png',
-    #     'assets/canvas.png',
-    #     'assets/custom_cols_mspaint.png'
-    # )
-    
+
     SLOTTED = 'slotted'
     LAYERED = 'layered'
 
@@ -45,7 +35,6 @@ class Bot(CalibrationMixin, CacheMixin):
         self.pause_key = 'p'
         self.settings = [.1, 12, .9, 0.5]  # Added jump delay default
         self.progress = 0
-        self.options = Bot.IGNORE_WHITE
         self.config_file = config_file
         self.drawing = False  # Flag to indicate if currently drawing
         self.skip_first_color = False  # Skip first color when drawing
@@ -148,8 +137,6 @@ class Bot(CalibrationMixin, CacheMixin):
         return self.painter.select_color(target, force_custom)
 
     def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None, valid_positions=None, manual_centers=None) -> Palette:
-
-        # pbox = pyautogui.locateOnScreen(Bot.RESOURCES[0], confidence=self.settings[Bot.CONF])
 
         # Previously, pbox was located using screenshots, this functionality is being phased out in favour of another method.
         # pyautogui's box format is (topleftx, toplefty, width, height). Likewise, palette expects and operates on this legacy format.
@@ -257,7 +244,7 @@ class Bot(CalibrationMixin, CacheMixin):
 
         try:
             x, y, cw, ch = self._canvas  # type: ignore[union-attr]
-        except:
+        except Exception:
             raise NoCanvasError('Bot could not continue because canvas is not initialized')
 
         tw, th = tuple(int(p // step) for p in utils.adjusted_img_size(img, (cw, ch)))
@@ -506,7 +493,7 @@ class Bot(CalibrationMixin, CacheMixin):
                         pyautogui.keyUp('shift')
                         pyautogui.keyUp('alt')
                         pyautogui.keyUp('ctrl')
-                    except:
+                    except Exception:
                         pass  # Ignore errors if keys are already released
                     time.sleep(0.1)  # Small delay to avoid busy waiting
 
@@ -675,74 +662,22 @@ class Bot(CalibrationMixin, CacheMixin):
 
 
     def _estimate_drawing_time_seconds(self, cmap):
-        """Estimate drawing time in seconds (internal helper method)"""
-        try:
-            total_strokes = sum(len(lines) for lines in cmap.values())
-            estimated_seconds = 0
-
-            # Calculate time for each color's strokes
-            for color, lines in cmap.items():
-                last_end_pos = None
-
-                for i, line in enumerate(lines):
-                    start_pos, end_pos = line
-
-                    # Calculate stroke distance
-                    distance = ((end_pos[0] - start_pos[0]) ** 2 + (end_pos[1] - start_pos[1]) ** 2) ** 0.5
-
-                    # Add normal delay for each stroke
-                    estimated_seconds += self.settings[Bot.DELAY]
-
-                    # Check for jump delay if this isn't the first stroke in this color
-                    if last_end_pos is not None:
-                        jump_distance = ((start_pos[0] - last_end_pos[0]) ** 2 + (start_pos[1] - last_end_pos[1]) ** 2) ** 0.5
-                        if jump_distance > self.jump_threshold:
-                            estimated_seconds += self.settings[Bot.JUMP_DELAY]
-
-                    # Update last position for next jump check
-                    last_end_pos = end_pos
-
-            # Add color switching overhead (~0.5 seconds per color)
-            num_colors = len(cmap)
-            estimated_seconds += num_colors * 0.5
-
-            return estimated_seconds
-
-        except Exception:
-            return 0.0
+        """Estimate drawing time in seconds (internal helper method)."""
+        return utils.estimate_drawing_seconds(
+            cmap,
+            self.settings[Bot.DELAY],
+            self.settings[Bot.JUMP_DELAY],
+            self.jump_threshold,
+        )
 
     def _format_time(self, seconds):
-        """Format seconds into a human-readable time string"""
-        if seconds < 60:
-            return f"{seconds:.0f}s"
-        elif seconds < 3600:
-            minutes = int(seconds // 60)
-            secs = int(seconds % 60)
-            return f"{minutes}:{secs:02d}"
-        else:
-            hours = int(seconds // 3600)
-            minutes = int((seconds % 3600) // 60)
-            return f"{hours}:{minutes:02d}h"
+        """Format seconds into a human-readable time string."""
+        return utils.format_duration(seconds)
 
     def estimate_drawing_time(self, cmap):
-        """Estimate how long drawing might take based on coordinate data"""
+        """Estimate how long drawing might take based on coordinate data."""
         try:
-            estimated_seconds = self._estimate_drawing_time_seconds(cmap)
-
-            # Format nicely
-            if estimated_seconds < 10:
-                return f"~{estimated_seconds:.1f} seconds"
-            elif estimated_seconds < 60:
-                return f"~{estimated_seconds:.0f} seconds"
-            elif estimated_seconds < 3600:
-                minutes = int(estimated_seconds // 60)
-                seconds = estimated_seconds % 60
-                return f"~{minutes}:{seconds:02.0f} minutes"
-            else:
-                hours = int(estimated_seconds // 3600)
-                minutes = int((estimated_seconds % 3600) // 60)
-                return f"~{hours}:{minutes:02.0f} hours"
-
+            return utils.format_estimate(self._estimate_drawing_time_seconds(cmap))
         except Exception:
             return "Unknown (unable to analyze)"
 
@@ -768,7 +703,7 @@ class Bot(CalibrationMixin, CacheMixin):
 
         try:
             canvas_x, canvas_y, canvas_w, canvas_h = self._canvas  # type: ignore[union-attr]
-        except:
+        except Exception:
             raise NoCanvasError('Bot could not continue because canvas is not initialized')
 
         # Determine where to position the drawing on the canvas
@@ -819,7 +754,7 @@ class Bot(CalibrationMixin, CacheMixin):
         '''
         try:
             canvas_x, canvas_y, canvas_w, canvas_h = self._canvas
-        except:
+        except Exception:
             raise NoCanvasError('Bot could not continue because canvas is not initialized')
 
         self.drawing = True

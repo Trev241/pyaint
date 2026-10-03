@@ -13,7 +13,6 @@ import time
 # Default drawing mode used by the cache signatures (mirrors ``Bot.LAYERED``).
 LAYERED = "layered"
 
-
 class CacheMixin:
     def get_cache_filename(self, image_path, flags=0, mode=LAYERED):
         """Generate a unique cache filename based on image and settings"""
@@ -36,6 +35,7 @@ class CacheMixin:
         os.makedirs(cache_dir, exist_ok=True)
 
         return f"{cache_dir}/{image_hash}_{settings_hash}.json"
+
     def precompute(self, image_path, flags=0, mode=LAYERED):
         """Pre-compute the image processing and save to cache"""
         cache_file = self.get_cache_filename(image_path, flags, mode)
@@ -74,6 +74,7 @@ class CacheMixin:
         log.info(f"Cache saved to: {cache_file}")
 
         return cache_file
+
     def load_cached(self, cache_file):
         """Load and validate cached computation results"""
         try:
@@ -116,6 +117,7 @@ class CacheMixin:
 
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
             return None
+
     def get_cached_status(self, image_path, flags=0, mode=LAYERED):
         """Check if valid cached computation exists"""
         cache_file = self.get_cache_filename(image_path, flags, mode)

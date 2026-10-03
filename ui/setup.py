@@ -206,7 +206,7 @@ class SetupWindow:
                 utils.adjusted_img_size(self._img, (self._preview_panel.winfo_width() - 10, self._preview_panel.winfo_height() - 10))
             ))
             self._img_label['image'] = self._img
-        except:
+        except Exception:
             self._img_label['image'] = ''
             self._img_label['text'] = 'No image to preview'
 
@@ -218,7 +218,7 @@ class SetupWindow:
             try:
                 self.rows = int(self._erows.get())
                 self.cols = int(self._ecols.get())
-            except:
+            except Exception:
                 messagebox.showerror(self.title, 'Please enter valid values for rows and columns before initializing your palette!')
                 return
 
@@ -356,7 +356,7 @@ class SetupWindow:
             img_label.grid(column=0, row=0, columnspan=self.cols, padx=5, pady=5)
             
             current_row = 1
-        except:
+        except Exception:
             current_row = 0
             self._palette_img_tk = None
         
@@ -462,7 +462,7 @@ class SetupWindow:
             try:
                 if isinstance(widget, Label) and 'text' in str(widget.cget('text')):
                     widget.config(text='Click on grid cells to toggle them. Green = Valid, Red = Invalid. Click "Done" when finished.')
-            except:
+            except Exception:
                 pass
         # Update grid to show valid/invalid toggle AND rebind click handler
         for i, lbl in self._grid_buttons.items():
@@ -491,7 +491,7 @@ class SetupWindow:
             try:
                 if isinstance(widget, Label) and 'text' in str(widget.cget('text')):
                     widget.config(text='Click on a color cell, then click the center point on your palette. System will automatically move to the next color. Press ESC to stop at any time. Yellow = Has center, White = No center yet.')
-            except:
+            except Exception:
                 pass
         
         # Update grid to show center picking status
@@ -535,11 +535,11 @@ class SetupWindow:
                     # Stop the mouse listener and keyboard listener
                     try:
                         self._listener.stop()
-                    except:
+                    except Exception:
                         pass
                     try:
                         self._key_listener.stop()
-                    except:
+                    except Exception:
                         pass
                     self._color_sel_window.deiconify()
                     log.info('Center picking cancelled by ESC key')
@@ -581,7 +581,7 @@ class SetupWindow:
             try:
                 if isinstance(widget, Label) and 'text' in str(widget.cget('text')):
                     widget.config(text='Centers auto-estimated (yellow = estimated). Click "Done" to accept or manually adjust by switching to Pick Centers mode.')
-            except:
+            except Exception:
                 pass
         
         log.info(f'Auto-estimated centers for {len(self._manual_centers)} colors')
@@ -951,7 +951,7 @@ class SetupWindow:
                 try:
                     if isinstance(widget, Label) and 'text' in str(widget.cget('text')):
                         widget.config(text='Precision estimate complete (yellow = estimated). Click "Done" to accept or manually adjust by switching to Pick Centers mode.')
-                except:
+                except Exception:
                     pass
             
             self._color_sel_window.deiconify()
@@ -1101,7 +1101,7 @@ class SetupWindow:
             # Stop the listener and cancel picking
             try:
                 self._listener.stop()
-            except:
+            except Exception:
                 pass  # Ignore errors when stopping
             self._color_sel_window.deiconify()
             log.info('Center picking cancelled by ESC key')
@@ -1146,7 +1146,7 @@ class SetupWindow:
                     # Also stop the keyboard listener
                     try:
                         self._key_listener.stop()
-                    except:
+                    except Exception:
                         pass
                     self._color_sel_window.deiconify()
                     messagebox.showinfo(self.title, 'All valid colors have been assigned centers!\n\nClick "Done" to save or adjust centers.')

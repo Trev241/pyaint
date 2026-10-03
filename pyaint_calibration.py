@@ -8,15 +8,11 @@ from pyaint_log import log
 
 import json
 import math
-import os
 import time
 from typing import Any, Dict, Optional, Tuple
 
 import pyautogui
 from PIL import ImageGrab
-
-from pyaint_palette import Palette
-
 
 class CalibrationMixin:
     def _scan_spectrum(self, ccbox):
@@ -56,24 +52,7 @@ class CalibrationMixin:
         
         log.info(f"[Spectrum] Created spectrum map with {len(spectrum_map)} color positions")
         return spectrum_map
-    def _find_nearest_spectrum_color(self, target_color):
-        """
-        Find the nearest color in the spectrum map to the target color.
-        Returns the screen coordinates to click.
-        """
-        if not hasattr(self, '_spectrum_map') or not self._spectrum_map:
-            return None
-        
-        # Find the color with minimum distance to target
-        nearest_color = min(
-            self._spectrum_map.keys(),
-            key=lambda c: Palette.dist(c, target_color)
-        )
-        
-        distance = Palette.dist(nearest_color, target_color)
-        log.info(f"[Spectrum] Target: {target_color}, Nearest found: {nearest_color}, Distance: {distance:.1f}")
-        
-        return self._spectrum_map[nearest_color]
+
     def calibrate_custom_colors(self, grid_box: Any, preview_point: Any, step: int = 2) -> Dict[Tuple[int, int, int], Tuple[int, int]]:
         """
         Calibrate custom colors by scanning the color spectrum grid and recording
@@ -178,7 +157,7 @@ class CalibrationMixin:
                     # Release mouse before exiting
                     try:
                         pyautogui.mouseUp(button='left')
-                    except:
+                    except Exception:
                         pass
                     return self.color_calibration_map
 
@@ -218,6 +197,7 @@ class CalibrationMixin:
         log.info(f"[Calibration] Total time: {actual_str}")
         
         return self.color_calibration_map
+
     def save_color_calibration(self, filepath: str) -> bool:
         """
         Save the color calibration map to a JSON file.
@@ -248,6 +228,7 @@ class CalibrationMixin:
         except Exception as e:
             log.info(f"[Calibration] Error saving calibration data: {e}")
             return False
+
     def load_color_calibration(self, filepath: str) -> bool:
         """
         Load color calibration data from a JSON file.
@@ -278,6 +259,7 @@ class CalibrationMixin:
         except Exception as e:
             log.info(f"[Calibration] Error loading calibration data: {e}")
             return False
+
     def get_calibrated_color_position(self, target_rgb: Tuple[int, int, int], tolerance: int = 20, k_neighbors: int = 4) -> Optional[Tuple[int, int]]:
         """
         Find the exact calibrated color position for a target RGB value.

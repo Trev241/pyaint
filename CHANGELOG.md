@@ -67,6 +67,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 - `pyaint_log.py`: a tiny logging shim (`log.info/debug/...`) with a
   `PYAINT_LOG_LEVEL` env override; default level `debug` preserves the previous
   console output.
+- `pyaint_config.py`: `config.json` I/O (`load_config`, `save_config`) and the
+  environment/preferences split (`split_preferences`, `build_payload`); `Window`
+  delegates to it. Covered by `tests/test_config.py`.
+- `utils.format_duration`, `utils.format_estimate` and
+  `utils.estimate_drawing_seconds`: drawing-time helpers extracted from `Bot`
+  (which now delegates), covered by `tests/test_timing.py`.
 - Recipe `detection` specs: skribbl auto-detects its canvas (white 800x600 / 4:3,
   with a `color_rect` fallback that is also aspect-checked) and its exact 2x13
   palette (26 sampled colours, `gap: 0`); MS Paint auto-detects its canvas.
@@ -113,6 +119,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 - Replaced 171 `print()` calls across `bot.py`, the extracted modules, `main.py`,
   `ui/window.py` and `ui/setup.py` with `pyaint_log` calls (identical default
   output; can be silenced with `PYAINT_LOG_LEVEL`).
+- Housekeeping: fixed 16 bare `except:` clauses, removed dead code (the
+  commented `RESOURCES`, the unused `Bot.options`, `_find_nearest_spectrum_color`)
+  and unused imports; `ui/window.py` reads/writes config through
+  `pyaint_config`.
 - `bot.py`: added `capture_screen()`, `detect_target()`, and
   `apply_detection()` so a recipe's locators can populate the canvas/palette
   without manual teaching.

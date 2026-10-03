@@ -1,5 +1,4 @@
 from pyaint_log import log
-import json
 import os
 import time
 import tkinter
@@ -7,8 +6,9 @@ import traceback
 import urllib.request
 import urllib.error as urllib_error
 import utils
+import pyaint_config
 
-from pyaint_profile import Profile, ENV_CONFIG_KEYS
+from pyaint_profile import Profile
 from pyaint_targets import (
     apply_profile_defaults,
     get_recipe,
@@ -48,7 +48,6 @@ from tkinter.ttk import (
     Button,
     Checkbutton,
     Entry,
-    Progressbar
 )
 
 
@@ -925,14 +924,11 @@ class Window:
         """Persist preferences and the environment profile to config.json."""
         if getattr(self, '_initializing', False):
             return
-        payload = dict(self.tools)
-        payload.update(self.profile.to_config())
-        try:
-            with open(self._config_path, 'w', encoding='utf-8') as f:
-                json.dump(payload, f, ensure_ascii=False, indent=4)
+        payload = pyaint_config.build_payload(self.tools, self.profile)
+        if pyaint_config.save_config(self._config_path, payload):
             log.info(f"Saved config to {self._config_path}; keys={list(payload.keys())}")
-        except Exception as e:
-            log.info(f"Failed to save config: {e}")
+        else:
+            log.info(f"Failed to save config to {self._config_path}")
 
     def _store_drawing_settings(self):
         """Copy the live drawing settings into the preferences dict."""
@@ -959,19 +955,17 @@ class Window:
         self._mspaint_delay_var.set(str(self.profile.mspaint_mode.get('delay', 0.5)))
 
     def load_config(self):
-        try:
-            with open(self._config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
+        config = pyaint_config.load_config(self._config_path)
+        if config:
             log.info(f"Loaded config from {self._config_path}; keys={list(config.keys())}")
-        except Exception as e:
-            config = {}
-            log.info(f"Config file missing or invalid ({e}); using defaults")
+        else:
+            log.info("Config file missing or invalid; using defaults")
 
         # Split persisted state into the taught environment (Profile) and user
         # preferences (self.tools). The bot shares this exact Profile instance.
         self.profile = Profile.from_config(config)
         self.bot.profile = self.profile
-        self.tools = {k: v for k, v in config.items() if k not in ENV_CONFIG_KEYS}
+        self.tools = pyaint_config.split_preferences(config)
         self.tools.setdefault('pause_key', 'p')
 
         # Restore the selected target without re-applying its defaults; the
