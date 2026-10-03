@@ -89,8 +89,8 @@ python main.py
 That's it. For skribbl.io the first draw should take about a minute.
 
 > **Honest note:** auto-detection is tuned against specific window layouts and
-> resolutions. If it can't find a region it falls back to manual teaching — it
-> will never silently draw in the wrong place.
+> resolutions. If it can't find a region it falls back to manual teaching, so
+> always check the **Detection** preview before applying.
 
 ## How it works
 
@@ -103,12 +103,13 @@ image  →  fit + downscale to the canvas (nearest-neighbour)
 
 Two processing modes:
 
-- **Quality** (layered) — sorts colours by frequency and repaints lower layers,
-  producing fewer, cleaner colour switches.
-- **Fast** (slotted) — a direct colour→lines mapping; faster to process.
+- **Layered** (default) — merges a colour's runs where later colours paint over
+  them: fewer strokes, faster drawing, smoother joins.
+- **Slotted** — draws every run exactly as-is: no overdraw, but more strokes.
 
-Processing can be **pre-computed** into `cache/` so repeat draws start
-instantly, and any draw can be **paused/resumed** from the exact stroke.
+Processing can be **cached** into `cache/`, so repeat runs skip the processing
+step (drawing time is unchanged), and any draw can be **paused/resumed** from
+the exact stroke.
 
 ## Configuration
 
@@ -117,7 +118,7 @@ source checkout) and are written whenever you change something in the UI.
 
 | Setting | Range | Meaning |
 |---------|-------|---------|
-| **Delay between strokes** | 0.0–1.0 s | Time between strokes |
+| **Time per stroke** | 0.0–1.0 s | How long each stroke takes |
 | **Detail** | 1–50 px | Lower = finer detail, slower |
 | **Pause after big moves** | 0.0–2.0 s | Pause inserted after large cursor jumps |
 
@@ -152,12 +153,12 @@ detection is tuned for Windows apps.
 
 **Colors are wrong.**
 Re-run **Auto-detect** (or **Setup**) so the palette grid is sampled from the
-swatch centres, and lower **Pixel Size** for more detail. See
+swatch centres, and lower **Detail** for more detail. See
 [`Docs/troubleshooting.md`](Docs/troubleshooting.md).
 
 **Drawing is too slow / too fast.**
-Adjust **Delay** and **Pixel Size**. **Pre-compute** makes repeated runs start
-instantly but does not change drawing speed.
+Adjust **Time per stroke** and **Detail**. **Prepare & cache** skips processing
+on repeat runs but does not change drawing speed.
 
 **Auto-detect found nothing.**
 The canvas must be **blank** — existing artwork defeats detection. Also make

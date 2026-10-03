@@ -50,7 +50,7 @@ Legacy keys from older versions (`Custom Colors`, `color_preview_spot`,
 
 | Setting | Range | Default | Meaning |
 |---------|-------|---------|---------|
-| `delay` | 0.0–1.0 s | 0.1 | Time between strokes |
+| `delay` | 0.0–1.0 s | 0.1 | How long each stroke takes |
 | `pixel_size` | 1–50 px | 12 | Detail level (lower = more detail, slower) |
 | `jump_delay` | 0.0–2.0 s | 0.5 | Pause after a large cursor jump |
 | `jump_threshold` | 1–200 px | 5 | Jump distance that triggers `jump_delay` |
@@ -61,7 +61,7 @@ Legacy keys from older versions (`Custom Colors`, `color_preview_spot`,
 |--------|---------|---------|
 | `ignore_white_pixels` | true | Skip pure-white runs |
 | `skip_first_color` | false | Don't draw the first colour in the map |
-| `draw_mode` | `layered` | `layered` (quality) or `slotted` (fast) |
+| `draw_mode` | `layered` | `layered` (fewer strokes) or `slotted` (exact runs) |
 
 ## Environment tools
 

@@ -14,7 +14,7 @@
 - Re-run **Auto-detect** (or teach the palette) so the swatch centres are
   sampled correctly. The **Detection** tab draws a dot at each cell centre —
   check the dots sit inside the swatches.
-- Reduce **Pixel Size** for more detail.
+- Reduce **Detail** for more detail.
 - Make sure a palette colour isn't being sampled from a border/gap.
 
 ## Colours are skipped entirely
@@ -32,13 +32,13 @@ colour with no close swatch may be skipped.
   scaling.
 - The window may have been moved or resized since the recipe was tuned; use
   **Teach manually** to point at the palette and canvas.
-- Detection failures are silent by design — it never draws in the wrong place.
+- If it finds nothing, it falls back to manual teaching rather than guessing.
 
 ## Drawing is slow
 
-- Increase **Pixel Size** (fewer strokes) and/or reduce **Delay**.
-- Use **Pre-compute** so repeat runs start instantly (it does not change
-  drawing speed).
+- Increase **Detail** (fewer strokes) and/or reduce **Time per stroke**.
+- Use **Prepare & cache** so repeat runs skip processing (drawing time is
+  unchanged).
 - A large **Jump Delay** or a low **Jump Threshold** adds pauses between
   strokes.
 

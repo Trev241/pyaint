@@ -245,32 +245,62 @@ class MainWindow(QMainWindow):
     def _build_draw_panel(self) -> QWidget:
         scroll, layout = self._scroll_panel()
 
-        mode = Section("Speed & quality", "Quality repaints backgrounds first; Fast is a direct, quicker pass.")
+        mode = Section("Stroke mode", "How the image is turned into strokes.")
         self._mode_combo = QComboBox()
-        self._mode_combo.addItem("Quality", Bot.LAYERED)
-        self._mode_combo.addItem("Fast", Bot.SLOTTED)
-        self._mode_combo.setItemData(0, "Layered: fewer, cleaner colour switches (default)", Qt.ToolTipRole)
-        self._mode_combo.setItemData(1, "Slotted: direct colour-to-lines mapping, faster to process", Qt.ToolTipRole)
+        self._mode_combo.addItem("Layered (fewer strokes)", Bot.LAYERED)
+        self._mode_combo.addItem("Slotted (exact runs)", Bot.SLOTTED)
+        self._mode_combo.setItemData(
+            0,
+            "Merges a colour's runs where later colours paint over them: fewer "
+            "strokes, faster drawing, smoother joins (default).",
+            Qt.ToolTipRole,
+        )
+        self._mode_combo.setItemData(
+            1,
+            "Draws every run exactly as-is: no overdraw, but more strokes to draw.",
+            Qt.ToolTipRole,
+        )
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         mode.add(self._mode_combo)
         layout.insertWidget(layout.count() - 1, mode)
 
         drawing = Section("Drawing", "How slowly and how finely Pyaint paints.")
         self._setters = [
-            SliderField("Delay between strokes", 0.0, 1.0, 0.1, 0.01),
+            SliderField("Time per stroke", 0.0, 1.0, 0.1, 0.01),
             SliderField("Detail (lower = finer)", 1, 50, 12, 1),
             SliderField("Pause after big moves", 0.0, 2.0, 0.5, 0.05),
         ]
+        tooltips = (
+            "How long each stroke takes (higher = slower, smoother).",
+            "Pixel step between sampled points. Lower = finer detail, more strokes.",
+            "Pause inserted when the cursor jumps a long way between strokes.",
+        )
         for index, field in enumerate(self._setters):
+            field.setToolTip(tooltips[index])
             field.changed.connect(lambda value, i=index: self._on_setting_changed(i, value))
             drawing.add(field)
+
+        trigger_row = QHBoxLayout()
+        trigger_label = QLabel("Trigger distance (px)")
+        trigger_label.setObjectName("FieldHint")
+        self._jump_threshold = QSpinBox()
+        self._jump_threshold.setRange(1, 200)
+        self._jump_threshold.setValue(5)
+        self._jump_threshold.setToolTip("Cursor jumps longer than this get the pause above")
+        self._jump_threshold.valueChanged.connect(self._on_jump_threshold_changed)
+        trigger_row.addWidget(trigger_label)
+        trigger_row.addStretch(1)
+        trigger_row.addWidget(self._jump_threshold)
+        drawing.add_layout(trigger_row)
         layout.insertWidget(layout.count() - 1, drawing)
 
         options = Section("Options")
         self._chk_ignore = QCheckBox("Ignore white pixels")
         self._chk_ignore.setToolTip("Skip pure-white areas, e.g. a blank background")
         self._chk_skip = QCheckBox("Skip first color")
-        self._chk_skip.setToolTip("Don't paint the first colour in the map")
+        self._chk_skip.setToolTip(
+            "Don't paint the first colour — useful when it is already on the canvas."
+        )
         self._chk_ignore.toggled.connect(self._on_options_changed)
         self._chk_skip.toggled.connect(self._on_skip_changed)
         for box in (self._chk_ignore, self._chk_skip):
@@ -300,12 +330,18 @@ class MainWindow(QMainWindow):
         self._chk_mspaint.setToolTip("Some palettes need a double-click to select a colour")
         self._chk_mspaint.toggled.connect(self._on_mspaint_toggled)
         mspaint_layout.addWidget(self._chk_mspaint)
+        mspaint_delay_row = QHBoxLayout()
+        mspaint_delay_label = QLabel("Double-click delay")
+        mspaint_delay_label.setObjectName("FieldHint")
         self._mspaint_delay = QSpinBox()
         self._mspaint_delay.setRange(0, 3000)
         self._mspaint_delay.setSuffix(" ms")
         self._mspaint_delay.setValue(500)
         self._mspaint_delay.valueChanged.connect(self._on_mspaint_delay)
-        mspaint_layout.addWidget(self._mspaint_delay)
+        mspaint_delay_row.addWidget(mspaint_delay_label)
+        mspaint_delay_row.addStretch(1)
+        mspaint_delay_row.addWidget(self._mspaint_delay)
+        mspaint_layout.addLayout(mspaint_delay_row)
         tools.add(self._mspaint_box)
         self._tools_section = tools
         layout.insertWidget(layout.count() - 1, tools)
@@ -337,18 +373,6 @@ class MainWindow(QMainWindow):
         key_row.addStretch(1)
         key_row.addWidget(self._pause_edit)
         keys.add_layout(key_row)
-
-        jump_row = QHBoxLayout()
-        jump_label = QLabel("Big-move threshold (px)")
-        jump_label.setObjectName("FieldLabel")
-        self._jump_threshold = QSpinBox()
-        self._jump_threshold.setRange(1, 200)
-        self._jump_threshold.setValue(5)
-        self._jump_threshold.valueChanged.connect(self._on_jump_threshold_changed)
-        jump_row.addWidget(jump_label)
-        jump_row.addStretch(1)
-        jump_row.addWidget(self._jump_threshold)
-        keys.add_layout(jump_row)
         container.add(keys)
 
         files = Section("Files")
@@ -485,7 +509,12 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(4)
 
-        self._btn_precompute = self._tool_button("Prepare & cache", "download", self._on_precompute, "Process the image now so Start is instant")
+        self._btn_precompute = self._tool_button(
+            "Prepare & cache",
+            "download",
+            self._on_precompute,
+            "Save the stroke map so repeat runs skip processing (drawing time is unchanged)",
+        )
         self._btn_test = self._tool_button("Test draw", "zap", self._on_test_draw, "Draw the first 20 strokes")
         self._btn_simple = self._tool_button("Brush test", "play", self._on_simple_test, "Draw 5 lines to tune the brush size")
         for button in (self._btn_precompute, self._btn_test, self._btn_simple):
@@ -856,11 +885,13 @@ class MainWindow(QMainWindow):
         self._overlay.update_progress(completed, total, eta)
         self._set_status(f"Drawing {completed}/{total} strokes")
 
-    def _start_task(self, name: str, work, minimize: bool = False, overlay: bool = False) -> None:
+    def _start_task(
+        self, name: str, work, minimize: bool = False, overlay: bool = False, interruptible: bool = True
+    ) -> None:
         if self._busy:
             return
         self._busy = True
-        self._set_running(True)
+        self._set_running(True, interruptible=interruptible)
         self._progress.setValue(0)
         self._set_status(f"{name}…")
         if overlay:
@@ -889,11 +920,11 @@ class MainWindow(QMainWindow):
             self.raise_()
             self.activateWindow()
 
-    def _set_running(self, running: bool) -> None:
+    def _set_running(self, running: bool, interruptible: bool = True) -> None:
         for button in (self._btn_precompute, self._btn_test, self._btn_simple, self._btn_start, self._auto_btn):
             button.setEnabled(not running)
-        self._btn_stop.setEnabled(running)
-        self._btn_pause.setEnabled(running)
+        self._btn_stop.setEnabled(running and interruptible)
+        self._btn_pause.setEnabled(running and interruptible)
         if self._detection_view is not None:
             self._retry_detection_btn.setEnabled(not running)
             self._cancel_detection_btn.setEnabled(not running)
@@ -928,7 +959,7 @@ class MainWindow(QMainWindow):
         if not text:
             self._open_file()
         elif text.lower().startswith(("http://", "https://")):
-            self._start_task("Download image", lambda: self._download_and_show(text))
+            self._start_task("Download image", lambda: self._download_and_show(text), interruptible=False)
         elif os.path.exists(text):
             self._set_image_path(text)
         else:
@@ -1016,7 +1047,7 @@ class MainWindow(QMainWindow):
         if not recipe.detection:
             QMessageBox.information(
                 self, self.title,
-                f'No auto-detection configured for "{recipe.name}".\n\nUse Setup to teach its tools.',
+                f'No auto-detection configured for "{recipe.name}".\n\nUse "Teach manually" to set it up.',
             )
             return
         self._detecting = True
@@ -1104,7 +1135,7 @@ class MainWindow(QMainWindow):
                 self.title,
                 "The palette sampled as a single colour — the target app may have "
                 "been covered when the region was captured. Re-run Auto-detect "
-                "with the target app in front, or teach the palette in Setup.",
+                "with the target app in front, or teach the palette manually.",
             )
         self._show_image_tab()
 
@@ -1135,16 +1166,16 @@ class MainWindow(QMainWindow):
     def _on_precompute(self) -> None:
         if not self._require_image():
             return
-        self._start_task("Pre-compute", self._precompute_work)
+        self._start_task("Prepare & cache", self._precompute_work, interruptible=False)
 
     def _precompute_work(self) -> None:
         cache_file = self.bot.precompute(self._imname, flags=self.draw_options, mode=self._mode)
         data = self.bot.load_cached(cache_file)
         if data:
             eta = self.bot.estimate_drawing_time(data["cmap"])
-            self.signals.status.emit(f"Pre-compute done — estimated drawing time {eta}.")
+            self.signals.status.emit(f"Cached — estimated drawing time {eta}.")
         else:
-            self.signals.status.emit("Pre-compute done — cache saved.")
+            self.signals.status.emit("Cached the stroke map.")
 
     def _on_test_draw(self) -> None:
         if not self._require_image():
@@ -1166,19 +1197,19 @@ class MainWindow(QMainWindow):
     def _on_simple_test(self) -> None:
         canvas = getattr(self.bot, "_canvas", None)
         if canvas is None:
-            QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect or Setup first.")
+            QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect, or teach it manually.")
             return
-        self._start_task("Simple test draw", self.bot.simple_test_draw, minimize=True)
+        self._start_task("Simple test draw", self.bot.simple_test_draw, minimize=True, interruptible=False)
 
     def _on_start(self) -> None:
         if not self._require_image():
             return
         if getattr(self.bot, "_canvas", None) is None:
-            QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect or Setup first.")
+            QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect, or teach it manually.")
             return
         palette = getattr(self.bot, "_palette", None)
         if palette is None:
-            QMessageBox.warning(self, self.title, "Palette not configured. Run Auto-detect or Setup first.")
+            QMessageBox.warning(self, self.title, "Palette not configured. Run Auto-detect, or teach it manually.")
             return
         if len(palette.colors) <= 1:
             QMessageBox.warning(
@@ -1186,7 +1217,7 @@ class MainWindow(QMainWindow):
                 self.title,
                 "The palette has only one distinct colour, so the whole image "
                 "would be drawn in that colour. Re-run Auto-detect with the "
-                "target app in front, or teach the palette in Setup.",
+                "target app in front, or teach the palette manually.",
             )
             return
         QMessageBox.information(
@@ -1223,7 +1254,7 @@ class MainWindow(QMainWindow):
         from pyaint.ui.capture import pick_points
 
         if getattr(self.bot, "_canvas", None) is None:
-            QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect or Setup first.")
+            QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect, or teach it manually.")
             return
         try:
             result = pick_points(self, 2, "Click the UPPER-LEFT then LOWER-RIGHT corner of the region.")

@@ -138,6 +138,11 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   notes) and this `CHANGELOG.md`.
 
 ### Changed
+- **Clearer drawing controls:** "Delay between strokes" → **Time per stroke**
+  (it's the time each stroke takes, not a gap between strokes); the "Prepare &
+  cache" tooltip no longer claims Start becomes instant; "Skip first color"
+  explains when it's useful; the **trigger distance** moved next to its matching
+  "Pause after big moves" slider; and the MS Paint double-click delay is labelled.
 - **App behaviour is easier to understand:** the optional New Layer / Color
   Button / Color Button Okay controls are now hidden when the selected target
   recipe doesn't use them, and an untaught tool shows "Not configured — teach
@@ -244,6 +249,17 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   without manual teaching.
 
 ### Fixed
+- **Misleading stroke-mode labels.** The modes were labelled "Quality" /
+  "Fast", but the difference is stroke count: **Layered merges runs** (~23%
+  fewer strokes on a sample image, so it *draws faster* and has smoother joins),
+  while **Slotted** draws every run exactly (no overdraw, more strokes). They are
+  now labelled **Layered (fewer strokes)** / **Slotted (exact runs)** with
+  accurate tooltips, and the section is "Stroke mode".
+- **Pause/Stop were enabled for tasks that can't be interrupted** (Prepare &
+  cache, Brush test, image download); they now enable only for draw-like tasks.
+- Docs corrected: "Pre-compute … start instantly" overstated it (it skips
+  processing, not drawing), the "never draws in the wrong place" claim was
+  softened, and stale "Pixel Size"/"Delay" names were updated.
 - **Icons rendered as tiny marks or looked missing** (`play`, `zap`, the
   download arrow, the refresh arrow, the trash handle): the shared `_poly()`
   helper did not scale its normalised coordinates by the icon size.
