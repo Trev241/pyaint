@@ -1,7 +1,9 @@
 """Small, self-contained line icons drawn with QPainter.
 
-Avoids shipping image assets and keeps the icon set consistent with the flat
-theme. Icons are cached by ``(name, color, size)``.
+Icons are drawn at the display's device-pixel-ratio so they stay crisp on
+scaled displays, and cached by ``(name, color, size, dpr)``. Using QPainter
+primitives avoids shipping image assets and keeps the icon set flat and
+theme-coloured.
 """
 
 from __future__ import annotations
@@ -18,17 +20,19 @@ from PySide6.QtGui import (
     QPixmap,
     QPolygonF,
 )
+from PySide6.QtWidgets import QApplication
 
 _DEFAULT = "#cccccc"
 
 
-def _poly(*pts):
-    return QPolygonF([QPointF(x, y) for x, y in pts])
+def _poly(s, *pts):
+    """Polygon from normalised (0..1) points, scaled to ``s``."""
+    return QPolygonF([QPointF(x * s, y * s) for x, y in pts])
 
 
 def _draw_play(p: QPainter, s: float) -> None:
     p.setBrush(p.pen().color())
-    p.drawPolygon(_poly((0.34, 0.24), (0.78, 0.5), (0.34, 0.76)))
+    p.drawPolygon(_poly(s, (0.34, 0.24), (0.78, 0.5), (0.34, 0.76)))
 
 
 def _draw_pause(p: QPainter, s: float) -> None:
@@ -48,7 +52,7 @@ def _draw_image(p: QPainter, s: float) -> None:
     p.setBrush(p.pen().color())
     p.drawEllipse(QPointF(0.34 * s, 0.38 * s), 0.05 * s, 0.05 * s)
     p.setBrush(Qt.NoBrush)
-    p.drawPolyline(_poly((0.19, 0.72), (0.4, 0.5), (0.55, 0.65), (0.68, 0.55), (0.81, 0.72)))
+    p.drawPolyline(_poly(s, (0.19, 0.72), (0.4, 0.5), (0.55, 0.65), (0.68, 0.55), (0.81, 0.72)))
 
 
 def _draw_sliders(p: QPainter, s: float) -> None:
@@ -91,21 +95,21 @@ def _draw_globe(p: QPainter, s: float) -> None:
 
 def _draw_download(p: QPainter, s: float) -> None:
     p.setBrush(Qt.NoBrush)
-    p.drawLine(QPointF(0.5 * s, 0.16 * s), QPointF(0.5 * s, 0.62 * s))
-    p.drawPolyline(_poly((0.34, 0.46), (0.5, 0.63), (0.66, 0.46)))
+    p.drawLine(QPointF(0.5 * s, 0.16 * s), QPointF(0.5 * s, 0.6 * s))
+    p.drawPolyline(_poly(s, (0.34, 0.44), (0.5, 0.62), (0.66, 0.44)))
     p.drawLine(QPointF(0.24 * s, 0.8 * s), QPointF(0.76 * s, 0.8 * s))
 
 
 def _draw_zap(p: QPainter, s: float) -> None:
     p.setBrush(p.pen().color())
-    p.drawPolygon(_poly((0.56, 0.1), (0.28, 0.54), (0.47, 0.54),
+    p.drawPolygon(_poly(s, (0.56, 0.1), (0.28, 0.54), (0.47, 0.54),
                         (0.42, 0.9), (0.72, 0.43), (0.52, 0.43)))
 
 
 def _draw_trash(p: QPainter, s: float) -> None:
     p.setBrush(Qt.NoBrush)
     p.drawLine(QPointF(0.18 * s, 0.28 * s), QPointF(0.82 * s, 0.28 * s))
-    p.drawPolyline(_poly((0.38, 0.28), (0.38, 0.2), (0.62, 0.2), (0.62, 0.28)))
+    p.drawPolyline(_poly(s, (0.38, 0.28), (0.38, 0.2), (0.62, 0.2), (0.62, 0.28)))
     p.drawRoundedRect(QRectF(0.24 * s, 0.32 * s, 0.52 * s, 0.5 * s), 2, 2)
     p.drawLine(QPointF(0.42 * s, 0.42 * s), QPointF(0.42 * s, 0.72 * s))
     p.drawLine(QPointF(0.58 * s, 0.42 * s), QPointF(0.58 * s, 0.72 * s))
@@ -115,7 +119,7 @@ def _draw_refresh(p: QPainter, s: float) -> None:
     p.setBrush(Qt.NoBrush)
     p.drawArc(QRectF(0.2 * s, 0.2 * s, 0.6 * s, 0.6 * s), 40 * 16, 280 * 16)
     p.setBrush(p.pen().color())
-    p.drawPolygon(_poly((0.62, 0.08), (0.82, 0.28), (0.58, 0.32)))
+    p.drawPolygon(_poly(s, (0.62, 0.06), (0.84, 0.26), (0.58, 0.32)))
 
 
 _DRAWERS = {
@@ -134,12 +138,20 @@ _DRAWERS = {
 }
 
 
-@lru_cache(maxsize=256)
-def icon(name: str, color: str = _DEFAULT, size: int = 20) -> QIcon:
-    """Return a cached :class:`QIcon` for ``name``."""
-    drawer = _DRAWERS.get(name)
-    pixmap = QPixmap(size, size)
+def _device_ratio() -> float:
+    app = QApplication.instance()
+    if app is None:
+        return 1.0
+    screen = app.primaryScreen()
+    return float(screen.devicePixelRatio()) if screen is not None else 1.0
+
+
+@lru_cache(maxsize=512)
+def _render(name: str, color: str, size: int, dpr: float) -> QIcon:
+    physical = max(1, int(round(size * dpr)))
+    pixmap = QPixmap(physical, physical)
     pixmap.fill(Qt.transparent)
+    drawer = _DRAWERS.get(name)
     if drawer is not None:
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -148,6 +160,13 @@ def icon(name: str, color: str = _DEFAULT, size: int = 20) -> QIcon:
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
+        painter.scale(dpr, dpr)
         drawer(painter, float(size))
         painter.end()
+    pixmap.setDevicePixelRatio(dpr)
     return QIcon(pixmap)
+
+
+def icon(name: str, color: str = _DEFAULT, size: int = 20) -> QIcon:
+    """Return a cached, DPR-aware :class:`QIcon` for ``name``."""
+    return _render(name, color, size, _device_ratio())

@@ -214,6 +214,7 @@ class ToolControls(QFrame):
 
     def __init__(self, title: str, get_entry, supports_delay: bool = False, parent=None):
         super().__init__(parent)
+        self.name = title
         self._get_entry = get_entry
         self._loading = True
         self.setObjectName("ToolControls")
@@ -263,6 +264,11 @@ class ToolControls(QFrame):
             row.addWidget(self._delay)
             layout.addLayout(row)
 
+        self._status = QLabel("Not configured — teach it in Setup to enable.")
+        self._status.setObjectName("FieldHint")
+        self._status.setWordWrap(True)
+        layout.addWidget(self._status)
+
         self._loading = False
         self.refresh()
 
@@ -297,6 +303,7 @@ class ToolControls(QFrame):
         if self._delay is not None:
             self._delay.setValue(int(float(entry.get("delay", 0.1)) * 1000))
             self._delay.setEnabled(status)
+        self._status.setVisible(not status)
         self._loading = False
 
 

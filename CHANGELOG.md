@@ -138,6 +138,11 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   notes) and this `CHANGELOG.md`.
 
 ### Changed
+- **App behaviour is easier to understand:** the optional New Layer / Color
+  Button / Color Button Okay controls are now hidden when the selected target
+  recipe doesn't use them, and an untaught tool shows "Not configured — teach
+  it in Setup to enable." instead of a bare greyed checkbox. MS Paint
+  double-click is hidden for targets that don't support it.
 - **Onboarding & navigation pass:**
   - **Readiness strip** above the toolbar (Target › Canvas & palette › Image ›
     Draw) with ✓/○ state; **Start** is enabled only when the canvas/palette and
@@ -239,6 +244,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   without manual teaching.
 
 ### Fixed
+- **Icons rendered as tiny marks or looked missing** (`play`, `zap`, the
+  download arrow, the refresh arrow, the trash handle): the shared `_poly()`
+  helper did not scale its normalised coordinates by the icon size.
+- **Pixelated icons on scaled displays**: icons are now rendered at the
+  display's device-pixel-ratio and cached per-DPR, so they stay crisp at 125% /
+  150% scaling.
 - **Drawing a whole image in one colour (a filled square)**: the palette was
   re-screenshotted *after* pyaint was brought back in front, so every swatch
   sampled pyaint's own UI and the palette collapsed to a single colour. Palette

@@ -277,7 +277,11 @@ class MainWindow(QMainWindow):
             options.add(box)
         layout.insertWidget(layout.count() - 1, options)
 
-        tools = Section("App behaviour", "Enable only what your target app provides.")
+        tools = Section(
+            "App behaviour",
+            "Optional actions Pyaint performs in your app. Tools are hidden unless "
+            "the chosen target uses them, and stay disabled until taught in Setup.",
+        )
         self._tool_controls = []
         for name, supports_delay in (
             ("New Layer", False),
@@ -288,16 +292,22 @@ class MainWindow(QMainWindow):
             control.changed.connect(self._on_tool_controls_changed)
             tools.add(control)
             self._tool_controls.append(control)
+        self._mspaint_box = QWidget()
+        mspaint_layout = QVBoxLayout(self._mspaint_box)
+        mspaint_layout.setContentsMargins(0, 0, 0, 0)
+        mspaint_layout.setSpacing(2)
         self._chk_mspaint = QCheckBox("MS Paint double-click")
         self._chk_mspaint.setToolTip("Some palettes need a double-click to select a colour")
         self._chk_mspaint.toggled.connect(self._on_mspaint_toggled)
-        tools.add(self._chk_mspaint)
+        mspaint_layout.addWidget(self._chk_mspaint)
         self._mspaint_delay = QSpinBox()
         self._mspaint_delay.setRange(0, 3000)
         self._mspaint_delay.setSuffix(" ms")
         self._mspaint_delay.setValue(500)
         self._mspaint_delay.valueChanged.connect(self._on_mspaint_delay)
-        tools.add(self._mspaint_delay)
+        mspaint_layout.addWidget(self._mspaint_delay)
+        tools.add(self._mspaint_box)
+        self._tools_section = tools
         layout.insertWidget(layout.count() - 1, tools)
 
         advanced = CollapsibleSection("Advanced")
@@ -679,8 +689,17 @@ class MainWindow(QMainWindow):
         self._chk_skip.setChecked(bool(self.bot.skip_first_color))
 
     def _sync_env_ui(self) -> None:
+        recipe = get_recipe(self.profile.target)
+        used = set(recipe.tools)
+        any_visible = False
         for control in self._tool_controls:
+            visible = control.name in used
+            control.setVisible(visible)
             control.refresh()
+            any_visible = any_visible or visible
+        self._mspaint_box.setVisible(bool(recipe.supports_mspaint_mode))
+        any_visible = any_visible or bool(recipe.supports_mspaint_mode)
+        self._tools_section.setVisible(any_visible)
         self._chk_mspaint.setChecked(bool(self.profile.mspaint_mode.get("enabled")))
         self._mspaint_delay.setValue(int(float(self.profile.mspaint_mode.get("delay", 0.5)) * 1000))
         self._mspaint_delay.setEnabled(self._chk_mspaint.isChecked())
