@@ -7,8 +7,6 @@
 Pyaint recreates a picture by driving the mouse in a painting app — MS Paint,
 GIMP, skribbl.io, and anything else you can teach it.
 
-[![tests](https://github.com/Trev241/pyaint/actions/workflows/tests.yml/badge.svg)](https://github.com/Trev241/pyaint/actions/workflows/tests.yml)
-[![release](https://img.shields.io/github/v/release/Trev241/pyaint?include_prereleases&color=blue)](https://github.com/Trev241/pyaint/releases)
 [![license](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE.md)
 [![platform](https://img.shields.io/badge/platform-Windows-0078d4)](#requirements)
 
@@ -51,8 +49,8 @@ Recipes for more apps are data, not code — see
 ## Requirements
 
 - **Windows 10/11** (screen capture + synthetic input are Windows-oriented).
-- **Python 3.8+** *only if installing from source or PyPI*. The release `.exe`
-  needs no Python.
+- **Python 3.8+**. You can also build a standalone `.exe` that bundles Python
+  (see the install options below).
 
 > **Display scaling / multi-monitor:** `pyautogui` captures the primary monitor
 > at physical pixels. Set Windows scaling to 100% on the target monitor, or
@@ -62,20 +60,14 @@ Recipes for more apps are data, not code — see
 
 ### 1. Install
 
-**Option A — Release (recommended, no Python needed):**
-
-1. Download `pyaint.exe` from the [latest release](https://github.com/Trev241/pyaint/releases).
-2. Put it in its own folder and run it. (Windows SmartScreen may warn because
-   the binary is unsigned — choose *More info → Run anyway*.)
-
-**Option B — pip / pipx:**
+**Option A — pip / pipx:**
 
 ```bash
 pipx install git+https://github.com/Trev241/pyaint.git
 pyaint
 ```
 
-**Option C — from source:**
+**Option B — from source:**
 
 ```bash
 git clone https://github.com/Trev241/pyaint.git
@@ -85,6 +77,9 @@ python -m venv .venv
 pip install -r requirements.txt
 python main.py
 ```
+
+**Want a standalone `.exe`?** Install the build extra and run
+`python scripts/build_exe.py`; the result lands in `dist/pyaint.exe`.
 
 ### 2. Draw
 
@@ -152,8 +147,7 @@ auto-detect the canvas/palette. Drop a JSON file in `targets/` (or
 ```
 
 The schema (locators, inheritance, validation) is documented in
-[`targets/README.md`](targets/README.md). Have a recipe for an app that isn't
-listed? [Share it](https://github.com/Trev241/pyaint/issues/new?template=recipe_submission.yml).
+[`targets/README.md`](targets/README.md).
 
 ## FAQ
 
@@ -174,11 +168,6 @@ instantly but does not change drawing speed.
 The window may be resized, on a non-primary monitor, or under display scaling.
 Maximize the app on the primary monitor at 100% scaling and retry, or teach the
 tools manually with **Setup**.
-
-**The `.exe` is flagged by SmartScreen / antivirus.**
-The binary is unsigned, and PyInstaller executables are commonly heuristically
-flagged. Build from source if you prefer, or run the release in a folder you
-trust.
 
 **Where does it save data?**
 `config.json`, `color_calibration.json`, `cache/`, and `targets/` sit next to
@@ -204,7 +193,7 @@ responsible for complying with the terms of service of any app you use it with.
 - [Architecture](Docs/architecture.md)
 - [Troubleshooting](Docs/troubleshooting.md)
 - [API reference](Docs/api.md)
-- [Contributing](CONTRIBUTING.md) • [Changelog](CHANGELOG.md)
+- [Changelog](CHANGELOG.md)
 
 ## Development
 

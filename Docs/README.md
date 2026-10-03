@@ -158,8 +158,7 @@ python scripts/build_exe.py  # build dist/pyaint.exe
 ```
 
 Tests live in `tests/` and never touch the screen: `Palette` is built from an
-explicit colour map, and screen actions are replaced with fakes. See
-[`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+explicit colour map, and screen actions are replaced with fakes.
 
 ### Dependencies
 
