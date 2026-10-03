@@ -3,3 +3,4 @@ Pillow
 pyscreeze
 PyAutoGUI
 pynput
+PySide6>=6.5

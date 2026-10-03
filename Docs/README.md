@@ -60,9 +60,15 @@ pyaint/
 ├── validation.py      recipe self-tests
 ├── calibration.py     custom-colour calibration (CalibrationMixin)
 ├── cache.py           pre-computation cache (CacheMixin)
-├── ui/
-│   ├── window.py      main Tk window, threads, config
-│   └── setup.py       setup wizard
+├── ui/                PySide6 (Qt) desktop UI
+│   ├── main_window.py  main window: panels, toolbar, status bar
+│   ├── setup_dialog.py setup wizard (manual tool teaching)
+│   ├── capture.py      full-screen click-capture overlay
+│   ├── theme.py        VS Code-style design tokens + stylesheet
+│   ├── icons.py        QPainter-drawn line icons
+│   ├── widgets.py      reusable widgets
+│   ├── window.py       legacy Tk UI (superseded, kept for reference)
+│   └── setup.py        legacy Tk setup wizard
 ├── paths.py           runtime filesystem locations
 ├── utils.py           sizing + duration helpers
 ├── errors.py          exceptions
@@ -75,8 +81,9 @@ pyaint/
 Pyaint (palette, canvas, custom colours, layer/colour buttons, MSPaint mode,
 colour-selection strategy, selected target). `Window` creates it; `Bot` holds a
 reference to the same instance, so there is nothing to merge back after setup.
-Legacy `Bot` attributes (`new_layer`, `color_button`, `_canvas`, …) are
-read-only views onto the profile.
+The main window creates it; the Setup dialog mutates it in place. Legacy `Bot`
+attributes (`new_layer`, `color_button`, `_canvas`, …) are read-only views onto
+the profile.
 
 ### Configuration split
 
@@ -163,5 +170,5 @@ explicit colour map, and screen actions are replaced with fakes.
 ### Dependencies
 
 `PyAutoGUI` (input/screenshots), `Pillow` (images), `pynput` (global hotkeys),
-and `pyscreeze`. `tkinter` ships with Python on Windows. There is no NumPy
+`pyscreeze`, and **PySide6** (Qt) for the desktop UI. There is no NumPy
 dependency.

@@ -1,14 +1,14 @@
 """Application entry point.
 
 Run with ``python -m pyaint`` (or the root ``main.py`` shim). Starts the global
-hotkey listener and opens the main window.
+hotkey listener and opens the PySide6 main window.
 """
 
 from pynput import keyboard as pynput_keyboard
 
 from pyaint.bot import Bot
 from pyaint.log import log
-from pyaint.ui.window import Window
+from pyaint.ui.main_window import run
 
 
 def main():
@@ -40,7 +40,7 @@ def main():
     listener.start()
 
     try:
-        Window("pyaint", bot, 1600, 900, 5, 5)
+        run(bot)
     finally:
         listener.stop()
 

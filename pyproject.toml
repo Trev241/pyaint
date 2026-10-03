@@ -42,6 +42,7 @@ dependencies = [
     "pyscreeze",
     "PyAutoGUI",
     "pynput",
+    "PySide6>=6.5",
 ]
 
 [project.optional-dependencies]

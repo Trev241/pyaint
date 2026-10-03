@@ -4,8 +4,6 @@ import time
 from pyaint import utils
 import json
 import os
-import threading
-import tkinter as tk
 
 from pyaint.errors import (
     NoCanvasError,
@@ -62,12 +60,11 @@ class Bot(CalibrationMixin, CacheMixin):
         # this object so other transports can be substituted later.
         self.painter = ScreenPainter(self)
 
-        # Progress Overlay state
-        self.progress_overlay = None
-        self.progress_overlay_enabled = True  # Always enabled by default
-        self.overlay_window = None
-        self.overlay_update_thread = None
-        self.overlay_stop_event = None
+        # Progress reporting. The UI assigns ``progress_callback``; it is
+        # invoked from the worker thread, so the UI must marshal it onto its
+        # own event loop (the Qt UI emits a signal from it).
+        self.progress_callback = None
+        self.progress_overlay_enabled = True
 
         pyautogui.PAUSE = 0.0
         pyautogui.MINIMUM_DURATION = 0.01
@@ -383,10 +380,7 @@ class Bot(CalibrationMixin, CacheMixin):
         else:
             log.info("[Calibration] No calibration data available")
 
-        # Create progress overlay window
-        self.create_progress_overlay()
-        if self.overlay_window:
-            self.update_progress_overlay(0, self.total_strokes, 0)
+        self._report_progress(0, self.total_strokes, 0)
 
         # Reset bot state for fresh drawing session
         self.terminate = False
@@ -472,9 +466,7 @@ class Bot(CalibrationMixin, CacheMixin):
                 log.info(f"Drawing stroke {line_idx + 1}/{len(lines)} for color {c} - {progress_percent:.1f}% complete")
                 log.info(f"Total progress: {self.completed_strokes}/{self.total_strokes} strokes - {time_remaining} remaining")
 
-                # Update overlay with progress and ETA
-                if self.overlay_window:
-                    self.update_progress_overlay(self.completed_strokes, self.total_strokes, estimated_remaining)
+                self._report_progress(self.completed_strokes, self.total_strokes, estimated_remaining)
 
                 # Check for large cursor jumps and add delay
                 start_pos = line[0]
@@ -504,7 +496,6 @@ class Bot(CalibrationMixin, CacheMixin):
                 if self.terminate:
                     pyautogui.mouseUp()
                     self.drawing = False  # Clear drawing flag on termination
-                    self.close_progress_overlay()  # Close overlay on termination
                     return 'terminated'
 
                 # Draw line with pause support (complete each stroke before checking pause)
@@ -520,7 +511,6 @@ class Bot(CalibrationMixin, CacheMixin):
                     self.draw_state['current_color'] = c  # Save current color
                     if self.terminate:
                         self.drawing = False  # Clear drawing flag on termination
-                        self.close_progress_overlay()  # Close overlay on termination
                         return 'terminated'
                     # Wait for resume
                     log.info("Paused after completing stroke - press resume to continue")
@@ -528,7 +518,6 @@ class Bot(CalibrationMixin, CacheMixin):
                         time.sleep(0.1)
                     if self.terminate:
                         self.drawing = False  # Clear drawing flag on termination
-                        self.close_progress_overlay()  # Close overlay on termination
                         return 'terminated'
                     # Resume - replay the current stroke to ensure clean result
                     log.info(f"Resuming - replaying current stroke for color {c}")
@@ -555,9 +544,6 @@ class Bot(CalibrationMixin, CacheMixin):
         log.info(f"Actual:   {actual_str}")
         log.info(f"{diff_str}")
         log.info("=" * 50)
-        
-        # Close progress overlay
-        self.close_progress_overlay()
         
         # Reset draw state on successful completion
         self.drawing = False  # Clear drawing flag
@@ -588,10 +574,7 @@ class Bot(CalibrationMixin, CacheMixin):
         else:
             log.info("[Calibration] No calibration data available")
 
-        # Create progress overlay window
-        self.create_progress_overlay()
-        if self.overlay_window:
-            self.update_progress_overlay(0, min(max_lines, sum(len(lines) for lines in cmap.values())), 0)
+        self._report_progress(0, min(max_lines, sum(len(lines) for lines in cmap.values())), 0)
 
         # Estimate time for the full cmap (not just test lines)
         self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
@@ -621,15 +604,12 @@ class Bot(CalibrationMixin, CacheMixin):
                 lines_drawn += 1
                 log.info(f"Drawing test line {lines_drawn}/{max_lines} for color {c}")
 
-                # Update overlay progress
-                if self.overlay_window:
-                    self.update_progress_overlay(lines_drawn, max_lines, 0)
+                self._report_progress(lines_drawn, max_lines, 0)
 
                 # Check for pause/terminate
                 if self.terminate:
                     pyautogui.mouseUp()
                     self.drawing = False  # Clear drawing flag on termination
-                    self.close_progress_overlay()  # Close overlay on termination
                     return 'terminated'
 
                 # Draw the line (simplified, no segmentation for test draw)
@@ -653,9 +633,6 @@ class Bot(CalibrationMixin, CacheMixin):
         log.info(f"Actual (test):   {actual_str}")
         log.info(f"{diff_str}")
         log.info("=" * 50)
-        
-        # Close progress overlay
-        self.close_progress_overlay()
         
         self.drawing = False  # Clear drawing flag
         return 'success'
@@ -791,124 +768,19 @@ class Bot(CalibrationMixin, CacheMixin):
         self.drawing = False
         return 'success'
 
-    def create_progress_overlay(self):
-        '''
-        Create and show an always-on-top progress overlay window.
-        The window displays current drawing progress and ETA.
-        '''
+    def _report_progress(self, completed, total, eta_seconds):
+        """Report drawing progress to the UI, if one has attached a callback.
+
+        Called from the drawing worker thread. The callback must not touch UI
+        objects directly; the Qt UI connects it to a signal so the update is
+        queued onto the main thread.
+        """
         if not self.progress_overlay_enabled:
-            return None
-
-        try:
-            # Create the overlay window
-            self.overlay_window = tk.Toplevel()
-            self.overlay_window.title("pyaint Progress")
-
-            # Set window to always on top and remove decorations
-            self.overlay_window.attributes("-topmost", True)
-            self.overlay_window.overrideredirect(True)
-
-            # Set window size and position (top center of screen)
-            window_width = 240
-            window_height = 20
-            screen_width = self.overlay_window.winfo_screenwidth()
-            x_position = (screen_width - window_width) // 2
-            y_position = 10
-
-            self.overlay_window.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
-
-            # Create a dark background frame with border
-            border_frame = tk.Frame(
-                self.overlay_window,
-                bg="#4a4a4a",
-                width=window_width,
-                height=window_height
-            )
-            border_frame.pack(fill=tk.BOTH, expand=True)
-
-            # Inner frame for content
-            self.overlay_frame = tk.Frame(
-                border_frame,
-                bg="#2c2c2c",
-                width=window_width - 2,
-                height=window_height - 2
-            )
-            self.overlay_frame.place(x=1, y=1, width=window_width - 2, height=window_height - 2)
-
-            # Create centered label for progress text
-            self.overlay_label = tk.Label(
-                self.overlay_frame,
-                text="Initializing...",
-                bg="#2c2c2c",
-                fg="#00ff00",  # Green text for progress
-                font=("Arial", 9, "bold"),
-                relief=tk.FLAT
-            )
-            self.overlay_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
-
-            # Create stop event for thread
-            self.overlay_stop_event = threading.Event()
-
-            # Keep window responsive
-            self.overlay_window.update()
-
-            log.info("[ProgressOverlay] Overlay window created")
-            return self.overlay_window
-
-        except Exception as e:
-            log.info(f"[ProgressOverlay] Error creating overlay: {e}")
-            return None
-
-    def update_progress_overlay(self, completed, total, eta_seconds):
-        '''
-        Update the progress overlay with current progress and ETA.
-        '''
-        if self.overlay_window is None or self.overlay_label is None or not self.progress_overlay_enabled:
             return
-
+        callback = getattr(self, "progress_callback", None)
+        if callback is None:
+            return
         try:
-            # Format ETA string
-            if eta_seconds < 60:
-                eta_str = f"{eta_seconds:.0f}s"
-            elif eta_seconds < 3600:
-                minutes = int(eta_seconds // 60)
-                seconds = int(eta_seconds % 60)
-                eta_str = f"{minutes}:{seconds:02d}"
-            else:
-                hours = int(eta_seconds // 3600)
-                minutes = int((eta_seconds % 3600) // 60)
-                eta_str = f"{hours}:{minutes:02d}h"
-
-            # Create progress text
-            progress_text = f"{completed}/{total} Strokes (ETA: {eta_str})"
-
-            # Update label
-            self.overlay_label.config(text=progress_text)
-            self.overlay_window.update()
-
-        except Exception as e:
-            log.info(f"[ProgressOverlay] Error updating overlay: {e}")
-
-    def close_progress_overlay(self):
-        '''
-        Close the progress overlay window and cleanup resources.
-        '''
-        if self.overlay_window is not None:
-            try:
-                # Stop any running threads
-                if self.overlay_stop_event:
-                    self.overlay_stop_event.set()
-
-                # Close the window
-                self.overlay_window.destroy()
-                self.overlay_window = None
-                self.overlay_label = None
-                self.overlay_frame = None
-                log.info("[ProgressOverlay] Overlay window closed")
-            except Exception as e:
-                log.info(f"[ProgressOverlay] Error closing overlay: {e}")
-                # Force cleanup
-                self.overlay_window = None
-                self.overlay_label = None
-                self.overlay_frame = None
-
+            callback(completed, total, eta_seconds)
+        except Exception as e:  # never let progress reporting break a draw
+            log.info(f"[Progress] callback error: {e}")

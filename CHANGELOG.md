@@ -13,6 +13,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **PySide6 desktop UI (VS Code-inspired):** replaced the Tk interface with a
+  Qt UI. New modules under `pyaint/ui/`: `main_window.py` (activity rail,
+  sidebar panels, toolbar, status/progress), `setup_dialog.py` (manual tool
+  teaching), `capture.py` (cross-platform click-capture overlay), `theme.py`
+  (VS Code "Dark Modern" tokens + stylesheet), `icons.py` (QPainter icons),
+  and `widgets.py` (reusable controls). Added `tests/test_ui_smoke.py`.
 - **Phase 4 — distribution:**
   - `pyaint.spec` + `scripts/build_exe.py`: a PyInstaller build producing a
     standalone `dist/pyaint.exe` (user data stored next to the executable).
@@ -112,6 +118,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   notes) and this `CHANGELOG.md`.
 
 ### Changed
+- **PySide6 UI:**
+  - `pyaint/bot.py` no longer imports `tkinter` or creates/manages progress
+    overlays. It reports progress through `progress_callback`, removing the
+    worker-thread Tk access that was a latent GUI-crash source.
+  - `pyaint/__main__.py` now launches the PySide6 window; `PySide6>=6.5` was
+    added to the dependencies.
+  - User docs describe the Qt UI and its module layout.
 - **Phase 4 — distribution & docs:**
   - Rewrote `README.md` as a front door: demo videos, supported-apps table,
     pip/source quick starts, a skribbl-focused 60-second quickstart, FAQ, and
@@ -182,6 +195,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ### Removed
 - Duplicated per-pixel run-length/layering logic between `process()` and
   `process_region()` (now shared).
+- The Tk UI (`pyaint/ui/window.py`, `pyaint/ui/setup.py`) is superseded and no
+  longer launched. The files are retained for reference until the remaining
+  features reach parity.
 
 ## [0.0.0] - 2026-01-17
 

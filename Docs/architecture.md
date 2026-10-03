@@ -168,14 +168,21 @@ failure is silent so the UI can fall back to manual teaching.
 
 ## UI and threading
 
-`Window` is a Tk application. `@is_free` gates actions on `self.busy`, and
-long-running work (precompute, test draw, calibration, draw, region redraw) runs
-on `Thread`s polled with `self._root.after(...)`.
+The UI is built with **PySide6** (`pyaint/ui/`). `MainWindow` is a VS Code-style
+shell: an activity rail selects a sidebar panel (Draw / Image / Settings), the
+content area shows the image preview, and the status bar shows progress. Theme
+tokens live in `theme.py` (VS Code "Dark Modern"), and icons are drawn in
+`icons.py` so no image assets are shipped.
 
-**Known limitation:** `Bot.draw()` creates and updates a Tk progress overlay
-from a worker thread. Tk is not thread-safe, so this is a latent source of GUI
-flakiness. The fix is to have `Window` own the overlay and have `Bot` report
-progress via a callback.
+Long-running work (precompute, test draw, calibration, draw, region redraw) runs
+on daemon `threading.Thread`s. `Bot` reports progress through
+`progress_callback`, which the window connects to a Qt signal; Qt then queues
+the update onto the main thread. This keeps all widget access on the UI thread
+(the historical Tk overlay was updated from a worker thread and could be flaky).
+
+Manual teaching ("click the palette corners") uses a translucent, always-on-top
+`QDialog` that records global clicks (`capture.py`), so it is cross-platform and
+does not depend on `pynput`.
 
 ## Runtime paths
 
