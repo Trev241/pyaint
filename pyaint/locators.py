@@ -441,9 +441,74 @@ _COLOR_RECT_KEYS = {"tolerance", "min_fraction", "max_fraction", "min_rectangula
 _COLOR_GRID_KEYS = {"min_saturation", "min_fraction", "max_fraction", "gap", "max_dim"}
 _COLOR_SIGNATURE_KEYS = {"tolerance", "gap", "max_dim", "min_colors", "min_fill"}
 
+LocatorHandler = Callable[
+    [Image.Image, Any, Dict[str, Any], Optional["WindowProvider"]],
+    Tuple[Optional[Rect], Optional[int], Optional[int]],
+]
 
-def _filtered(params: Dict[str, Any], allowed: set) -> Dict[str, Any]:
-    return {k: v for k, v in params.items() if k in allowed}
+# Registered locator types: name -> (handler, allowed params).
+_LOCATORS: Dict[str, Tuple[LocatorHandler, set]] = {}
+
+
+def register_locator(name: str, allowed_params):
+    """Register a locator type usable as ``{"type": name, ...}`` in a recipe."""
+
+    def decorator(func: LocatorHandler) -> LocatorHandler:
+        _LOCATORS[name] = (func, set(allowed_params))
+        return func
+
+    return decorator
+
+
+def available_locators() -> List[str]:
+    """Names of every registered locator type."""
+    return list(_LOCATORS)
+
+
+def locator_params(name: str) -> Optional[set]:
+    """Allowed parameter names for a locator type, or ``None`` if unknown."""
+    entry = _LOCATORS.get(name)
+    return set(entry[1]) if entry else None
+
+
+@register_locator("white_rect", _WHITE_RECT_KEYS)
+def _locate_white_rect(image, recipe, params, provider):
+    return find_white_rect(image, **params), None, None
+
+
+@register_locator("color_rect", _COLOR_RECT_KEYS | {"color"})
+def _locate_color_rect(image, recipe, params, provider):
+    color = params.pop("color", None)
+    if not color:
+        return None, None, None
+    return find_color_rect(image, color, **params), None, None
+
+
+@register_locator("color_grid", _COLOR_GRID_KEYS)
+def _locate_color_grid(image, recipe, params, provider):
+    result = find_color_grid(image, **params)
+    return result if result else (None, None, None)
+
+
+@register_locator("color_signature", _COLOR_SIGNATURE_KEYS | {"colors", "rows", "cols"})
+def _locate_color_signature(image, recipe, params, provider):
+    colors = params.pop("colors", None) or getattr(recipe, "palette", None)
+    rows, cols = params.pop("rows", None), params.pop("cols", None)
+    if not colors:
+        return None, None, None
+    return find_color_signature(image, colors, **params), rows, cols
+
+
+@register_locator("window_relative", {"window", "rect", "rows", "cols"})
+def _locate_window_relative(image, recipe, params, provider):
+    normalized = params.get("rect")
+    if not normalized or len(normalized) != 4:
+        return None, None, None
+    provider_fn = provider or get_window_rect
+    window = provider_fn(params.get("window", ""))
+    if not window:
+        return None, None, None
+    return window_relative_rect(window, normalized), params.get("rows"), params.get("cols")
 
 
 def _run_spec(
@@ -452,44 +517,17 @@ def _run_spec(
     recipe: Any,
     window_provider: Optional[WindowProvider],
 ) -> Tuple[Optional[Rect], Optional[int], Optional[int]]:
-    kind = spec.get("type")
-    params = {k: v for k, v in spec.items() if k != "type"}
-
-    if kind == "white_rect":
-        return find_white_rect(image, **_filtered(params, _WHITE_RECT_KEYS)), None, None
-
-    if kind == "color_rect":
-        color = params.get("color")
-        if not color:
-            return None, None, None
-        return find_color_rect(image, color, **_filtered(params, _COLOR_RECT_KEYS)), None, None
-
-    if kind == "color_grid":
-        result = find_color_grid(image, **_filtered(params, _COLOR_GRID_KEYS))
-        return result if result else (None, None, None)
-
-    if kind == "color_signature":
-        colors = params.get("colors") or getattr(recipe, "palette", None)
-        rows, cols = params.get("rows"), params.get("cols")
-        if not colors:
-            return None, None, None
-        rect = find_color_signature(
-            image, colors, **_filtered(params, _COLOR_SIGNATURE_KEYS)
-        )
-        return rect, rows, cols
-
-    if kind == "window_relative":
-        title = params.get("window", "")
-        normalized = params.get("rect")
-        if not normalized or len(normalized) != 4:
-            return None, None, None
-        provider = window_provider or get_window_rect
-        window = provider(title)
-        if not window:
-            return None, None, None
-        return window_relative_rect(window, normalized), params.get("rows"), params.get("cols")
-
-    return None, None, None
+    if not isinstance(spec, dict):
+        return None, None, None
+    entry = _LOCATORS.get(spec.get("type"))
+    if entry is None:
+        return None, None, None
+    handler, allowed = entry
+    params = {k: v for k, v in spec.items() if k in allowed}
+    try:
+        return handler(image, recipe, params, window_provider)
+    except TypeError:
+        return None, None, None
 
 
 def _run_chain(

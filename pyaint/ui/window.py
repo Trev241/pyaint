@@ -18,6 +18,7 @@ from pyaint.targets import (
     merge_drawing_options,
     merge_drawing_settings,
 )
+from pyaint.validation import validate_recipe
 from pyaint.locators import detect_target
 from pyaint.ui.setup import SetupWindow
 from tkinter import filedialog
@@ -194,8 +195,12 @@ class Window:
         Label(self._cframe, text='Target App', font=Window.TITLE_FONT).grid(
             column=0, row=curr_row, columnspan=2, sticky='w', padx=5, pady=5)
         # Load any user/community recipes from targets/ and ~/.pyaint/targets
-        # before building the list (they may override built-ins).
-        load_user_recipes()
+        # before building the list (they may override built-ins); report any
+        # that fail the static self-test.
+        for recipe in load_user_recipes():
+            issues = validate_recipe(recipe)
+            if issues:
+                log.info(f"[Recipes] '{recipe.id}' has issues: {issues}")
         self._recipes = list_recipes()
         self._recipes_by_name = {r.name: r for r in self._recipes}
         self._target_var = StringVar()

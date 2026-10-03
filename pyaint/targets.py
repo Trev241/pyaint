@@ -24,6 +24,9 @@ from pyaint.profile import AUTO, TOOL_KEYS, VALID_COLOR_SELECTION
 
 DEFAULT_RECIPE_ID = "generic"
 
+# Bump when the recipe schema changes in a backwards-incompatible way.
+CURRENT_RECIPE_SCHEMA = 1
+
 # The two tools every target needs; used as a safe fallback.
 _MINIMUM_TOOLS: Tuple[str, ...] = ("Palette", "Canvas")
 
@@ -52,6 +55,12 @@ class Recipe:
     # Locator specs used for auto-detection (see ``pyaint.locators``).
     detection: Dict[str, Any] = field(default_factory=dict)
     notes: str = ""
+    # Schema version (for forward compatibility).
+    schema_version: int = CURRENT_RECIPE_SCHEMA
+    # Hidden recipes are infrastructure (bases) and are not shown in the UI.
+    hidden: bool = False
+    # Optional parent recipe id; the registry deep-merges parent then child.
+    extends: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Serialization / validation
@@ -86,6 +95,9 @@ class Recipe:
             palette=palette,
             detection=copy.deepcopy(dict(data.get("detection") or {})),
             notes=str(data.get("notes", "")),
+            schema_version=int(data.get("schema_version", CURRENT_RECIPE_SCHEMA)),
+            hidden=bool(data.get("hidden", False)),
+            extends=data.get("extends"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -104,6 +116,9 @@ class Recipe:
             "palette": [list(c) for c in self.palette] if self.palette else None,
             "detection": copy.deepcopy(self.detection),
             "notes": self.notes,
+            "schema_version": self.schema_version,
+            "hidden": self.hidden,
+            "extends": self.extends,
         }
 
 
@@ -181,10 +196,46 @@ SKRIBBL_PALETTE = [
 ]
 
 
+def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str, Any]:
+    """Recursively merge ``override`` into a copy of ``base`` (dicts only)."""
+    result: Dict[str, Any] = dict(base)
+    for key, value in override.items():
+        if isinstance(value, Mapping) and isinstance(result.get(key), Mapping):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Built-in recipes
 # ---------------------------------------------------------------------------
 _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
+    # Hidden base recipes (not shown in the UI; used via "extends").
+    {
+        "id": "desktop-base",
+        "name": "Desktop app (base)",
+        "hidden": True,
+        "tools": [
+            "Palette", "Canvas", "Custom Colors",
+            "New Layer", "Color Button", "Color Button Okay",
+        ],
+        "color_selection": AUTO,
+        "supports_custom_colors": True,
+        "supports_layers": True,
+        "supports_mspaint_mode": True,
+    },
+    {
+        "id": "browser-base",
+        "name": "Browser canvas (base)",
+        "hidden": True,
+        "tools": ["Palette", "Canvas"],
+        "color_selection": "palette",
+        "supports_custom_colors": False,
+        "supports_layers": False,
+        "supports_mspaint_mode": False,
+        "drawing_options": {"ignore_white_pixels": True, "use_custom_colors": False},
+    },
     {
         "id": "generic",
         "name": "Generic / other app",
@@ -199,12 +250,11 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
     {
         "id": "mspaint",
         "name": "MS Paint",
+        "extends": "desktop-base",
         "description": "Classic sampled-palette workflow; optional double-click mode.",
+        # Classic Paint has no layers; override the desktop base's tool list.
         "tools": ["Palette", "Canvas", "Custom Colors", "Color Button", "Color Button Okay"],
-        "color_selection": AUTO,
-        "supports_custom_colors": True,
         "supports_layers": False,
-        "supports_mspaint_mode": True,
         "drawing_settings": {
             "delay": 0.05,
             "pixel_size": 8,
@@ -213,18 +263,20 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
             "jump_threshold": 5,
         },
         "drawing_options": {"ignore_white_pixels": True, "use_custom_colors": False},
-        "detection": {"canvas": {"type": "white_rect"}},
+        # Best-effort: canvas is a white rectangle; palette is a swatch grid.
+        # Needs a real-app screenshot to tune (see HANDOFF).
+        "detection": {
+            "canvas": {"type": "white_rect"},
+            "palette": {"type": "color_grid"},
+        },
         "notes": "Sampled palette. Enable MSPaint Mode if the app needs double-clicks to pick colours.",
     },
     {
         "id": "gimp",
         "name": "GIMP",
+        "extends": "desktop-base",
         "description": "Layer-based editor using its colour dialog.",
-        "tools": ["Palette", "Canvas", "Custom Colors", "New Layer", "Color Button", "Color Button Okay"],
         "color_selection": "custom",
-        "supports_custom_colors": True,
-        "supports_layers": True,
-        "supports_mspaint_mode": False,
         "drawing_settings": {
             "delay": 0.05,
             "pixel_size": 6,
@@ -238,12 +290,8 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
     {
         "id": "skribbl",
         "name": "skribbl.io",
+        "extends": "browser-base",
         "description": "Browser drawing game with a fixed on-screen palette.",
-        "tools": ["Palette", "Canvas"],
-        "color_selection": "palette",
-        "supports_custom_colors": False,
-        "supports_layers": False,
-        "supports_mspaint_mode": False,
         "drawing_settings": {
             "delay": 0.03,
             "pixel_size": 8,
@@ -251,10 +299,7 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
             "jump_delay": 0.2,
             "jump_threshold": 5,
         },
-        "drawing_options": {"ignore_white_pixels": True, "use_custom_colors": False},
         "skip_first_color": False,
-        # Phase 2 will populate/verify the fixed palette via colour-signature
-        # detection; until then the palette is sampled from the screen.
         "palette": None,
         "detection": {
             "canvas": [
@@ -295,6 +340,21 @@ class RecipeRegistry:
             raise ValueError(f"recipe already registered: {recipe.id}")
         self._recipes[recipe.id] = recipe
 
+    def add_from_dict(self, data: Mapping[str, Any], replace: bool = True) -> Recipe:
+        """Build a recipe, resolving ``extends`` against already-registered ones."""
+        parent_id = data.get("extends")
+        parent = self._recipes.get(parent_id) if parent_id else None
+        merged = copy.deepcopy(parent.to_dict()) if parent else {}
+        merged = _deep_merge(merged, {k: v for k, v in data.items() if k != "extends"})
+        # ``hidden`` and ``extends`` describe the child, not the parent, so do
+        # not inherit them from a hidden base.
+        merged["hidden"] = bool(data.get("hidden", False))
+        if parent_id:
+            merged["extends"] = parent_id
+        recipe = Recipe.from_dict(merged)
+        self.register(recipe, replace=replace)
+        return recipe
+
     def get(self, recipe_id: str) -> Optional[Recipe]:
         return self._recipes.get(recipe_id)
 
@@ -302,8 +362,11 @@ class RecipeRegistry:
         """Return the named recipe, falling back to the default."""
         return self.get(recipe_id) or self._recipes[DEFAULT_RECIPE_ID]
 
-    def all(self) -> List[Recipe]:
-        return list(self._recipes.values())
+    def all(self, include_hidden: bool = False) -> List[Recipe]:
+        recipes = list(self._recipes.values())
+        if include_hidden:
+            return recipes
+        return [r for r in recipes if not r.hidden]
 
     def ids(self) -> List[str]:
         return list(self._recipes.keys())
@@ -314,19 +377,22 @@ class RecipeRegistry:
         for filepath in sorted(glob.glob(os.path.join(path, "*.json"))):
             try:
                 with open(filepath, "r", encoding="utf-8") as handle:
-                    recipe = Recipe.from_dict(json.load(handle))
+                    data = json.load(handle)
+                loaded.append(self.add_from_dict(data))
             except Exception:
                 continue
-            self.register(recipe, replace=True)
-            loaded.append(recipe)
         return loaded
 
 
-BUILTIN_RECIPES: Tuple[Recipe, ...] = tuple(
-    Recipe.from_dict(data) for data in _BUILTIN_DATA
-)
+def _build_builtins() -> "RecipeRegistry":
+    registry = RecipeRegistry()
+    for data in _BUILTIN_DATA:
+        registry.add_from_dict(data)
+    return registry
 
-REGISTRY = RecipeRegistry(BUILTIN_RECIPES)
+
+REGISTRY = _build_builtins()
+BUILTIN_RECIPES: Tuple[Recipe, ...] = tuple(REGISTRY.all(include_hidden=True))
 
 
 def list_recipes() -> List[Recipe]:

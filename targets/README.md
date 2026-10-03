@@ -14,6 +14,9 @@ use, and how to auto-detect the canvas/palette.
 | `id` | Unique identifier (required) |
 | `name` | Display name in the dropdown |
 | `description` | Short description |
+| `extends` | Optional parent `id`; parent fields are deep-merged then overridden by this recipe |
+| `hidden` | If true the recipe is infrastructure (a base) and is not shown in the dropdown |
+| `schema_version` | Recipe schema version (current: 1) |
 | `tools` | Which taught tools Setup should show, from: `Palette`, `Canvas`, `Custom Colors`, `New Layer`, `Color Button`, `Color Button Okay`, `color_preview_spot` |
 | `color_selection` | `auto`, `palette`, or `custom` |
 | `supports_custom_colors` / `supports_layers` / `supports_mspaint_mode` | Capability flags |
@@ -23,6 +26,9 @@ use, and how to auto-detect the canvas/palette.
 | `palette` | Optional fixed `[[r,g,b], ...]` list (used to *locate* a palette via `color_signature`) |
 | `detection` | Auto-detection specs (see below) |
 | `notes` | Help text |
+
+Recipes are checked by a static self-test on load; problems (unknown locator
+type/params, bad colour, new schema) are printed to the console.
 
 ## Locator types (`detection.canvas` / `detection.palette`)
 
@@ -39,6 +45,23 @@ tried until one succeeds).
 
 `color_signature` and `window_relative` return `rows`/`cols` from the spec, so
 include them when detecting a palette.
+
+## Inheritance
+
+A recipe can extend another (including the built-in hidden bases
+`desktop-base` and `browser-base`). For example:
+
+```json
+{
+  "id": "my-paint",
+  "name": "My Paint",
+  "extends": "desktop-base",
+  "drawing_settings": { "pixel_size": 6 }
+}
+```
+
+Dict fields (`drawing_settings`, `drawing_options`, `detection`) are deep-merged,
+so the child only specifies what it changes.
 
 ## Example
 

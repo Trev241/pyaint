@@ -45,6 +45,15 @@ def test_get_recipe_falls_back_to_generic():
     assert DEFAULT_RECIPE_ID in get_recipe("nonsense").id
 
 
+def test_available_locators_registry():
+    from pyaint.locators import available_locators, locator_params
+
+    names = available_locators()
+    assert {"white_rect", "color_rect", "color_grid", "color_signature", "window_relative"} <= set(names)
+    assert "color" in locator_params("color_rect")
+    assert locator_params("does-not-exist") is None
+
+
 # ---------------------------------------------------------------------------
 # Recipe serialization / validation
 # ---------------------------------------------------------------------------
@@ -143,6 +152,64 @@ def test_load_user_recipes_registers_recipe(tmp_path):
 
 def test_load_user_recipes_ignores_missing_dir():
     assert load_user_recipes(["/definitely/not/a/real/dir"]) == []
+
+
+# ---------------------------------------------------------------------------
+# Inheritance / hidden base recipes
+# ---------------------------------------------------------------------------
+def test_registry_resolves_extends_with_deep_merge():
+    registry = RecipeRegistry()
+    registry.add_from_dict(
+        {
+            "id": "base",
+            "name": "Base",
+            "tools": ["Palette", "Canvas"],
+            "drawing_settings": {"delay": 0.1, "pixel_size": 4},
+            "drawing_options": {"ignore_white_pixels": True},
+        }
+    )
+    child = registry.add_from_dict(
+        {
+            "id": "child",
+            "name": "Child",
+            "extends": "base",
+            "drawing_settings": {"pixel_size": 9},
+        }
+    )
+    assert child.tools == ("Palette", "Canvas")
+    assert child.drawing_settings == {"delay": 0.1, "pixel_size": 9}
+    assert child.drawing_options == {"ignore_white_pixels": True}
+    assert child.extends == "base"
+
+
+def test_add_from_dict_does_not_inherit_hidden():
+    registry = RecipeRegistry()
+    registry.add_from_dict(
+        {"id": "base", "name": "Base", "hidden": True, "tools": ["Palette", "Canvas"]}
+    )
+    child = registry.add_from_dict({"id": "child", "name": "Child", "extends": "base"})
+    assert child.hidden is False
+
+
+def test_hidden_recipes_resolvable_but_not_listed():
+    listed = {r.id for r in list_recipes()}
+    assert "desktop-base" not in listed and "browser-base" not in listed
+    assert get_recipe("desktop-base").hidden is True
+
+
+def test_builtin_children_inherit_from_base():
+    mspaint = get_recipe("mspaint")
+    assert set(mspaint.tools) == {
+        "Palette", "Canvas", "Custom Colors", "Color Button", "Color Button Okay",
+    }
+    assert mspaint.supports_layers is False  # overridden
+    assert mspaint.supports_mspaint_mode is True  # inherited
+    assert mspaint.supports_custom_colors is True  # inherited
+
+    skribbl = get_recipe("skribbl")
+    assert skribbl.tools == ("Palette", "Canvas")
+    assert skribbl.color_selection == "palette"
+    assert skribbl.drawing_options["ignore_white_pixels"] is True
 
 
 # ---------------------------------------------------------------------------

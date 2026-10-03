@@ -73,6 +73,21 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 - `utils.format_duration`, `utils.format_estimate` and
   `utils.estimate_drawing_seconds`: drawing-time helpers extracted from `Bot`
   (which now delegates), covered by `tests/test_timing.py`.
+- **Phase 3 — multi-app via recipes:**
+  - Locator registry: `register_locator` / `available_locators` /
+    `locator_params` in `pyaint/locators.py`; new locator types are additive and
+    no longer require editing dispatch code.
+  - Recipe `schema_version`, `extends` inheritance (deep-merged via
+    `RecipeRegistry.add_from_dict`) and hidden base recipes (`desktop-base`,
+    `browser-base`). Hidden recipes resolve for `extends` but are not shown in
+    the dropdown.
+  - `pyaint/validation.py`: `validate_recipe` / `recipe_is_valid` static
+    self-tests (schema version, tools, colour strategy, settings/options keys,
+    palette colours, and locator type/params). Built-ins are validated by the
+    test suite; user recipes are validated (and logged) on load.
+  - MS Paint recipe gains best-effort palette detection (`color_grid`); GIMP
+    uses the colour-dialog (`custom`) path. `tests/test_validation.py` plus
+    inheritance/locator-registry tests.
 - Recipe `detection` specs: skribbl auto-detects its canvas (white 800x600 / 4:3,
   with a `color_rect` fallback that is also aspect-checked) and its exact 2x13
   palette (26 sampled colours, `gap: 0`); MS Paint auto-detects its canvas.

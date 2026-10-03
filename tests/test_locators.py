@@ -250,6 +250,23 @@ def test_detect_target_window_relative_uses_provider():
     assert detection.canvas == (120, 110, 160, 80)
 
 
+def test_register_locator_adds_detection_type():
+    from pyaint import locators
+
+    def handler(image, recipe, params, provider):
+        return (1, 2, 3, 4), None, None
+
+    locators.register_locator("fixed-test-rect", set())(handler)
+    try:
+        recipe = Recipe(
+            id="x", name="X", detection={"canvas": {"type": "fixed-test-rect"}}
+        )
+        detection = detect_target(recipe, Image.new("RGB", (10, 10)))
+        assert detection.canvas == (1, 2, 3, 4)
+    finally:
+        locators._LOCATORS.pop("fixed-test-rect", None)
+
+
 # ---------------------------------------------------------------------------
 # Bot integration
 # ---------------------------------------------------------------------------
