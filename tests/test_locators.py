@@ -137,6 +137,40 @@ def test_find_color_signature_prefers_multicolour_region():
     assert rect is not None and rect[0] >= 190
 
 
+def _sparse_colour_frame(size=(400, 200), box=(10, 10, 310, 120)):
+    red, green, blue = (255, 0, 0), (0, 255, 0), (0, 0, 255)
+    img = Image.new("RGB", size, (0, 0, 0))
+    x0, y0, x1, y1 = box
+    for x in range(x0, x1 + 1):
+        for t in range(2):
+            img.putpixel((x, y0 + t), red)
+            img.putpixel((x, y1 - t), blue)
+    for y in range(y0, y1 + 1):
+        for t in range(2):
+            img.putpixel((x0 + t, y), red)
+            img.putpixel((x1 - t, y), green)
+    return img
+
+
+def test_find_color_signature_prefers_dense_over_sparse_same_colours():
+    red, green, blue = (255, 0, 0), (0, 255, 0), (0, 0, 255)
+    img = _sparse_colour_frame()
+    # A dense block with the same three colours.
+    for i, c in enumerate((red, green, blue)):
+        for y in range(60 + i * 10, 70 + i * 10):
+            for x in range(340, 380):
+                img.putpixel((x, y), c)
+    rect = find_color_signature(img, [red, green, blue], tolerance=10, gap=0)
+    assert rect is not None and 340 <= rect[0] <= 360
+
+
+def test_find_color_signature_min_fill_skips_sparse():
+    colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
+    img = _sparse_colour_frame()
+    assert find_color_signature(img, colors, tolerance=10, gap=0) is not None
+    assert find_color_signature(img, colors, tolerance=10, gap=0, min_fill=0.5) is None
+
+
 # ---------------------------------------------------------------------------
 # Colour rectangle (canvas of a known colour)
 # ---------------------------------------------------------------------------

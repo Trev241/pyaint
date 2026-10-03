@@ -43,9 +43,14 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   orchestration. Detection specs may be a single locator or an ordered **chain**
   (tried until one succeeds), and rectangle locators accept an optional
   `aspect`/`aspect_tolerance` filter. `color_signature` picks the blob covering
-  the most *distinct* target colours, so a multi-colour palette is chosen over
-  large single-colour UI panels. Pure over a PIL image, so it is testable
-  headless.
+  the most *distinct* target colours (tie-broken by how densely it fills its
+  bbox, with an optional `min_fill`), so a solid multi-colour palette is chosen
+  over large single-colour panels and sparse colourful text. Pure over a PIL
+  image, so it is testable headless.
+- External recipe loading: `pyaint_targets.load_user_recipes()` scans
+  `<repo>/targets` and `~/.pyaint/targets` (invalid files skipped); the main
+  window loads them at startup so a target can be added with data only. See
+  `targets/README.md`.
 - Recipe `detection` specs: skribbl auto-detects its canvas (white 800x600 / 4:3,
   with a `color_rect` fallback that is also aspect-checked) and its exact 2x13
   palette (26 sampled colours, `gap: 0`); MS Paint auto-detects its canvas.

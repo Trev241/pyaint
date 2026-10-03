@@ -238,6 +238,7 @@ def find_color_signature(
     gap: int = 3,
     max_dim: int = _MAX_DIM,
     min_colors: int = 1,
+    min_fill: float = 0.0,
 ) -> Optional[Rect]:
     """Find the region containing the most *distinct* target colours.
 
@@ -283,14 +284,25 @@ def find_color_signature(
     best_bbox = None
     for area, (x0, y0, x1, y1) in components:
         cover = 0
+        matched_count = 0
         for y in range(y0, y1 + 1):
             row_bits = matched[y]
             for x in range(x0, x1 + 1):
-                cover |= row_bits[x]
+                bits = row_bits[x]
+                if bits:
+                    cover |= bits
+                    matched_count += 1
         distinct = bin(cover).count("1")
         if distinct < min_colors:
             continue
-        key = (distinct, x1 - x0 + 1, area)
+        bbox_area = (x1 - x0 + 1) * (y1 - y0 + 1)
+        fill = matched_count / bbox_area if bbox_area else 0.0
+        if fill < min_fill:
+            continue
+        # Prefer blobs covering the most distinct colours; break ties by how
+        # densely they fill their bounding box. A palette is a solid block;
+        # sparse colourful text (e.g. a rainbow logo) is not, so it loses.
+        key = (distinct, round(fill, 3), x1 - x0 + 1, area)
         if best_key is None or key > best_key:
             best_key = key
             best_bbox = (x0, y0, x1, y1)
@@ -427,7 +439,7 @@ class Detection:
 _WHITE_RECT_KEYS = {"threshold", "min_fraction", "max_fraction", "min_rectangularity", "max_dim", "aspect", "aspect_tolerance"}
 _COLOR_RECT_KEYS = {"tolerance", "min_fraction", "max_fraction", "min_rectangularity", "max_dim", "aspect", "aspect_tolerance"}
 _COLOR_GRID_KEYS = {"min_saturation", "min_fraction", "max_fraction", "gap", "max_dim"}
-_COLOR_SIGNATURE_KEYS = {"tolerance", "gap", "max_dim", "min_colors"}
+_COLOR_SIGNATURE_KEYS = {"tolerance", "gap", "max_dim", "min_colors", "min_fill"}
 
 
 def _filtered(params: Dict[str, Any], allowed: set) -> Dict[str, Any]:

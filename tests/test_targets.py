@@ -10,6 +10,7 @@ from pyaint_targets import (
     RecipeRegistry,
     get_recipe,
     list_recipes,
+    load_user_recipes,
 )
 import pytest
 
@@ -85,6 +86,22 @@ def test_registry_load_dir_skips_invalid(tmp_path):
     (tmp_path / "broken.json").write_text("{not json", encoding="utf-8")
     registry = RecipeRegistry()
     assert registry.load_dir(str(tmp_path)) == []
+
+
+def test_load_user_recipes_registers_recipe(tmp_path):
+    payload = {
+        "id": "community-test",
+        "name": "Community Test",
+        "tools": ["Palette", "Canvas"],
+    }
+    (tmp_path / "community.json").write_text(json.dumps(payload), encoding="utf-8")
+    loaded = load_user_recipes([str(tmp_path)])
+    assert [r.id for r in loaded] == ["community-test"]
+    assert get_recipe("community-test").name == "Community Test"
+
+
+def test_load_user_recipes_ignores_missing_dir():
+    assert load_user_recipes(["/definitely/not/a/real/dir"]) == []
 
 
 # ---------------------------------------------------------------------------

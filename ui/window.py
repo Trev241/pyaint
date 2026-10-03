@@ -8,7 +8,7 @@ import urllib.error as urllib_error
 import utils
 
 from pyaint_profile import Profile, ENV_CONFIG_KEYS
-from pyaint_targets import get_recipe, list_recipes
+from pyaint_targets import get_recipe, list_recipes, load_user_recipes
 from pyaint_locators import detect_target
 from ui.setup import SetupWindow
 from tkinter import filedialog
@@ -185,6 +185,9 @@ class Window:
         # limits which tools Setup asks for.
         Label(self._cframe, text='Target App', font=Window.TITLE_FONT).grid(
             column=0, row=curr_row, columnspan=2, sticky='w', padx=5, pady=5)
+        # Load any user/community recipes from targets/ and ~/.pyaint/targets
+        # before building the list (they may override built-ins).
+        load_user_recipes()
         self._recipes = list_recipes()
         self._recipes_by_name = {r.name: r for r in self._recipes}
         self._target_var = StringVar()

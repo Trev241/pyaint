@@ -275,3 +275,25 @@ def list_recipes() -> List[Recipe]:
 
 def get_recipe(recipe_id: str) -> Recipe:
     return REGISTRY.require(recipe_id)
+
+
+def default_recipe_dirs() -> List[str]:
+    """Directories scanned for user-supplied recipes."""
+    repo_targets = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "targets"
+    )
+    user_targets = os.path.join(os.path.expanduser("~"), ".pyaint", "targets")
+    return [repo_targets, user_targets]
+
+
+def load_user_recipes(paths: Optional[Sequence[str]] = None) -> List[Recipe]:
+    """Load (and let override built-ins) recipes from the targets directories.
+
+    Scans ``<repo>/targets`` and ``~/.pyaint/targets`` by default. Invalid files
+    are skipped. Returns the recipes that were loaded.
+    """
+    loaded: List[Recipe] = []
+    for path in (paths if paths is not None else default_recipe_dirs()):
+        if os.path.isdir(path):
+            loaded.extend(REGISTRY.load_dir(path))
+    return loaded
