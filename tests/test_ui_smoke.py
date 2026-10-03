@@ -84,6 +84,34 @@ def test_tool_controls_mutate_profile(app):
         control.close()
 
 
+def test_countdown_dialog_capture_now(app):
+    from PySide6.QtWidgets import QDialog
+
+    from pyaint.ui.countdown import CountdownDialog
+
+    dialog = CountdownDialog(None, seconds=3)
+    try:
+        dialog._capture_now()
+        assert dialog.result() == QDialog.Accepted
+    finally:
+        dialog.close()
+
+
+def test_countdown_dialog_counts_down_and_closes(app):
+    from PySide6.QtWidgets import QDialog
+
+    from pyaint.ui.countdown import CountdownDialog
+
+    dialog = CountdownDialog(None, seconds=2)
+    try:
+        dialog._tick()  # 2 -> 1
+        assert dialog._count.text() == "1"
+        dialog._tick()  # 1 -> accept
+        assert dialog.result() == QDialog.Accepted
+    finally:
+        dialog.close()
+
+
 def test_theme_resolution_and_stylesheet():
     from pyaint.ui import theme
 

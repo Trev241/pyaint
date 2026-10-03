@@ -138,6 +138,11 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   notes) and this `CHANGELOG.md`.
 
 ### Changed
+- **Auto-detect countdown:** the small status-bar hint was replaced with a modal
+  countdown dialog (`pyaint/ui/countdown.py`) that clearly warns the screen will
+  be captured and the window minimized, with a live countdown plus **Capture
+  now** / **Cancel**. The window only minimizes after confirmation, and
+  cancelling aborts cleanly.
 - `Palette` is a plain evenly-divided grid again; `Bot.settings` is
   `[delay, pixel_size, jump_delay]`. `config.py` drops legacy environment keys
   (`Custom Colors`, `color_preview_spot`, `color_selection`) on load.

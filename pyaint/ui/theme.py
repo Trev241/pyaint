@@ -197,6 +197,11 @@ def stylesheet(tokens: dict | None = None) -> str:
     #DialogStatus {{
         color: {t['success']};
     }}
+    #CountdownNumber {{
+        color: {t['accent']};
+        font-size: 44px;
+        font-weight: 700;
+    }}
 
     /* --- Buttons -------------------------------------------------------- */
     QPushButton {{

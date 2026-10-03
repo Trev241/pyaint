@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -58,6 +59,7 @@ from pyaint.targets import (
     merge_drawing_settings,
 )
 from pyaint.ui import theme
+from pyaint.ui.countdown import CountdownDialog
 from pyaint.ui.icons import icon
 from pyaint.ui.overlay import ProgressOverlay
 from pyaint.ui.widgets import ImagePreview, Section, SliderField, ToolControls, pil_to_qpixmap
@@ -102,7 +104,6 @@ class MainWindow(QMainWindow):
         self._detection_result = None
         self._detection_image = None
         self._detection_view = None
-        self._countdown = 0
 
         self.signals = UiSignals()
         self.signals.progress.connect(self._on_progress)
@@ -934,23 +935,26 @@ class MainWindow(QMainWindow):
         self._pending_recipe = recipe
         self._detection_result = None
         self._detection_image = None
-        self._countdown = 3
         self.showNormal()
         self.raise_()
         self.activateWindow()
-        self._tick_countdown()
-
-    def _tick_countdown(self) -> None:
-        if self._countdown > 0:
-            self._set_status(
-                f"Auto-detect: capturing in {self._countdown}s — bring the target app to the front."
-            )
-            self._countdown -= 1
-            QTimer.singleShot(1000, self._tick_countdown)
-        else:
-            self.showMinimized()
-            # Let the minimize take effect before grabbing the screen.
-            QTimer.singleShot(400, self._finish_auto_detect)
+        dialog = CountdownDialog(
+            self,
+            seconds=3,
+            title="Auto-detect",
+            heading="Capturing the screen",
+            message=(
+                "Pyaint will minimize and capture the screen in a few seconds. "
+                "Bring the target application to the front now."
+            ),
+        )
+        if dialog.exec() != QDialog.Accepted:
+            self._detecting = False
+            self._set_status("Auto-detect cancelled.")
+            return
+        self.showMinimized()
+        # Let the minimize take effect before grabbing the screen.
+        QTimer.singleShot(400, self._finish_auto_detect)
 
     def _finish_auto_detect(self) -> None:
         try:
