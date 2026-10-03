@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QDialog,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -59,7 +58,7 @@ from pyaint.targets import (
     merge_drawing_settings,
 )
 from pyaint.ui import theme
-from pyaint.ui.countdown import CountdownDialog
+from pyaint.ui.countdown import CountdownBanner
 from pyaint.ui.icons import icon
 from pyaint.ui.overlay import ProgressOverlay
 from pyaint.ui.widgets import ImagePreview, Section, SliderField, ToolControls, pil_to_qpixmap
@@ -370,6 +369,11 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._build_toolbar())
+
+        self._countdown_banner = CountdownBanner()
+        self._countdown_banner.captured.connect(self._begin_capture)
+        self._countdown_banner.cancelled.connect(self._cancel_auto_detect)
+        layout.addWidget(self._countdown_banner)
 
         self._detection_view = None
         self._tabs = QTabWidget()
@@ -938,23 +942,21 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
-        dialog = CountdownDialog(
-            self,
-            seconds=3,
-            title="Auto-detect",
-            heading="Capturing the screen",
-            message=(
-                "Pyaint will minimize and capture the screen in a few seconds. "
-                "Bring the target application to the front now."
-            ),
-        )
-        if dialog.exec() != QDialog.Accepted:
-            self._detecting = False
-            self._set_status("Auto-detect cancelled.")
-            return
+        for button in (self._auto_btn, self._btn_start, self._btn_test, self._btn_simple, self._btn_precompute):
+            button.setEnabled(False)
+        self._countdown_banner.start(seconds=4)
+
+    def _begin_capture(self) -> None:
+        self._countdown_banner.stop()
         self.showMinimized()
         # Let the minimize take effect before grabbing the screen.
         QTimer.singleShot(400, self._finish_auto_detect)
+
+    def _cancel_auto_detect(self) -> None:
+        self._countdown_banner.stop()
+        self._detecting = False
+        self._set_running(False)
+        self._set_status("Auto-detect cancelled.")
 
     def _finish_auto_detect(self) -> None:
         try:
@@ -975,6 +977,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, self.title, f"Auto-detect failed: {exc}")
         finally:
             self._detecting = False
+            self._set_running(False)
 
     def _present_detection(self, image, detection) -> None:
         """Show the detection result in its own tab, leaving the image tab alone."""
@@ -1244,6 +1247,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):  # noqa: N802
         self._overlay.hide_overlay()
+        self._countdown_banner.stop()
         try:
             cache_dir = os.path.join(paths.PROJECT_ROOT, "cache")
             if os.path.exists(cache_dir):

@@ -1,14 +1,16 @@
-"""A modal countdown dialog used before the screen is captured.
+"""Non-modal in-window countdown banner used before a screen capture.
 
-Used by Auto-detect so the user gets an unmissable warning (with a cancel and a
-"capture now" option) before pyaint minimizes itself.
+Shown above the content area when Auto-detect is about to minimize the window.
+Unlike a modal dialog it never steals focus or floats over the target app, but
+it is large and high-contrast enough to be unmissable. It offers **Capture now**
+and **Cancel**, and auto-proceeds when the countdown ends.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
-    QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -17,73 +19,76 @@ from PySide6.QtWidgets import (
 )
 
 
-class CountdownDialog(QDialog):
-    def __init__(
-        self,
-        parent=None,
-        seconds: int = 3,
-        title: str = "Auto-detect",
-        heading: str = "Capturing the screen",
-        message: str = "Bring the target application to the front now.",
-    ):
+class CountdownBanner(QFrame):
+    captured = Signal()
+    cancelled = Signal()
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setModal(True)
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
-        self.setMinimumWidth(360)
+        self.setObjectName("CountdownBanner")
+        self._total = 0
+        self._remaining = 0
 
-        self._total = max(1, seconds)
-        self._remaining = self._total
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(14, 10, 14, 10)
+        outer.setSpacing(6)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 16)
-        layout.setSpacing(8)
+        top = QHBoxLayout()
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        self._title = QLabel()
+        self._title.setObjectName("CountdownTitle")
+        self._hint = QLabel("Bring the target application to the front now.")
+        self._hint.setObjectName("CountdownHint")
+        text.addWidget(self._title)
+        text.addWidget(self._hint)
+        top.addLayout(text, 1)
 
-        self._heading = QLabel(heading)
-        self._heading.setObjectName("DialogTitle")
-        layout.addWidget(self._heading)
-
-        self._message = QLabel(message)
-        self._message.setObjectName("DialogHint")
-        self._message.setWordWrap(True)
-        layout.addWidget(self._message)
-
-        self._count = QLabel(str(self._remaining))
-        self._count.setObjectName("CountdownNumber")
-        self._count.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self._count)
+        self._capture_btn = QPushButton("Capture now")
+        self._capture_btn.setObjectName("Primary")
+        self._capture_btn.clicked.connect(self._capture_now)
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.clicked.connect(self._cancel)
+        top.addWidget(self._capture_btn)
+        top.addWidget(self._cancel_btn)
+        outer.addLayout(top)
 
         self._bar = QProgressBar()
-        self._bar.setRange(0, self._total)
-        self._bar.setValue(self._total)
+        self._bar.setRange(0, 1)
+        self._bar.setValue(1)
         self._bar.setTextVisible(False)
-        self._bar.setFixedHeight(6)
-        layout.addWidget(self._bar)
-
-        buttons = QHBoxLayout()
-        capture_now = QPushButton("Capture now")
-        capture_now.setObjectName("Primary")
-        capture_now.clicked.connect(self._capture_now)
-        cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
-        buttons.addStretch(1)
-        buttons.addWidget(capture_now)
-        buttons.addWidget(cancel)
-        layout.addLayout(buttons)
+        self._bar.setFixedHeight(4)
+        outer.addWidget(self._bar)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(1000)
+        self.hide()
+
+    def start(self, seconds: int = 4) -> None:
+        self._total = max(1, int(seconds))
+        self._remaining = self._total
+        self._bar.setRange(0, self._total)
+        self._bar.setValue(self._total)
+        self._title.setText(f"Capturing the screen in {self._remaining}s…")
+        self.show()
+
+    def stop(self) -> None:
+        self._timer.stop()
+        self.hide()
 
     def _tick(self) -> None:
         self._remaining -= 1
         if self._remaining <= 0:
             self._timer.stop()
-            self.accept()
+            self.captured.emit()
             return
-        self._count.setText(str(self._remaining))
+        self._title.setText(f"Capturing the screen in {self._remaining}s…")
         self._bar.setValue(self._remaining)
 
     def _capture_now(self) -> None:
         self._timer.stop()
-        self.accept()
+        self.captured.emit()
+
+    def _cancel(self) -> None:
+        self._timer.stop()
+        self.cancelled.emit()

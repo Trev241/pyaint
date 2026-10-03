@@ -84,32 +84,34 @@ def test_tool_controls_mutate_profile(app):
         control.close()
 
 
-def test_countdown_dialog_capture_now(app):
-    from PySide6.QtWidgets import QDialog
+def test_countdown_banner_counts_down_and_captures(app):
+    from pyaint.ui.countdown import CountdownBanner
 
-    from pyaint.ui.countdown import CountdownDialog
-
-    dialog = CountdownDialog(None, seconds=3)
+    banner = CountdownBanner()
+    captured = []
+    banner.captured.connect(lambda: captured.append(True))
     try:
-        dialog._capture_now()
-        assert dialog.result() == QDialog.Accepted
+        banner.start(seconds=2)
+        banner._tick()  # 2 -> 1
+        assert banner._title.text().endswith("1s…")
+        banner._tick()  # 1 -> captured
+        assert captured == [True]
     finally:
-        dialog.close()
+        banner.close()
 
 
-def test_countdown_dialog_counts_down_and_closes(app):
-    from PySide6.QtWidgets import QDialog
+def test_countdown_banner_cancel_emits(app):
+    from pyaint.ui.countdown import CountdownBanner
 
-    from pyaint.ui.countdown import CountdownDialog
-
-    dialog = CountdownDialog(None, seconds=2)
+    banner = CountdownBanner()
+    cancelled = []
+    banner.cancelled.connect(lambda: cancelled.append(True))
     try:
-        dialog._tick()  # 2 -> 1
-        assert dialog._count.text() == "1"
-        dialog._tick()  # 1 -> accept
-        assert dialog.result() == QDialog.Accepted
+        banner.start(seconds=3)
+        banner._cancel()
+        assert cancelled == [True]
     finally:
-        dialog.close()
+        banner.close()
 
 
 def test_theme_resolution_and_stylesheet():

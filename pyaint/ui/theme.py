@@ -197,10 +197,19 @@ def stylesheet(tokens: dict | None = None) -> str:
     #DialogStatus {{
         color: {t['success']};
     }}
-    #CountdownNumber {{
-        color: {t['accent']};
-        font-size: 44px;
-        font-weight: 700;
+    #CountdownBanner {{
+        background: {t['bg_card']};
+        border-bottom: 1px solid {t['border']};
+        border-left: 3px solid {t['accent']};
+    }}
+    #CountdownTitle {{
+        color: {t['fg']};
+        font-size: 13px;
+        font-weight: 600;
+    }}
+    #CountdownHint {{
+        color: {t['fg_muted']};
+        font-size: 11px;
     }}
 
     /* --- Buttons -------------------------------------------------------- */
