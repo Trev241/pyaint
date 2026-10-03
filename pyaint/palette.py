@@ -25,9 +25,14 @@ class Palette:
     Build either from an explicit ``colors_pos`` map ``{(r, g, b): (x, y)}``
     (used in tests) or by sampling a screen ``box`` ``(left, top, width,
     height)`` divided into ``rows`` x ``columns`` evenly sized cells.
+
+    If ``image`` (a full-screen PIL image) is given, the box is cropped from it
+    instead of taking a fresh screenshot. This lets callers sample from the
+    screenshot the detection was computed on, before pyaint is brought back to
+    the front over the target app.
     """
 
-    def __init__(self, colors_pos=None, box=None, rows=None, columns=None):
+    def __init__(self, colors_pos=None, box=None, rows=None, columns=None, image=None):
         if colors_pos is not None:
             self.colors_pos = colors_pos
             self.colors = colors_pos.keys()
@@ -43,7 +48,11 @@ class Palette:
         self._csizex = int(box[2] // columns)
         self._csizey = int(box[3] // rows)
 
-        pix = pyautogui.screenshot(region=box).load()
+        if image is not None:
+            left, top, width, height = box
+            pix = image.crop((left, top, left + width, top + height)).load()
+        else:
+            pix = pyautogui.screenshot(region=box).load()
 
         # COLOR LAYOUT    :    ((r, g, b) : (x, y))
         self.colors_pos = dict()

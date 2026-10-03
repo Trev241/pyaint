@@ -218,6 +218,15 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   without manual teaching.
 
 ### Fixed
+- **Drawing a whole image in one colour (a filled square)**: the palette was
+  re-screenshotted *after* pyaint was brought back in front, so every swatch
+  sampled pyaint's own UI and the palette collapsed to a single colour. Palette
+  sampling now uses the screenshot the detection (or corner-click) was captured
+  on: `Palette(..., image=...)` samples a provided full-screen image,
+  `Bot.init_palette`/`apply_detection` pass it through, the auto-detect flow
+  keeps its capture, and manual Setup grabs a screenshot the instant the pick
+  overlay closes (with pyaint hidden). A warning is shown if a palette resolves
+  to a single colour, so it can't silently draw a solid square.
 - **Pre-compute (and drawing) could crash with `IndexError: list index out of
   range`** when the draw mode came from `config.json`: `_encode_rows`/
   `_emit_run` compared the mode with `is` instead of `==`, so a JSON-loaded mode

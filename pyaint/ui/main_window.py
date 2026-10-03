@@ -100,6 +100,7 @@ class MainWindow(QMainWindow):
         self._imname = os.path.join(paths.PROJECT_ROOT, "assets", "sample.png")
         self._detecting = False
         self._detection_result = None
+        self._detection_image = None
         self._detection_view = None
         self._countdown = 0
 
@@ -932,6 +933,7 @@ class MainWindow(QMainWindow):
         self._detecting = True
         self._pending_recipe = recipe
         self._detection_result = None
+        self._detection_image = None
         self._countdown = 3
         self.showNormal()
         self.raise_()
@@ -972,6 +974,7 @@ class MainWindow(QMainWindow):
 
     def _present_detection(self, image, detection) -> None:
         """Show the detection result in its own tab, leaving the image tab alone."""
+        self._detection_image = image
         self._ensure_detection_tab()
         if detection:
             self._detection_result = detection
@@ -997,13 +1000,22 @@ class MainWindow(QMainWindow):
     def _apply_detection(self) -> None:
         if not self._detection_result:
             return
-        applied = self.bot.apply_detection(self._detection_result)
+        applied = self.bot.apply_detection(self._detection_result, image=self._detection_image)
         self._sync_env_ui()
         self._refresh_detection_status()
         self._store_drawing_settings()
         self._store_drawing_options()
         self._save_config()
         self._set_status(f"Auto-detect applied ({', '.join(applied) or 'nothing'}).")
+        palette = getattr(self.bot, "_palette", None)
+        if palette is not None and len(palette.colors) <= 1:
+            QMessageBox.warning(
+                self,
+                self.title,
+                "The palette sampled as a single colour — the target app may have "
+                "been covered when the region was captured. Re-run Auto-detect "
+                "with the target app in front, or teach the palette in Setup.",
+            )
         self._show_image_tab()
 
     def _cancel_detection(self) -> None:
@@ -1074,6 +1086,19 @@ class MainWindow(QMainWindow):
         if getattr(self.bot, "_canvas", None) is None:
             QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect or Setup first.")
             return
+        palette = getattr(self.bot, "_palette", None)
+        if palette is None:
+            QMessageBox.warning(self, self.title, "Palette not configured. Run Auto-detect or Setup first.")
+            return
+        if len(palette.colors) <= 1:
+            QMessageBox.warning(
+                self,
+                self.title,
+                "The palette has only one distinct colour, so the whole image "
+                "would be drawn in that colour. Re-run Auto-detect with the "
+                "target app in front, or teach the palette in Setup.",
+            )
+            return
         QMessageBox.information(
             self, self.title,
             f"Press ESC to stop.\nPress {self.bot.pause_key or 'p'} to pause/resume.",
@@ -1111,14 +1136,14 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect or Setup first.")
             return
         try:
-            points = pick_points(self, 2, "Click the UPPER-LEFT corner of the region.")
+            result = pick_points(self, 2, "Click the UPPER-LEFT then LOWER-RIGHT corner of the region.")
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, self.title, f"Region pick failed: {exc}")
             return
-        if not points or len(points) < 2:
+        if not result or len(result.points) < 2:
             self._set_status("Region selection cancelled.")
             return
-        (x1, y1), (x2, y2) = points
+        (x1, y1), (x2, y2) = result.points
         box = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
         self._redraw_region = box
         self._region_label.setText(f"Region: ({box[0]}, {box[1]}) → ({box[2]}, {box[3]})")

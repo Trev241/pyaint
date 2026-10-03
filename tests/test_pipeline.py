@@ -107,6 +107,40 @@ def test_process_coordinates_within_canvas(tmp_path):
                 assert cy <= y <= cy + ch
 
 
+def test_palette_samples_from_provided_image():
+    colours = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]
+    img = Image.new("RGB", (40, 40))
+    for i, c in enumerate(colours):
+        r, cc = divmod(i, 2)
+        for y in range(r * 20, r * 20 + 20):
+            for x in range(cc * 20, cc * 20 + 20):
+                img.putpixel((x, y), c)
+    palette = Palette(box=(0, 0, 40, 40), rows=2, columns=2, image=img)
+    assert set(palette.colors) == set(colours)
+
+
+def test_apply_detection_samples_from_provided_image(monkeypatch):
+    """Auto-detect must sample the captured screenshot, not a fresh one."""
+    import pyaint.palette as palette_mod
+    from pyaint.locators import Detection
+
+    def fail_screenshot(*args, **kwargs):
+        raise AssertionError("apply_detection should use the provided image")
+
+    monkeypatch.setattr(palette_mod.pyautogui, "screenshot", fail_screenshot)
+
+    img = Image.new("RGB", (60, 40), (255, 255, 255))
+    img.paste((255, 0, 0), (10, 10, 20, 20))
+    img.paste((0, 0, 255), (20, 10, 30, 20))
+    detection = Detection(
+        canvas=(0, 0, 60, 40), palette=(10, 10, 20, 10), palette_rows=1, palette_cols=2
+    )
+    bot = Bot()
+    applied = bot.apply_detection(detection, image=img)
+    assert "canvas" in applied and "palette" in applied
+    assert len(bot._palette.colors) == 2
+
+
 def test_process_accepts_mode_strings_from_config(tmp_path):
     """Regression: mode was compared with ``is`` and crashed on JSON strings."""
     path = write_image(tmp_path, {(0, 0): RED}, (1, 1))

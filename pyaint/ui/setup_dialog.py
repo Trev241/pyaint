@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -195,24 +196,24 @@ class SetupDialog(QDialog):
             return
         friendly = _FRIENDLY[name]
         if name in _BOX_TOOLS:
-            points = pick_points(self, 2, f"Click the UPPER-LEFT then LOWER-RIGHT corner of the {friendly}.")
-            if not points:
+            result = pick_points(self, 2, f"Click the UPPER-LEFT then LOWER-RIGHT corner of the {friendly}.")
+            if not result:
                 return
-            (x1, y1), (x2, y2) = points
+            (x1, y1), (x2, y2) = result.points
             box = [min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]
-            self._apply_box(name, box)
+            self._apply_box(name, box, image=result.image)
         else:
-            points = pick_points(self, 1, f"Click the {friendly} in the target app.")
-            if not points:
+            result = pick_points(self, 1, f"Click the {friendly} in the target app.")
+            if not result:
                 return
-            x, y = points[0]
+            x, y = result.points[0]
             entry = self.profile[name]
             entry["coords"] = [x, y]
             entry["status"] = True
         self._refresh_list()
         self._select_tool(self._list.currentRow())
 
-    def _apply_box(self, name: str, box) -> None:
+    def _apply_box(self, name: str, box, image=None) -> None:
         entry = self.profile[name]
         entry["box"] = list(box)
         entry["status"] = True
@@ -220,11 +221,11 @@ class SetupDialog(QDialog):
             if name == "Canvas":
                 self.bot.init_canvas(box)
             elif name == "Palette":
-                self._setup_palette(box)
+                self._setup_palette(box, image=image)
         except Exception as exc:  # noqa: BLE001
             log.info(f"[Setup] applying {name} failed: {exc}")
 
-    def _setup_palette(self, box) -> None:
+    def _setup_palette(self, box, image=None) -> None:
         rows = self._rows.value()
         cols = self._cols.value()
         entry = self.profile["Palette"]
@@ -235,8 +236,17 @@ class SetupDialog(QDialog):
                 pbox=(box[0], box[1], box[2] - box[0], box[3] - box[1]),
                 prows=rows,
                 pcols=cols,
+                image=image,
             )
             entry["color_coords"] = {str(k): list(v) for k, v in palette.colors_pos.items()}
+            if len(palette.colors) <= 1:
+                QMessageBox.warning(
+                    self,
+                    "Palette",
+                    "Only one distinct colour was sampled. Make sure the target "
+                    "app was visible when you clicked the corners, and that the "
+                    "rows/columns match the palette.",
+                )
         except Exception as exc:  # noqa: BLE001
             log.info(f"[Setup] palette sampling failed: {exc}")
 

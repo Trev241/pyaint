@@ -101,13 +101,14 @@ class Bot(CacheMixin):
         """Select ``target`` in the painting app (from the sampled palette)."""
         return self.painter.select_color(target)
 
-    def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None) -> Palette:
-        # ``pbox`` is (left, top, width, height) — pyautogui's format.
+    def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None, image=None) -> Palette:
+        # ``pbox`` is (left, top, width, height) — pyautogui's format. When
+        # ``image`` is given, sample from it instead of a fresh screenshot.
         try:
             if colors_pos is not None:
                 self._palette = Palette(colors_pos=colors_pos)
             elif pbox is not None and prows is not None and pcols is not None:
-                self._palette = Palette(box=pbox, rows=prows, columns=pcols)
+                self._palette = Palette(box=pbox, rows=prows, columns=pcols, image=image)
             else:
                 raise ValueError('Invalid parameters for palette initialization')
         except Exception as e:
@@ -137,8 +138,14 @@ class Bot(CacheMixin):
             recipe = get_recipe(self.profile.target)
         return detect_target(recipe, self.capture_screen())
 
-    def apply_detection(self, detection):
-        """Apply a Detection to the live profile/palette; return what was used."""
+    def apply_detection(self, detection, image=None):
+        """Apply a Detection to the live profile/palette; return what was used.
+
+        ``image`` is the screenshot the detection was computed on. When given,
+        the palette is sampled from it rather than a fresh screenshot, so the
+        sampled colours come from the target app even if pyaint is now in
+        front.
+        """
         applied = []
         if detection.canvas:
             x, y, w, h = detection.canvas
@@ -151,6 +158,7 @@ class Bot(CacheMixin):
                 pbox=(x, y, w, h),
                 prows=detection.palette_rows,
                 pcols=detection.palette_cols,
+                image=image,
             )
             entry = self.profile['Palette']
             entry['box'] = [x, y, x + w, y + h]
