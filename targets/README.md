@@ -39,9 +39,15 @@ tried until one succeeds).
 |------|---------------|---------------|
 | `white_rect` | largest near-white rectangle | `aspect`, `aspect_tolerance`, `threshold` |
 | `color_rect` | largest solid rectangle of a given colour | `color`, `tolerance`, `aspect` |
+| `center_rect` | solid rectangle grown from the image centre (border-aware) | `tolerance`, `min_fraction` |
 | `color_grid` | a grid of saturated swatches | `min_saturation`, `gap` |
 | `color_signature` | the block covering the most distinct listed colours | `colors`, `tolerance`, `gap`, `min_colors`, `min_fill` |
 | `window_relative` | a sub-rectangle of an OS window | `window` (title substring), `rect` `[x,y,w,h]` (0..1) |
+
+Every locator also accepts **`region`** `[x, y, w, h]` (absolute pixels):
+detection runs inside that crop and the result is offset back to screen
+coordinates. Use it to keep a locator from being distracted by unrelated UI
+(e.g. limitting a palette search to the ribbon).
 
 `color_signature` and `window_relative` return `rows`/`cols` from the spec, so
 include them when detecting a palette.

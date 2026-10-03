@@ -85,9 +85,11 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
     self-tests (schema version, tools, colour strategy, settings/options keys,
     palette colours, and locator type/params). Built-ins are validated by the
     test suite; user recipes are validated (and logged) on load.
-  - MS Paint recipe gains best-effort palette detection (`color_grid`); GIMP
-    uses the colour-dialog (`custom`) path. `tests/test_validation.py` plus
-    inheritance/locator-registry tests.
+  - MS Paint recipe tuned against a real Windows 11 Paint screenshot: canvas
+    via the new border-aware `center_rect` locator, palette via `color_signature`
+    over the exact 10x2 swatch colours inside a `region`.
+  - New `center_rect` locator and universal `region` support for all locators;
+    `tests/test_validation.py` plus inheritance/locator-registry/region tests.
 - Recipe `detection` specs: skribbl auto-detects its canvas (white 800x600 / 4:3,
   with a `color_rect` fallback that is also aspect-checked) and its exact 2x13
   palette (26 sampled colours, `gap: 0`); MS Paint auto-detects its canvas.

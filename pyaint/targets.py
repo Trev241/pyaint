@@ -195,6 +195,18 @@ SKRIBBL_PALETTE = [
     (99, 48, 13),
 ]
 
+# Windows 11 Paint's 10x2 palette (top row then bottom row), sampled from a real
+# screenshot. Pure white is omitted: it matches the ribbon/canvas background and
+# would swallow the whole region. Used only to *locate* the palette grid.
+PAINT_PALETTE = [
+    (0, 0, 0), (127, 127, 127), (136, 0, 21), (237, 28, 36),
+    (255, 127, 39), (255, 242, 0), (34, 177, 76), (0, 162, 232),
+    (63, 72, 204), (163, 73, 164),
+    (195, 195, 195), (185, 122, 87), (255, 174, 201), (255, 201, 14),
+    (239, 228, 176), (181, 230, 29), (153, 217, 234), (112, 146, 190),
+    (200, 191, 231),
+]
+
 
 def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str, Any]:
     """Recursively merge ``override`` into a copy of ``base`` (dicts only)."""
@@ -263,11 +275,24 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
             "jump_threshold": 5,
         },
         "drawing_options": {"ignore_white_pixels": True, "use_custom_colors": False},
-        # Best-effort: canvas is a white rectangle; palette is a swatch grid.
-        # Needs a real-app screenshot to tune (see HANDOFF).
+        # Best-effort, tuned from a maximized Windows 11 Paint screenshot:
+        # the canvas is found from the image centre; the palette is found with
+        # the exact swatch colours inside the ribbon's Colors region.
         "detection": {
-            "canvas": {"type": "white_rect"},
-            "palette": {"type": "color_grid"},
+            "canvas": [
+                {"type": "center_rect", "tolerance": 5},
+                {"type": "white_rect"},
+            ],
+            "palette": {
+                "type": "color_signature",
+                "colors": PAINT_PALETTE,
+                "region": [780, 76, 246, 48],
+                "tolerance": 25,
+                "gap": 4,
+                "min_colors": 5,
+                "rows": 2,
+                "cols": 10,
+            },
         },
         "notes": "Sampled palette. Enable MSPaint Mode if the app needs double-clicks to pick colours.",
     },

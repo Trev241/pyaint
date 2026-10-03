@@ -49,7 +49,7 @@ def test_available_locators_registry():
     from pyaint.locators import available_locators, locator_params
 
     names = available_locators()
-    assert {"white_rect", "color_rect", "color_grid", "color_signature", "window_relative"} <= set(names)
+    assert {"white_rect", "color_rect", "color_grid", "color_signature", "center_rect", "window_relative"} <= set(names)
     assert "color" in locator_params("color_rect")
     assert locator_params("does-not-exist") is None
 

@@ -7,6 +7,7 @@ from pyaint import bot as bot_module
 from pyaint.locators import (
     Detection,
     detect_target,
+    find_center_rect,
     find_color_grid,
     find_color_rect,
     find_color_signature,
@@ -77,6 +78,20 @@ def test_find_white_rect_aspect_filter():
 
 def test_find_white_rect_none_when_absent():
     assert find_white_rect(Image.new("RGB", (100, 100), (20, 20, 20))) is None
+
+
+def test_find_center_rect_respects_thin_border():
+    img = Image.new("RGB", (400, 300), (248, 248, 248))
+    for y in range(80, 230):
+        for x in range(100, 300):
+            img.putpixel((x, y), (255, 255, 255))
+    for x in range(99, 301):
+        img.putpixel((x, 79), (120, 120, 120))
+        img.putpixel((x, 230), (120, 120, 120))
+    for y in range(79, 231):
+        img.putpixel((99, y), (120, 120, 120))
+        img.putpixel((300, y), (120, 120, 120))
+    assert find_center_rect(img, tolerance=5) == (100, 80, 200, 150)
 
 
 def test_find_white_rect_rejects_tiny_regions():
@@ -248,6 +263,26 @@ def test_detect_target_window_relative_uses_provider():
         window_provider=lambda title: (100, 100, 200, 100),
     )
     assert detection.canvas == (120, 110, 160, 80)
+
+
+def test_region_offsets_locator_result():
+    img = Image.new("RGB", (400, 300), (0, 0, 0))
+    for y in range(100, 180):
+        for x in range(150, 250):
+            img.putpixel((x, y), (255, 255, 255))
+    recipe = Recipe(
+        id="r",
+        name="r",
+        detection={
+            "canvas": {
+                "type": "center_rect",
+                "region": [100, 50, 200, 200],
+                "tolerance": 5,
+            }
+        },
+    )
+    detection = detect_target(recipe, img)
+    assert detection.canvas == (150, 100, 100, 80)
 
 
 def test_register_locator_adds_detection_type():

@@ -356,6 +356,46 @@ def find_color_grid(
     return _scale_rect((x0, y0, bw, bh), scale, image.size), rows, cols
 
 
+def find_center_rect(
+    image: Image.Image,
+    tolerance: int = 30,
+    min_fraction: float = 0.02,
+) -> Optional[Rect]:
+    """Grow a solid-colour rectangle out from the image centre.
+
+    Fast and border-aware: it walks left/right/up/down from the centre pixel
+    until the colour changes, so a thin (even 1px) border around the canvas is
+    respected — unlike connected-component detection after downscaling, which
+    can merge the canvas with a same-coloured toolbar.
+    """
+    width, height = image.size
+    pixels = image.load()
+    cx, cy = width // 2, height // 2
+    seed = tuple(pixels[cx, cy][:3])
+
+    def match(c: RGB) -> bool:
+        return max(abs(c[i] - seed[i]) for i in range(3)) <= tolerance
+
+    left = cx
+    while left > 0 and match(tuple(pixels[left - 1, cy][:3])):
+        left -= 1
+    right = cx
+    while right < width - 1 and match(tuple(pixels[right + 1, cy][:3])):
+        right += 1
+    top = cy
+    while top > 0 and match(tuple(pixels[cx, top - 1][:3])):
+        top -= 1
+    bottom = cy
+    while bottom < height - 1 and match(tuple(pixels[cx, bottom + 1][:3])):
+        bottom += 1
+
+    bw = right - left + 1
+    bh = bottom - top + 1
+    if bw * bh < min_fraction * width * height:
+        return None
+    return (left, top, bw, bh)
+
+
 def window_relative_rect(window: Rect, normalized: Sequence[float]) -> Rect:
     """Map a normalized ``(x, y, w, h)`` (0..1) onto an absolute window rect."""
     wx, wy, ww, wh = window
@@ -454,7 +494,7 @@ def register_locator(name: str, allowed_params):
     """Register a locator type usable as ``{"type": name, ...}`` in a recipe."""
 
     def decorator(func: LocatorHandler) -> LocatorHandler:
-        _LOCATORS[name] = (func, set(allowed_params))
+        _LOCATORS[name] = (func, set(allowed_params) | {"region"})
         return func
 
     return decorator
@@ -499,6 +539,11 @@ def _locate_color_signature(image, recipe, params, provider):
     return find_color_signature(image, colors, **params), rows, cols
 
 
+@register_locator("center_rect", {"tolerance", "min_fraction"})
+def _locate_center_rect(image, recipe, params, provider):
+    return find_center_rect(image, **params), None, None
+
+
 @register_locator("window_relative", {"window", "rect", "rows", "cols"})
 def _locate_window_relative(image, recipe, params, provider):
     normalized = params.get("rect")
@@ -523,11 +568,25 @@ def _run_spec(
     if entry is None:
         return None, None, None
     handler, allowed = entry
-    params = {k: v for k, v in spec.items() if k in allowed}
+
+    # Optional absolute-pixel region of interest: detect inside a crop, then
+    # offset the result back to full-image coordinates.
+    region = spec.get("region")
+    offset = (0, 0)
+    work = image
+    if isinstance(region, (list, tuple)) and len(region) == 4:
+        rx, ry, rw, rh = (int(v) for v in region)
+        work = image.crop((rx, ry, rx + rw, ry + rh))
+        offset = (rx, ry)
+
+    params = {k: v for k, v in spec.items() if k in allowed and k != "region"}
     try:
-        return handler(image, recipe, params, window_provider)
+        rect, rows, cols = handler(work, recipe, params, window_provider)
     except TypeError:
         return None, None, None
+    if rect and offset != (0, 0):
+        rect = (rect[0] + offset[0], rect[1] + offset[1], rect[2], rect[3])
+    return rect, rows, cols
 
 
 def _run_chain(
