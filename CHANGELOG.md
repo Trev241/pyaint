@@ -218,6 +218,11 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   without manual teaching.
 
 ### Fixed
+- **Pre-compute (and drawing) could crash with `IndexError: list index out of
+  range`** when the draw mode came from `config.json`: `_encode_rows`/
+  `_emit_run` compared the mode with `is` instead of `==`, so a JSON-loaded mode
+  string was not recognised and the layered row tables were never built. All
+  mode comparisons now use `==`, with a regression test.
 - `get_cache_filename()` no longer fails when the canvas is uninitialized; it
   returns `None` instead of raising.
 - Auto-detection now finds skribbl's canvas and palette. The canvas is a **white

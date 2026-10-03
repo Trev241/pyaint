@@ -4,6 +4,7 @@ These deliberately avoid any screen access: Palette is constructed from an
 explicit ``colors_pos`` map and Bot receives a canvas via ``init_canvas``.
 """
 
+import json
 import os
 
 import pytest
@@ -104,6 +105,16 @@ def test_process_coordinates_within_canvas(tmp_path):
             for x, y in (start, end):
                 assert cx <= x <= cx + cw
                 assert cy <= y <= cy + ch
+
+
+def test_process_accepts_mode_strings_from_config(tmp_path):
+    """Regression: mode was compared with ``is`` and crashed on JSON strings."""
+    path = write_image(tmp_path, {(0, 0): RED}, (1, 1))
+    bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
+    for mode in (Bot.LAYERED, Bot.SLOTTED):
+        parsed = json.loads(json.dumps(mode))  # a distinct string object
+        cmap = bot.process(path, mode=parsed)
+        assert cmap
 
 
 def test_slotted_returns_plain_columns(tmp_path):

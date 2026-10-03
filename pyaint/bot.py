@@ -211,7 +211,7 @@ class Bot(CacheMixin):
         """Record one horizontal run as a stroke (or a layer-table row)."""
         if color is None:
             return
-        if mode is Bot.SLOTTED:
+        if mode == Bot.SLOTTED:
             if color == (255, 255, 255) and flags & Bot.IGNORE_WHITE:
                 return
             cmap.setdefault(color, []).append((start, end))
@@ -263,7 +263,7 @@ class Bot(CacheMixin):
         y = y0
 
         for i in range(h):
-            if mode is Bot.LAYERED:
+            if mode == Bot.LAYERED:
                 table_lines.append(list())
                 table_colors.append(set())
 
@@ -290,7 +290,7 @@ class Bot(CacheMixin):
                            i, old_col, start, (x - step, y), mode, flags)
             y += step
 
-        if mode is Bot.SLOTTED:
+        if mode == Bot.SLOTTED:
             return cmap
         return self._merge_layers(cmap, table_lines, table_colors, col_freq, flags)
 
