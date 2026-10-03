@@ -34,8 +34,8 @@ class FakePainter:
     def color_button_okay(self):
         self._rec("color_button_okay")
 
-    def select_color(self, target, force_custom=False):
-        self._rec("select_color", target, force_custom)
+    def select_color(self, target):
+        self._rec("select_color", target)
         return "palette"
 
     def execute_stroke(self, start, end, delay):
@@ -52,7 +52,7 @@ class FakePainter:
 
 
 def make_bot(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)  # no color_calibration.json
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(time, "sleep", lambda *_: None)
     bot = Bot()
     bot.progress_overlay_enabled = False  # avoid Tk
@@ -103,11 +103,10 @@ def test_draw_calls_new_layer_and_color_button_when_enabled(monkeypatch, tmp_pat
     assert "color_button" in fake.names()
 
 
-def test_draw_forces_custom_colours_when_okay_enabled(monkeypatch, tmp_path):
+def test_draw_clicks_color_button_okay_when_enabled(monkeypatch, tmp_path):
     bot, fake = make_bot(monkeypatch, tmp_path)
     bot.profile["Color Button Okay"].update({"enabled": True, "coords": (7, 7)})
     bot.draw(cmap())
-    assert all(call[1][1] is True for call in fake.select_calls())
     assert "color_button_okay" in fake.names()
 
 

@@ -18,7 +18,7 @@ import urllib.error as urllib_error
 import urllib.request
 
 from PIL import Image
-from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QSize, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -232,7 +232,6 @@ class MainWindow(QMainWindow):
         self._setters = [
             SliderField("Delay", 0.0, 1.0, 0.1, 0.01),
             SliderField("Pixel size", 1, 50, 12, 1),
-            SliderField("Precision", 0.0, 1.0, 0.9, 0.01),
             SliderField("Jump delay", 0.0, 2.0, 0.5, 0.05),
         ]
         for index, field in enumerate(self._setters):
@@ -242,12 +241,10 @@ class MainWindow(QMainWindow):
 
         options = Section("Options")
         self._chk_ignore = QCheckBox("Ignore white pixels")
-        self._chk_custom = QCheckBox("Use custom colors")
         self._chk_skip = QCheckBox("Skip first color")
         self._chk_ignore.toggled.connect(self._on_options_changed)
-        self._chk_custom.toggled.connect(self._on_options_changed)
         self._chk_skip.toggled.connect(self._on_skip_changed)
-        for box in (self._chk_ignore, self._chk_custom, self._chk_skip):
+        for box in (self._chk_ignore, self._chk_skip):
             options.add(box)
         layout.insertWidget(layout.count() - 1, options)
 
@@ -339,18 +336,6 @@ class MainWindow(QMainWindow):
         key_row.addWidget(self._pause_edit)
         keys.add_layout(key_row)
 
-        step_row = QHBoxLayout()
-        step_label = QLabel("Calibration step")
-        step_label.setObjectName("FieldLabel")
-        self._calib_step = QSpinBox()
-        self._calib_step.setRange(1, 10)
-        self._calib_step.setValue(2)
-        self._calib_step.valueChanged.connect(self._on_calib_step_changed)
-        step_row.addWidget(step_label)
-        step_row.addStretch(1)
-        step_row.addWidget(self._calib_step)
-        keys.add_layout(step_row)
-
         jump_row = QHBoxLayout()
         jump_label = QLabel("Jump threshold (px)")
         jump_label.setObjectName("FieldLabel")
@@ -365,13 +350,9 @@ class MainWindow(QMainWindow):
         layout.insertWidget(layout.count() - 1, keys)
 
         files = Section("Files")
-        remove_calib = QPushButton("Remove calibration")
-        remove_calib.setObjectName("Danger")
-        remove_calib.clicked.connect(self._on_delete_calibration)
         reset = QPushButton("Reset config")
         reset.setObjectName("Danger")
         reset.clicked.connect(self._on_reset_config)
-        files.add(remove_calib)
         files.add(reset)
         layout.insertWidget(layout.count() - 1, files)
 
@@ -458,8 +439,7 @@ class MainWindow(QMainWindow):
         self._btn_precompute = self._tool_button("Pre-compute", "download", self._on_precompute, "Process and cache the image")
         self._btn_test = self._tool_button("Test draw", "zap", self._on_test_draw, "Draw the first 20 strokes")
         self._btn_simple = self._tool_button("Simple test", "play", self._on_simple_test, "Draw 5 lines to tune the brush")
-        self._btn_calibrate = self._tool_button("Calibrate", "wand", self._on_calibrate, "Scan the custom-colour spectrum")
-        for button in (self._btn_precompute, self._btn_test, self._btn_simple, self._btn_calibrate):
+        for button in (self._btn_precompute, self._btn_test, self._btn_simple):
             layout.addWidget(button)
         layout.addStretch(1)
 
@@ -525,8 +505,7 @@ class MainWindow(QMainWindow):
             self.bot.jump_threshold = int(recipe.drawing_settings["jump_threshold"])
             self._jump_threshold.setValue(self.bot.jump_threshold)
         self.draw_options = merge_drawing_options(
-            self.draw_options, recipe.drawing_options or {},
-            Bot.IGNORE_WHITE, Bot.USE_CUSTOM_COLORS,
+            self.draw_options, recipe.drawing_options or {}, Bot.IGNORE_WHITE,
         )
         self.bot.skip_first_color = bool(recipe.skip_first_color)
         self._refresh_drawing_widgets()
@@ -559,14 +538,10 @@ class MainWindow(QMainWindow):
         self.bot.pause_key = str(self.tools.get("pause_key", "p"))
         self._pause_edit.setText(self.bot.pause_key)
 
-        calib = self.tools.get("calibration_settings", {})
-        self._calib_step.setValue(int(calib.get("step_size", 2)))
-
         settings = self.tools.get("drawing_settings", {})
         self.bot.settings = [
             settings.get("delay", 0.1),
             settings.get("pixel_size", 12),
-            settings.get("precision", 0.9),
             settings.get("jump_delay", 0.5),
         ]
         self.bot.jump_threshold = int(settings.get("jump_threshold", 5))
@@ -576,8 +551,6 @@ class MainWindow(QMainWindow):
         self.draw_options = 0
         if options.get("ignore_white_pixels", True):
             self.draw_options |= Bot.IGNORE_WHITE
-        if options.get("use_custom_colors", False):
-            self.draw_options |= Bot.USE_CUSTOM_COLORS
 
         self.bot.skip_first_color = bool(self.tools.get("skip_first_color", False))
         mode = self.tools.get("draw_mode", Bot.LAYERED)
@@ -608,14 +581,9 @@ class MainWindow(QMainWindow):
         try:
             if palette.get("box") and palette.get("rows") and palette.get("cols"):
                 box = palette["box"]
-                valid = set(palette["valid_positions"]) if palette.get("valid_positions") else None
-                manual = None
-                if palette.get("manual_centers"):
-                    manual = {int(k): tuple(v) for k, v in palette["manual_centers"].items()}
                 self.bot.init_palette(
                     pbox=(box[0], box[1], box[2] - box[0], box[3] - box[1]),
                     prows=palette["rows"], pcols=palette["cols"],
-                    valid_positions=valid, manual_centers=manual,
                 )
             elif palette.get("color_coords"):
                 colors_pos = {
@@ -630,24 +598,17 @@ class MainWindow(QMainWindow):
                 self.bot.init_canvas(self.profile["Canvas"]["box"])
         except Exception as e:
             log.info(f"[Config] canvas restore failed: {e}")
-        try:
-            if self.profile["Custom Colors"].get("box"):
-                self.bot.init_custom_colors(self.profile["Custom Colors"]["box"])
-        except Exception as e:
-            log.info(f"[Config] custom-colour restore failed: {e}")
 
     def _store_drawing_settings(self) -> None:
         settings = self.tools.setdefault("drawing_settings", {})
         settings["delay"] = self.bot.settings[0]
         settings["pixel_size"] = self.bot.settings[1]
-        settings["precision"] = self.bot.settings[2]
-        settings["jump_delay"] = self.bot.settings[3]
+        settings["jump_delay"] = self.bot.settings[2]
         settings["jump_threshold"] = self.bot.jump_threshold
 
     def _store_drawing_options(self) -> None:
         options = self.tools.setdefault("drawing_options", {})
         options["ignore_white_pixels"] = bool(self.draw_options & Bot.IGNORE_WHITE)
-        options["use_custom_colors"] = bool(self.draw_options & Bot.USE_CUSTOM_COLORS)
 
     def _save_config(self) -> None:
         if self._initializing:
@@ -656,7 +617,6 @@ class MainWindow(QMainWindow):
         self.tools["skip_first_color"] = bool(self.bot.skip_first_color)
         self.tools["draw_mode"] = self._mode
         self.tools["theme"] = self._theme_mode
-        self.tools.setdefault("calibration_settings", {})["step_size"] = self._calib_step.value()
         if self._last_url:
             self.tools["last_image_url"] = self._last_url
         payload = pyaint_config.build_payload(self.tools, self.profile)
@@ -677,7 +637,6 @@ class MainWindow(QMainWindow):
 
     def _refresh_option_widgets(self) -> None:
         self._chk_ignore.setChecked(bool(self.draw_options & Bot.IGNORE_WHITE))
-        self._chk_custom.setChecked(bool(self.draw_options & Bot.USE_CUSTOM_COLORS))
         self._chk_skip.setChecked(bool(self.bot.skip_first_color))
 
     def _sync_env_ui(self) -> None:
@@ -723,8 +682,6 @@ class MainWindow(QMainWindow):
         self.draw_options = 0
         if self._chk_ignore.isChecked():
             self.draw_options |= Bot.IGNORE_WHITE
-        if self._chk_custom.isChecked():
-            self.draw_options |= Bot.USE_CUSTOM_COLORS
         self._store_drawing_options()
         self._save_config()
 
@@ -757,12 +714,6 @@ class MainWindow(QMainWindow):
         if self._initializing:
             return
         self.bot.pause_key = text.strip() or "p"
-        self._save_config()
-
-    def _on_calib_step_changed(self, value: int) -> None:
-        if self._initializing:
-            return
-        self.tools.setdefault("calibration_settings", {})["step_size"] = int(value)
         self._save_config()
 
     def _on_jump_threshold_changed(self, value: int) -> None:
@@ -801,7 +752,6 @@ class MainWindow(QMainWindow):
         self._btn_precompute.setIcon(icon("download", fg, 16))
         self._btn_test.setIcon(icon("zap", fg, 16))
         self._btn_simple.setIcon(icon("play", fg, 16))
-        self._btn_calibrate.setIcon(icon("wand", fg, 16))
         self._btn_start.setIcon(icon("play", accent_fg, 16))
         self._btn_pause.setIcon(icon("pause", fg, 16))
         self._btn_stop.setIcon(icon("stop", fg, 16))
@@ -849,7 +799,7 @@ class MainWindow(QMainWindow):
             self.activateWindow()
 
     def _set_running(self, running: bool) -> None:
-        for button in (self._btn_precompute, self._btn_test, self._btn_simple, self._btn_calibrate, self._btn_start, self._auto_btn):
+        for button in (self._btn_precompute, self._btn_test, self._btn_simple, self._btn_start, self._auto_btn):
             button.setEnabled(not running)
         self._btn_stop.setEnabled(running)
         self._btn_pause.setEnabled(running)
@@ -1114,21 +1064,6 @@ class MainWindow(QMainWindow):
             return
         self._start_task("Simple test draw", self.bot.simple_test_draw, minimize=True)
 
-    def _on_calibrate(self) -> None:
-        self._start_task("Calibration", self._calibrate_work)
-
-    def _calibrate_work(self) -> None:
-        grid = self.profile["Custom Colors"].get("box")
-        preview = self.profile["color_preview_spot"].get("coords") or self.profile["color_preview_spot"].get("data")
-        if not grid:
-            raise RuntimeError("Custom Colors not configured — use Setup.")
-        if not preview:
-            raise RuntimeError("Color Preview Spot not configured — use Setup.")
-        self.signals.status.emit("Scanning custom-colour spectrum…")
-        self.bot.calibrate_custom_colors(grid, preview, self._calib_step.value())
-        self.bot.save_color_calibration(os.path.join(paths.PROJECT_ROOT, "color_calibration.json"))
-        self.signals.status.emit("Calibration saved.")
-
     def _on_start(self) -> None:
         if not self._require_image():
             return
@@ -1253,22 +1188,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # File management
     # ------------------------------------------------------------------
-    def _on_delete_calibration(self) -> None:
-        answer = QMessageBox.question(
-            self, self.title,
-            "Remove color_calibration.json? Calibration will need to be redone.",
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        path = os.path.join(paths.PROJECT_ROOT, "color_calibration.json")
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-            self.bot.color_calibration_map = None
-            self._set_status("Calibration removed.")
-        except Exception as exc:  # noqa: BLE001
-            self._set_status(f"Could not remove calibration: {exc}")
-
     def _on_reset_config(self) -> None:
         answer = QMessageBox.question(
             self, self.title,

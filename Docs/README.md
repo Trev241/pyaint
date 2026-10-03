@@ -24,13 +24,15 @@ with any drawing app — it works purely from screen pixels and synthetic input.
 
 The pipeline:
 
-1. **Teach / detect** where the palette, canvas, and (optionally) custom-colour
-   dialog are on screen. The result is stored in a shared **`Profile`**.
+1. **Teach / detect** where the palette and canvas are on screen. The result is
+   stored in a shared **`Profile`**.
 2. **Process** an image: fit it to the canvas, downscale it, and map each pixel
    to the nearest palette colour.
-3. **Encode** each row into horizontal runs → a colour-to-strokes map
-   (`cmap`).
-4. **Draw**: for each colour, select it in the app, then replay its strokes.
+3. **Encode** each row into horizontal runs → a colour-to-strokes map (`cmap`).
+4. **Draw**: for each colour, click its palette swatch, then replay its strokes.
+
+Colours are chosen from the sampled **palette**; arbitrary custom colours
+(colour-dialog automation) are intentionally not supported.
 
 ## Install & run
 
@@ -51,24 +53,22 @@ launcher shim.
 pyaint/
 ├── __main__.py        entry point (python -m pyaint)
 ├── bot.py             engine facade (Bot): process + draw
-├── painter.py         screen-input driver (ScreenPainter, Capabilities)
+├── painter.py         screen-input driver (ScreenPainter)
 ├── palette.py         swatch sampling + nearest colour
 ├── profile.py         Profile: single source of truth for the environment
 ├── config.py          config.json I/O + env/prefs split
 ├── targets.py         target recipes + registry
 ├── locators.py        canvas/palette auto-detection
+├── annotate.py        detection preview drawing (regions + swatch centres)
 ├── validation.py      recipe self-tests
-├── calibration.py     custom-colour calibration (CalibrationMixin)
 ├── cache.py           pre-computation cache (CacheMixin)
 ├── ui/                PySide6 (Qt) desktop UI
-│   ├── main_window.py  main window: panels, toolbar, status bar
+│   ├── main_window.py  main window: panels, tabs, toolbar, status bar
 │   ├── setup_dialog.py setup wizard (manual tool teaching)
 │   ├── capture.py      full-screen click-capture overlay
 │   ├── theme.py        VS Code-style design tokens + stylesheet
 │   ├── icons.py        QPainter-drawn line icons
-│   ├── widgets.py      reusable widgets
-│   ├── window.py       legacy Tk UI (superseded, kept for reference)
-│   └── setup.py        legacy Tk setup wizard
+│   └── widgets.py      reusable widgets
 ├── paths.py           runtime filesystem locations
 ├── utils.py           sizing + duration helpers
 ├── errors.py          exceptions
@@ -78,30 +78,31 @@ pyaint/
 ### Shared environment
 
 `Profile` is the single source of truth for everything the user has taught
-Pyaint (palette, canvas, custom colours, layer/colour buttons, MSPaint mode,
-colour-selection strategy, selected target). `Window` creates it; `Bot` holds a
-reference to the same instance, so there is nothing to merge back after setup.
-The main window creates it; the Setup dialog mutates it in place. Legacy `Bot`
-attributes (`new_layer`, `color_button`, `_canvas`, …) are read-only views onto
-the profile.
+Pyaint (palette, canvas, layer/colour buttons, MSPaint mode, selected target).
+The main window creates it; the Setup dialog mutates it in place, and `Bot`
+holds a reference to the same instance, so there is nothing to merge back.
+`Bot` exposes read-only `@property` views (`new_layer`, `color_button`,
+`_canvas`, …) onto the profile.
 
 ### Configuration split
 
 `config.json` mixes two concerns, separated on load:
 
-- **Environment** (owned by `Profile`): tool geometry, `MSPaint Mode`,
-  `color_selection`, `target`.
+- **Environment** (owned by `Profile`): the tool entries, `MSPaint Mode`,
+  `target`.
 - **Preferences** (owned by `Window`): `pause_key`, `drawing_settings`,
-  `drawing_options`, `skip_first_color`, `last_image_url`,
-  `calibration_settings`.
+  `drawing_options`, `skip_first_color`, `last_image_url`, `theme`, `draw_mode`.
+
+Legacy environment keys from older versions (`Custom Colors`,
+`color_preview_spot`, `color_selection`) are dropped on load.
 
 See [`configuration.md`](configuration.md).
 
 ### Processing
 
 `Bot.process()` opens the image, scales it to fit the canvas, downscales by the
-pixel step, then `_encode_rows()` maps each pixel to a colour and closes a run
-whenever the colour changes or a row ends.
+pixel step, then `_encode_rows()` maps each pixel to the nearest palette colour
+and closes a run whenever the colour changes or a row ends.
 
 - **Layered** (default): builds per-row colour tables, then `_merge_layers()`
   sorts colours by frequency and repaints lower layers, yielding fewer strokes.
@@ -112,22 +113,18 @@ whenever the colour changes or a row ends.
 ### Drawing
 
 `Bot.draw(cmap)` iterates colours, optionally creates a new layer and/or clicks
-the colour button(s), selects the colour through the `ScreenPainter` colour
-chain, then replays each run as a segmented drag. It supports pause/resume
-(state is kept in `draw_state`) and terminates on `ESC`.
-
-### Colour selection
-
-`Profile.color_selection` is one of `auto`, `palette`, or `custom`. The driver
-resolves each colour to one of four sources — `palette` → `calibrated` →
-`keyboard` → `none` — and clicks the corresponding swatch or types RGB values.
+the colour button(s), selects the swatch through the `ScreenPainter`, then
+replays each run as a segmented drag. It supports pause/resume (state is kept in
+`draw_state`) and terminates on `ESC`.
 
 ### Auto-detection
 
 `locators.py` finds the canvas and palette from a screenshot using declarative
 specs from the active recipe: `white_rect`, `color_rect`, `center_rect`,
-`color_grid`, `color_signature`, and `window_relative`. Detection is pure over a
-PIL image (headlessly testable); failures fall back to manual teaching.
+`color_grid`, `color_signature`, and `window_relative`. `annotate.py` draws the
+detected regions and the palette swatch centres into the **Detection** tab so
+the result can be confirmed visually. Detection is pure over a PIL image
+(headlessly testable); failures fall back to manual teaching.
 
 ### Caching
 
@@ -149,8 +146,6 @@ not code. A recipe can be extended and overridden by dropping a JSON file in
 
 ## Guides
 
-- [Usage guide](usage-guide.md)
-- [Tutorial](tutorial.md)
 - [Configuration](configuration.md)
 - [Troubleshooting](troubleshooting.md)
 - [API reference](api.md)

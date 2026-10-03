@@ -22,8 +22,8 @@ layers:
 ```
 
 Supporting data and helpers: `profile.py` (taught environment), `targets.py`
-(recipes), `locators.py` (auto-detection), `palette.py`, `calibration.py`,
-`cache.py`, `config.py`, `utils.py`.
+(recipes), `locators.py` (auto-detection), `annotate.py` (preview),
+`palette.py`, `cache.py`, `config.py`, `utils.py`.
 
 The key design rule: **the planner never branches on app identity.** App
 differences live in a declarative recipe (data) and behind the `ScreenPainter`
@@ -37,7 +37,7 @@ keeping two copies, `Window` creates one `Profile` and hands a reference to
 
 ```
 Window ─┐
-        ├── self.profile ──▶ Profile (tools, mspaint_mode, color_selection, target)
+        ├── self.profile ──▶ Profile (tools, mspaint_mode, target)
 Bot ────┘
 ```
 
@@ -53,18 +53,12 @@ attribute access keeps working.
 
 `config.json` mixes two concerns and is split on load:
 
-- **Environment** → `Profile`: all tool entries, `MSPaint Mode`,
-  `color_selection`, `target`.
+- **Environment** → `Profile`: the tool entries, `MSPaint Mode`, `target`.
 - **Preferences** → `Window.tools`: `pause_key`, `drawing_settings`,
-  `drawing_options`, `skip_first_color`, `last_image_url`,
-  `calibration_settings`.
+  `drawing_options`, `skip_first_color`, `last_image_url`, `theme`, `draw_mode`.
 
-On save the two are merged: `{**preferences, **profile.to_config()}`.
-
-`color_calibration.json` is deliberately **not** part of `to_config()`; it
-persists separately as `{"r,g,b": [x, y], ...}`. `Profile.to_dict()` /
-`from_dict()` is a different, versioned *preset* format that does include
-calibration.
+On save the two are merged: `{**preferences, **profile.to_config()}`. Legacy
+environment keys from older versions are dropped on load.
 
 ### Box formats
 
@@ -73,8 +67,8 @@ Two shapes are in play:
 - **Corner box** `[x1, y1, x2, y2]` — stored in `profile[tool]["box"]`.
 - **Rect** `(x, y, w, h)` — used by `pyautogui` and `Palette`.
 
-`Profile.canvas_rect()` / `palette_rect()` / `custom_colors_rect()` do the
-conversion (and tolerate reversed corners).
+The `canvas_rect()` / `palette_rect()` helpers do the conversion (and tolerate
+reversed corners).
 
 ## Processing pipeline
 
@@ -103,14 +97,13 @@ redraws.
 
 `Bot.draw(cmap)`:
 
-1. Compute total strokes; show the progress overlay.
-2. Load `color_calibration.json` if present.
-3. For each colour: optionally create a new layer, optionally click the colour
-   button, select the colour via `ScreenPainter.select_color()`, optionally
+1. Compute total strokes and report progress through the callback.
+2. For each colour: optionally create a new layer, optionally click the colour
+   button, select the swatch via `ScreenPainter.select_color()`, optionally
    click the colour-dialog OK button.
-4. For each run: insert a jump delay if the cursor moved more than
+3. For each run: insert a jump delay if the cursor moved more than
    `jump_threshold`; honour pause/terminate; replay the run as a segmented drag.
-5. Report estimated vs actual time and reset state.
+4. Report estimated vs actual time and reset state.
 
 Pause/terminate is driven by the global `pynput` listener in
 `pyaint/__main__.py`, which sets `bot.paused` / `bot.terminate`. Resume state
@@ -119,27 +112,18 @@ replayed for a clean result.
 
 ## Colour selection
 
-`Profile.color_selection` ∈ `auto | palette | custom`. The driver's
-`ColorSelectionChain` resolves each target to one of:
-
-| Source | Condition |
-|--------|-----------|
-| `palette` | target is in the sampled palette (unless `custom`/force-custom) |
-| `calibrated` | a calibration map yields a position within tolerance |
-| `keyboard` | no calibration file exists and the Custom Colors box is set |
-| `none` | nothing applies; the colour is skipped |
-
-The strategy is decided without input (`resolve`) and then performed
-(`apply`). Calibration lookup is a Manhattan-distance tolerance match first,
-then inverse-distance-weighted kNN interpolation in RGB space.
+Colours are selected from the sampled palette. The driver's
+`ColorSelectionChain` resolves each target to `palette` if the swatch is known,
+otherwise `none` (the colour is skipped). `resolve` decides without performing
+input; `apply` clicks the swatch. Arbitrary custom colours (colour-dialog
+automation) are not supported.
 
 ## Target recipes
 
 A recipe is data describing a target app:
 
 - which `tools` Setup should show,
-- the `color_selection` strategy and capability flags,
-- `drawing_settings` / `drawing_options` defaults,
+- the `drawing_settings` / `drawing_options` defaults,
 - optional fixed `palette`,
 - `detection` locator specs.
 
@@ -174,7 +158,7 @@ content area shows the image preview, and the status bar shows progress. Theme
 tokens live in `theme.py` (VS Code "Dark Modern"), and icons are drawn in
 `icons.py` so no image assets are shipped.
 
-Long-running work (precompute, test draw, calibration, draw, region redraw) runs
+Long-running work (precompute, test draw, draw, region redraw) runs
 on daemon `threading.Thread`s. `Bot` reports progress through
 `progress_callback`, which the window connects to a Qt signal; Qt then queues
 the update onto the main thread. This keeps all widget access on the UI thread

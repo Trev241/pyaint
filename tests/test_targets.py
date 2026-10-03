@@ -24,18 +24,15 @@ import pytest
 # ---------------------------------------------------------------------------
 def test_builtin_recipes_present_and_valid():
     ids = {r.id for r in list_recipes()}
-    assert {"generic", "mspaint", "gimp", "skribbl"} <= ids
+    assert {"generic", "mspaint", "skribbl"} <= ids
     for recipe in list_recipes():
         assert recipe.tools, recipe.id
         assert set(recipe.tools) <= set(pyaint_profile.TOOL_KEYS)
-        assert recipe.color_selection in pyaint_profile.VALID_COLOR_SELECTION
 
 
 def test_skribbl_recipe_is_palette_only():
     recipe = get_recipe("skribbl")
     assert recipe.tools == ("Palette", "Canvas")
-    assert recipe.color_selection == "palette"
-    assert recipe.supports_custom_colors is False
     assert recipe.supports_layers is False
     assert recipe.drawing_options["ignore_white_pixels"] is True
 
@@ -58,7 +55,7 @@ def test_available_locators_registry():
 # Recipe serialization / validation
 # ---------------------------------------------------------------------------
 def test_recipe_dict_round_trip():
-    original = get_recipe("gimp")
+    original = get_recipe("mspaint")
     restored = Recipe.from_dict(original.to_dict())
     assert restored == original
 
@@ -66,10 +63,6 @@ def test_recipe_dict_round_trip():
 def test_recipe_from_dict_filters_unknown_tools():
     recipe = Recipe.from_dict({"id": "x", "tools": ["Palette", "Bogus", "Canvas"]})
     assert recipe.tools == ("Palette", "Canvas")
-
-
-def test_recipe_from_dict_invalid_color_selection_falls_back():
-    assert Recipe.from_dict({"id": "x", "color_selection": "wat"}).color_selection == "auto"
 
 
 def test_recipe_from_dict_requires_id():
@@ -81,21 +74,20 @@ def test_recipe_from_dict_requires_id():
 # Applying recipe defaults
 # ---------------------------------------------------------------------------
 def test_merge_drawing_settings_overlays_present_keys_only():
-    base = [0.1, 12, 0.9, 0.5]
+    base = [0.1, 12, 0.5]
     assert merge_drawing_settings(base, {"delay": 0.2, "pixel_size": 8}) == [
         0.2,
         8,
-        0.9,
         0.5,
     ]
     assert merge_drawing_settings(base, {}) == base
 
 
 def test_merge_drawing_options_sets_and_clears_bits():
-    ignore, custom = 1, 2
-    assert merge_drawing_options(0, {"ignore_white_pixels": True}, ignore, custom) == ignore
-    assert merge_drawing_options(3, {"use_custom_colors": False}, ignore, custom) == ignore
-    assert merge_drawing_options(0, {}, ignore, custom) == 0
+    ignore = 1
+    assert merge_drawing_options(0, {"ignore_white_pixels": True}, ignore) == ignore
+    assert merge_drawing_options(1, {"ignore_white_pixels": False}, ignore) == 0
+    assert merge_drawing_options(0, {}, ignore) == 0
 
 
 def test_apply_profile_defaults_disables_unused_tools():
@@ -109,7 +101,6 @@ def test_apply_profile_defaults_disables_unused_tools():
     profile["New Layer"]["enabled"] = True
     profile.mspaint_mode["enabled"] = True
     apply_profile_defaults(profile, recipe)
-    assert profile.color_selection == "palette"
     assert profile["New Layer"]["enabled"] is False
     assert profile.mspaint_mode["enabled"] is False
 
@@ -122,7 +113,6 @@ def test_registry_load_dir(tmp_path):
         "id": "myapp",
         "name": "My App",
         "tools": ["Palette", "Canvas"],
-        "color_selection": "palette",
     }
     (tmp_path / "myapp.json").write_text(json.dumps(payload), encoding="utf-8")
 
@@ -200,15 +190,13 @@ def test_hidden_recipes_resolvable_but_not_listed():
 def test_builtin_children_inherit_from_base():
     mspaint = get_recipe("mspaint")
     assert set(mspaint.tools) == {
-        "Palette", "Canvas", "Custom Colors", "Color Button", "Color Button Okay",
+        "Palette", "Canvas", "Color Button", "Color Button Okay",
     }
     assert mspaint.supports_layers is False  # overridden
     assert mspaint.supports_mspaint_mode is True  # inherited
-    assert mspaint.supports_custom_colors is True  # inherited
 
     skribbl = get_recipe("skribbl")
     assert skribbl.tools == ("Palette", "Canvas")
-    assert skribbl.color_selection == "palette"
     assert skribbl.drawing_options["ignore_white_pixels"] is True
 
 
@@ -219,14 +207,10 @@ def test_target_is_an_environment_config_key():
     assert "target" in pyaint_profile.ENV_CONFIG_KEYS
 
 
-def test_profile_target_round_trips_through_config_and_preset():
+def test_profile_target_round_trips_through_config():
     profile = Profile(target="skribbl")
     assert profile.to_config()["target"] == "skribbl"
     assert Profile.from_config(profile.to_config()).target == "skribbl"
-
-    preset = profile.to_dict()
-    assert preset["target"] == "skribbl"
-    assert Profile.from_dict(preset).target == "skribbl"
 
 
 def test_profile_target_defaults_to_generic():

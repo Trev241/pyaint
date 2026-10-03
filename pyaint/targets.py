@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from pyaint import paths
-from pyaint.profile import AUTO, TOOL_KEYS, VALID_COLOR_SELECTION
+from pyaint.profile import TOOL_KEYS
 
 DEFAULT_RECIPE_ID = "generic"
 
@@ -40,10 +40,7 @@ class Recipe:
     description: str = ""
     # Which Profile tools this target uses (controls what Setup shows).
     tools: Tuple[str, ...] = _MINIMUM_TOOLS
-    # Colour-selection strategy to apply: "auto" | "palette" | "custom".
-    color_selection: str = AUTO
     # Capability hints (informational for now; drive degradation later).
-    supports_custom_colors: bool = False
     supports_layers: bool = False
     supports_mspaint_mode: bool = False
     # Drawing defaults applied when the target is selected.
@@ -73,10 +70,6 @@ class Recipe:
         requested = data.get("tools") or _MINIMUM_TOOLS
         tools = tuple(t for t in requested if t in TOOL_KEYS) or _MINIMUM_TOOLS
 
-        color_selection = data.get("color_selection", AUTO)
-        if color_selection not in VALID_COLOR_SELECTION:
-            color_selection = AUTO
-
         palette = data.get("palette")
         palette = [list(c) for c in palette] if palette else None
 
@@ -85,8 +78,6 @@ class Recipe:
             name=str(data.get("name", data["id"])),
             description=str(data.get("description", "")),
             tools=tools,
-            color_selection=color_selection,
-            supports_custom_colors=bool(data.get("supports_custom_colors", False)),
             supports_layers=bool(data.get("supports_layers", False)),
             supports_mspaint_mode=bool(data.get("supports_mspaint_mode", False)),
             drawing_settings=dict(data.get("drawing_settings") or {}),
@@ -106,8 +97,6 @@ class Recipe:
             "name": self.name,
             "description": self.description,
             "tools": list(self.tools),
-            "color_selection": self.color_selection,
-            "supports_custom_colors": self.supports_custom_colors,
             "supports_layers": self.supports_layers,
             "supports_mspaint_mode": self.supports_mspaint_mode,
             "drawing_settings": dict(self.drawing_settings),
@@ -137,29 +126,17 @@ def merge_drawing_settings(
     if len(merged) > 1:
         merged[1] = updates.get("pixel_size", merged[1])
     if len(merged) > 2:
-        merged[2] = updates.get("precision", merged[2])
-    if len(merged) > 3:
-        merged[3] = updates.get("jump_delay", merged[3])
+        merged[2] = updates.get("jump_delay", merged[2])
     return merged
 
 
-def merge_drawing_options(
-    flags: int,
-    updates: Mapping[str, bool],
-    ignore_white_bit: int,
-    use_custom_bit: int,
-) -> int:
-    """Apply ``ignore_white_pixels`` / ``use_custom_colors`` to a flag bitmask."""
+def merge_drawing_options(flags: int, updates: Mapping[str, bool], ignore_white_bit: int) -> int:
+    """Apply ``ignore_white_pixels`` to a flag bitmask."""
     if "ignore_white_pixels" in updates:
         if updates["ignore_white_pixels"]:
             flags |= ignore_white_bit
         else:
             flags &= ~ignore_white_bit
-    if "use_custom_colors" in updates:
-        if updates["use_custom_colors"]:
-            flags |= use_custom_bit
-        else:
-            flags &= ~use_custom_bit
     return flags
 
 
@@ -174,7 +151,6 @@ def disabled_tools(recipe: "Recipe") -> Tuple[str, ...]:
 
 def apply_profile_defaults(profile: Any, recipe: "Recipe") -> None:
     """Apply the environment-side recipe defaults to a ``Profile`` in place."""
-    profile.color_selection = recipe.color_selection
     for tool in disabled_tools(recipe):
         profile[tool]["enabled"] = False
     if not recipe.supports_mspaint_mode:
@@ -229,11 +205,9 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
         "name": "Desktop app (base)",
         "hidden": True,
         "tools": [
-            "Palette", "Canvas", "Custom Colors",
+            "Palette", "Canvas",
             "New Layer", "Color Button", "Color Button Okay",
         ],
-        "color_selection": AUTO,
-        "supports_custom_colors": True,
         "supports_layers": True,
         "supports_mspaint_mode": True,
     },
@@ -242,22 +216,18 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
         "name": "Browser canvas (base)",
         "hidden": True,
         "tools": ["Palette", "Canvas"],
-        "color_selection": "palette",
-        "supports_custom_colors": False,
         "supports_layers": False,
         "supports_mspaint_mode": False,
-        "drawing_options": {"ignore_white_pixels": True, "use_custom_colors": False},
+        "drawing_options": {"ignore_white_pixels": True},
     },
     {
         "id": "generic",
         "name": "Generic / other app",
         "description": "Full manual setup for any painting application.",
         "tools": list(TOOL_KEYS),
-        "color_selection": AUTO,
-        "supports_custom_colors": True,
         "supports_layers": True,
         "supports_mspaint_mode": True,
-        "notes": "Teach every tool manually; enable custom colours only if the app has a colour dialog.",
+        "notes": "Teach the palette and canvas manually; optional layer/colour-button tools.",
     },
     {
         "id": "mspaint",
@@ -265,16 +235,15 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
         "extends": "desktop-base",
         "description": "Classic sampled-palette workflow; optional double-click mode.",
         # Classic Paint has no layers; override the desktop base's tool list.
-        "tools": ["Palette", "Canvas", "Custom Colors", "Color Button", "Color Button Okay"],
+        "tools": ["Palette", "Canvas", "Color Button", "Color Button Okay"],
         "supports_layers": False,
         "drawing_settings": {
             "delay": 0.05,
             "pixel_size": 8,
-            "precision": 0.9,
             "jump_delay": 0.5,
             "jump_threshold": 5,
         },
-        "drawing_options": {"ignore_white_pixels": True, "use_custom_colors": False},
+        "drawing_options": {"ignore_white_pixels": True},
         # Best-effort, tuned from a maximized Windows 11 Paint screenshot:
         # the canvas is found from the image centre; the palette is found with
         # the exact swatch colours inside the ribbon's Colors region.
@@ -297,22 +266,6 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
         "notes": "Sampled palette. Enable MSPaint Mode if the app needs double-clicks to pick colours.",
     },
     {
-        "id": "gimp",
-        "name": "GIMP",
-        "extends": "desktop-base",
-        "description": "Layer-based editor using its colour dialog.",
-        "color_selection": "custom",
-        "drawing_settings": {
-            "delay": 0.05,
-            "pixel_size": 6,
-            "precision": 0.95,
-            "jump_delay": 0.5,
-            "jump_threshold": 5,
-        },
-        "drawing_options": {"ignore_white_pixels": True, "use_custom_colors": False},
-        "notes": "Uses the colour dialog. Run calibration or rely on RGB keyboard entry.",
-    },
-    {
         "id": "skribbl",
         "name": "skribbl.io",
         "extends": "browser-base",
@@ -320,7 +273,6 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
         "drawing_settings": {
             "delay": 0.03,
             "pixel_size": 8,
-            "precision": 0.9,
             "jump_delay": 0.2,
             "jump_threshold": 5,
         },
@@ -393,9 +345,6 @@ class RecipeRegistry:
             return recipes
         return [r for r in recipes if not r.hidden]
 
-    def ids(self) -> List[str]:
-        return list(self._recipes.keys())
-
     def load_dir(self, path: str) -> List[Recipe]:
         """Load/override recipes from ``*.json`` files in ``path``."""
         loaded: List[Recipe] = []
@@ -417,7 +366,6 @@ def _build_builtins() -> "RecipeRegistry":
 
 
 REGISTRY = _build_builtins()
-BUILTIN_RECIPES: Tuple[Recipe, ...] = tuple(REGISTRY.all(include_hidden=True))
 
 
 def list_recipes() -> List[Recipe]:

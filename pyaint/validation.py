@@ -9,11 +9,11 @@ and at startup.
 from typing import Any, List
 
 from pyaint.locators import available_locators, locator_params
-from pyaint.profile import TOOL_KEYS, VALID_COLOR_SELECTION
+from pyaint.profile import TOOL_KEYS
 from pyaint.targets import CURRENT_RECIPE_SCHEMA, Recipe
 
-_SETTING_KEYS = {"delay", "pixel_size", "precision", "jump_delay", "jump_threshold"}
-_OPTION_KEYS = {"ignore_white_pixels", "use_custom_colors"}
+_SETTING_KEYS = {"delay", "pixel_size", "jump_delay", "jump_threshold"}
+_OPTION_KEYS = {"ignore_white_pixels"}
 
 
 def _validate_detection(detection: Any) -> List[str]:
@@ -61,8 +61,6 @@ def validate_recipe(recipe: Recipe) -> List[str]:
     unknown_tools = [t for t in recipe.tools if t not in TOOL_KEYS]
     if unknown_tools:
         issues.append(f"unknown tools: {unknown_tools}")
-    if recipe.color_selection not in VALID_COLOR_SELECTION:
-        issues.append(f"invalid color_selection: {recipe.color_selection!r}")
     unknown_settings = set(recipe.drawing_settings) - _SETTING_KEYS
     if unknown_settings:
         issues.append(f"unknown drawing_settings: {sorted(unknown_settings)}")
@@ -77,7 +75,3 @@ def validate_recipe(recipe: Recipe) -> List[str]:
             issues.append(f"invalid palette colour: {color!r}")
     issues.extend(_validate_detection(recipe.detection))
     return issues
-
-
-def recipe_is_valid(recipe: Recipe) -> bool:
-    return not validate_recipe(recipe)

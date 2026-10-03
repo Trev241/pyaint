@@ -167,36 +167,13 @@ def test_process_region_stays_within_canvas_target(tmp_path):
 # ---------------------------------------------------------------------------
 # colour-selection strategy (profile-driven, no clicks performed)
 # ---------------------------------------------------------------------------
-def test_color_source_prefers_palette_in_auto(monkeypatch, tmp_path):
+def test_color_source_uses_palette(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
     assert bot._color_source(RED) == "palette"
 
 
-def test_color_source_palette_only_mode(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
-    bot.profile.color_selection = "palette"
-    assert bot._color_source(RED) == "palette"
-    assert bot._color_source((1, 2, 3)) == "none"
-
-
-def test_color_source_custom_mode_uses_calibration(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
-    bot.profile.color_selection = "custom"
-    bot.profile.calibration = {RED: (5, 6)}
-    assert bot._color_source(RED) == "calibrated"
-
-
-def test_color_source_force_custom_falls_back_to_keyboard(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
-    bot.profile["Custom Colors"]["box"] = [0, 0, 10, 10]
-    assert bot._color_source(RED, force_custom=True) == "keyboard"
-
-
-def test_color_source_none_when_nothing_configured(monkeypatch, tmp_path):
+def test_color_source_none_when_absent(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
     assert bot._color_source((1, 2, 3)) == "none"

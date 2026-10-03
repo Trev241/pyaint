@@ -26,25 +26,21 @@ from pyaint.ui.capture import pick_points
 _FRIENDLY = {
     "Palette": "Palette",
     "Canvas": "Canvas",
-    "Custom Colors": "Custom colors",
     "New Layer": "New layer",
     "Color Button": "Color button",
     "Color Button Okay": "Color button OK",
-    "color_preview_spot": "Color preview spot",
 }
 
 _DESCRIPTIONS = {
     "Palette": "A grid of swatches. Click its top-left and bottom-right corners, then set the rows and columns.",
     "Canvas": "The drawing surface. Click its top-left and bottom-right corners.",
-    "Custom Colors": "The colour-dialog/spectrum region, used for calibration.",
     "New Layer": "The button that creates a new layer (optional).",
-    "Color Button": "The button that opens the colour dialog (optional).",
-    "Color Button Okay": "The confirmation button in the colour dialog (optional).",
-    "color_preview_spot": "Where the app previews the currently selected colour (used by calibration).",
+    "Color Button": "A button clicked before palette selection (optional).",
+    "Color Button Okay": "A button clicked after palette selection (optional).",
 }
 
-_BOX_TOOLS = {"Palette", "Canvas", "Custom Colors"}
-_COORD_TOOLS = {"New Layer", "Color Button", "Color Button Okay", "color_preview_spot"}
+_BOX_TOOLS = {"Palette", "Canvas"}
+_COORD_TOOLS = {"New Layer", "Color Button", "Color Button Okay"}
 _MODIFIER_TOOLS = {"New Layer", "Color Button", "Color Button Okay"}
 _DELAY_TOOLS = {"Color Button", "Color Button Okay"}
 
@@ -223,8 +219,6 @@ class SetupDialog(QDialog):
         try:
             if name == "Canvas":
                 self.bot.init_canvas(box)
-            elif name == "Custom Colors":
-                self.bot.init_custom_colors(box)
             elif name == "Palette":
                 self._setup_palette(box)
         except Exception as exc:  # noqa: BLE001
@@ -243,8 +237,6 @@ class SetupDialog(QDialog):
                 pcols=cols,
             )
             entry["color_coords"] = {str(k): list(v) for k, v in palette.colors_pos.items()}
-            entry["valid_positions"] = list(range(rows * cols))
-            entry["manual_centers"] = {}
         except Exception as exc:  # noqa: BLE001
             log.info(f"[Setup] palette sampling failed: {exc}")
 

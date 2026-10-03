@@ -14,7 +14,6 @@ Produces ``dist/pyaint.exe``. This is a thin wrapper around the checked-in
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path

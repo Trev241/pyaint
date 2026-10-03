@@ -2,8 +2,6 @@ from pyaint.log import log
 import pyautogui
 import time
 from pyaint import utils
-import json
-import os
 
 from pyaint.errors import (
     NoCanvasError,
@@ -15,25 +13,21 @@ from pyaint.profile import Profile
 from pyaint.painter import ScreenPainter
 from pyaint.locators import detect_target
 from pyaint.palette import Palette
-from pyaint.calibration import CalibrationMixin
 from pyaint.cache import CacheMixin
 
-class Bot(CalibrationMixin, CacheMixin):
-    DELAY, STEP, ACCURACY, JUMP_DELAY = tuple(i for i in range(4))
+class Bot(CacheMixin):
+    DELAY, STEP, JUMP_DELAY = tuple(i for i in range(3))
 
     SLOTTED = 'slotted'
     LAYERED = 'layered'
 
     IGNORE_WHITE = 1 << 0
-    USE_CUSTOM_COLORS = 1 << 1
 
-    def __init__(self, config_file='config.json', profile=None):
+    def __init__(self, profile=None):
         self.terminate = False
         self.paused = False
         self.pause_key = 'p'
-        self.settings = [.1, 12, .9, 0.5]  # Added jump delay default
-        self.progress = 0
-        self.config_file = config_file
+        self.settings = [.1, 12, 0.5]  # [delay, pixel_size, jump_delay]
         self.drawing = False  # Flag to indicate if currently drawing
         self.skip_first_color = False  # Skip first color when drawing
         self.jump_threshold = 5  # Pixel distance threshold for jump detection (default 5)
@@ -90,61 +84,30 @@ class Bot(CalibrationMixin, CacheMixin):
         return self.profile.mspaint_mode
 
     @property
-    def color_calibration_map(self):
-        return self.profile.calibration
-
-    @color_calibration_map.setter
-    def color_calibration_map(self, value):
-        self.profile.calibration = value
-
-    @property
     def _canvas(self):
         return self.profile.canvas_rect()
 
-    @property
-    def _custom_colors(self):
-        return self.profile.custom_colors_rect()
-
     # ------------------------------------------------------------------
-    # Colour selection strategy (declared by the profile, not inferred)
+    # Colour selection (palette swatches only)
     # ------------------------------------------------------------------
-    def _color_source(self, target, force_custom=False):
+    def _color_source(self, target):
         """Decide how ``target`` should be selected, without performing input.
 
-        Returns ``'palette'``, ``'calibrated'``, ``'keyboard'`` or ``'none'``.
-        Delegates to the screen driver's colour-selection chain so the strategy
-        lives with the rest of the app-specific input code.
+        Returns ``'palette'`` or ``'none'``.
         """
-        return self.painter.resolve_color_source(target, force_custom)
+        return self.painter.resolve_color_source(target)
 
-    def _click_swatch(self, x, y):
-        """Backwards-compatible wrapper for the driver's swatch click."""
-        return self.painter.click_swatch(x, y)
+    def _select_color(self, target):
+        """Select ``target`` in the painting app (from the sampled palette)."""
+        return self.painter.select_color(target)
 
-    def _enter_rgb_keyboard(self, c):
-        """Backwards-compatible wrapper for the driver's RGB keyboard entry."""
-        return self.painter.enter_rgb_keyboard(c)
-
-    def _select_color(self, target, force_custom=False):
-        """Select ``target`` in the painting app per the profile's strategy.
-
-        When ``force_custom`` is set (Colour Button Okay enabled) the built-in
-        palette is skipped and the custom-colour path is used instead.
-        """
-        return self.painter.select_color(target, force_custom)
-
-    def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None, valid_positions=None, manual_centers=None) -> Palette:
-
-        # Previously, pbox was located using screenshots, this functionality is being phased out in favour of another method.
-        # pyautogui's box format is (topleftx, toplefty, width, height). Likewise, palette expects and operates on this legacy format.
-        # pbox should already be in (left, top, width, height) format when passed in
-
+    def init_palette(self, colors_pos=None, prows=None, pcols=None, pbox=None) -> Palette:
+        # ``pbox`` is (left, top, width, height) — pyautogui's format.
         try:
             if colors_pos is not None:
                 self._palette = Palette(colors_pos=colors_pos)
             elif pbox is not None and prows is not None and pcols is not None:
-                # pbox should already be in correct format (left, top, width, height), pass through directly
-                self._palette = Palette(box=pbox, rows=prows, columns=pcols, valid_positions=valid_positions, manual_centers=manual_centers)
+                self._palette = Palette(box=pbox, rows=prows, columns=pcols)
             else:
                 raise ValueError('Invalid parameters for palette initialization')
         except Exception as e:
@@ -157,23 +120,6 @@ class Bot(CalibrationMixin, CacheMixin):
         # ``_canvas`` property derives the (x, y, w, h) view used by the engine.
         self.profile['Canvas']['box'] = list(cabox)
 
-    def init_custom_colors(self, ccbox):
-        self.profile['Custom Colors']['box'] = list(ccbox)
-
-        # Scan the custom colors spectrum to create a color-to-position map
-        # This allows clicking on specific colors in the spectrum instead of using keyboard input
-        self._spectrum_map = self._scan_spectrum(ccbox)
-        log.info(f"[Spectrum] Scanned {len(self._spectrum_map)} unique colors from custom colors spectrum")
-        
-        # Load color calibration data if file exists
-        if os.path.exists('color_calibration.json'):
-            try:
-                with open('color_calibration.json', 'r') as f:
-                    calibration_json = json.load(f)
-                log.info(f"[Color Calibration] Loaded {len(calibration_json)} mapped colors")
-            except Exception as e:
-                log.info(f"[Color Calibration] Error loading calibration data: {e}")
-    
     # ------------------------------------------------------------------
     # Auto-detection (Phase 2)
     # ------------------------------------------------------------------
@@ -309,14 +255,11 @@ class Bot(CalibrationMixin, CacheMixin):
         and again at the end of each row (so the final pixel is included).
         Shared by process() and process_region().
         """
-        size = w * h
         nearest_colors = {}
         cmap = {}
         col_freq = {}
         table_lines = []
         table_colors = []
-        # Interval size from normalized accuracy; lower bound of 1 prevents 0.
-        interval_size = max((1 - self.settings[Bot.ACCURACY]) * 255, 1)
         y = y0
 
         for i in range(h):
@@ -331,13 +274,8 @@ class Bot(CalibrationMixin, CacheMixin):
                 r, g, b = pix[j, i][:3]
 
                 if (r, g, b) not in nearest_colors:
-                    if flags & Bot.USE_CUSTOM_COLORS:
-                        col = tuple(int(round(v / interval_size) * interval_size) for v in (r, g, b))
-                    else:
-                        col = self._palette.nearest_color((r, g, b))
-                    nearest_colors[(r, g, b)] = col
-                else:
-                    col = nearest_colors[(r, g, b)]
+                    nearest_colors[(r, g, b)] = self._palette.nearest_color((r, g, b))
+                col = nearest_colors[(r, g, b)]
 
                 if old_col is not None and old_col != col:
                     self._emit_run(cmap, table_lines, table_colors, col_freq,
@@ -345,7 +283,6 @@ class Bot(CalibrationMixin, CacheMixin):
                     start = (x, y)
 
                 old_col = col
-                self.progress = 100 * (i * w + (j + 1)) / size
                 x += step
 
             # Close the run that contains the final pixel of the row.
@@ -360,8 +297,6 @@ class Bot(CalibrationMixin, CacheMixin):
     def draw(self, cmap):
         '''
         Draws the image as per the coordinates of the processed cmap table.
-        Depending upon the selection of colors used, the bot will choose
-        from either the standard palette or custom color option accordingly.
         Supports pause/resume functionality and configurable jump delays.
         '''
 
@@ -369,16 +304,6 @@ class Bot(CalibrationMixin, CacheMixin):
         self.total_strokes = sum(len(lines) for lines in cmap.values())
         self.start_time = time.time()
         self.completed_strokes = 0
-
-        # Load calibration data if file exists - always load if file exists to ensure latest data is used
-        if os.path.exists('color_calibration.json'):
-            if self.color_calibration_map is None or not self.color_calibration_map:
-                log.info("[Calibration] Loading calibration data from color_calibration.json")
-                self.load_color_calibration('color_calibration.json')
-            else:
-                log.info(f"[Calibration] Calibration data already loaded from color_calibration.json ({len(self.color_calibration_map)} colors)")
-        else:
-            log.info("[Calibration] No calibration data available")
 
         self._report_progress(0, self.total_strokes, 0)
 
@@ -418,16 +343,8 @@ class Bot(CalibrationMixin, CacheMixin):
             # If Color Button Mode is enabled, click the color button with modifiers before palette selection
             self.painter.color_button()
 
-            # DEBUG: Log color selection details
-            log.debug(f"[DEBUG] Selecting color: {c}")
-            log.debug(f"[DEBUG] Color in palette: {self._palette is not None and c in self._palette.colors}")
-            log.debug(f"[DEBUG] Color Button enabled: {self.color_button.get('enabled', False)}")
-            log.debug(f"[DEBUG] Color Button Okay enabled: {self.color_button_okay.get('enabled', False)}")
-            log.debug(f"[DEBUG] Custom colors box: {self._custom_colors}")
-
-            # Resolve the selection strategy from the profile and apply it.
-            # Colour Button Okay bypasses the built-in palette on purpose.
-            self._select_color(c, force_custom=self.color_button_okay.get('enabled', False))
+            # Select the colour from the sampled palette.
+            self._select_color(c)
 
             # If Color Button Okay Mode is enabled, click "Set Okay" button after color selection
             self.painter.color_button_okay()
@@ -564,16 +481,6 @@ class Bot(CalibrationMixin, CacheMixin):
         lines_drawn = 0
         self.start_time = time.time()  # Track start time for test draw
 
-        # Load calibration data if file exists - always load if file exists to ensure latest data is used
-        if os.path.exists('color_calibration.json'):
-            if self.color_calibration_map is None or not self.color_calibration_map:
-                log.info("[Calibration] Loading calibration data from color_calibration.json")
-                self.load_color_calibration('color_calibration.json')
-            else:
-                log.info(f"[Calibration] Calibration data already loaded from color_calibration.json ({len(self.color_calibration_map)} colors)")
-        else:
-            log.info("[Calibration] No calibration data available")
-
         self._report_progress(0, min(max_lines, sum(len(lines) for lines in cmap.values())), 0)
 
         # Estimate time for the full cmap (not just test lines)
@@ -589,9 +496,7 @@ class Bot(CalibrationMixin, CacheMixin):
             log.debug(f"[DEBUG] Color Button Okay enabled: {self.color_button_okay.get('enabled', False)}")
             log.info(f"Switching to color {c} for test draw")
 
-            # Resolve the selection strategy from the profile and apply it.
-            # Colour Button Okay bypasses the built-in palette on purpose.
-            self._select_color(c, force_custom=self.color_button_okay.get('enabled', False))
+            self._select_color(c)
 
             # Only click okay button if Color Button Okay is enabled
             self.painter.color_button_okay()
@@ -695,7 +600,6 @@ class Bot(CalibrationMixin, CacheMixin):
             # Position at the target location
             xo = target_x
             y_start = target_y
-            x = xo  # Initialize x for the loop
         else:
             # Default behavior: scale to fit canvas and center
             cropped_w, cropped_h = img_cropped.size
@@ -707,7 +611,6 @@ class Bot(CalibrationMixin, CacheMixin):
             offset_y = (canvas_h - scaled_h) // 2
             xo = canvas_x + offset_x
             y_start = canvas_y + offset_y
-            x = xo  # Initialize x for the loop
 
         # Calculate pixel step for the scaled image
         tw, th = scaled_w // step, scaled_h // step

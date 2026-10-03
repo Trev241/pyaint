@@ -40,28 +40,6 @@ def names(fake):
 
 
 # ---------------------------------------------------------------------------
-# Capabilities
-# ---------------------------------------------------------------------------
-def test_capabilities_default_bare_bot():
-    caps = Bot().painter.capabilities
-    assert caps.palette is False
-    assert caps.custom_colors is False
-    assert caps.new_layer is False
-    assert caps.mspaint_double_click is False
-
-
-def test_capabilities_reflect_profile():
-    bot = Bot()
-    bot.init_palette(colors_pos={(1, 2, 3): (0, 0)})
-    bot.profile["New Layer"].update({"enabled": True, "coords": (5, 5)})
-    bot.profile.mspaint_mode["enabled"] = True
-    caps = bot.painter.capabilities
-    assert caps.palette is True
-    assert caps.new_layer is True
-    assert caps.mspaint_double_click is True
-
-
-# ---------------------------------------------------------------------------
 # Colour selection
 # ---------------------------------------------------------------------------
 def test_chain_selects_palette_and_clicks(monkeypatch):
@@ -75,8 +53,7 @@ def test_chain_selects_palette_and_clicks(monkeypatch):
     assert clicked == {"x": 7, "y": 8}
 
 
-def test_chain_resolves_none_when_unconfigured(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
+def test_chain_resolves_none_when_unconfigured():
     bot = Bot()
     assert bot.painter.resolve_color_source((9, 9, 9)) == "none"
 

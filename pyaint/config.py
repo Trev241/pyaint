@@ -10,6 +10,10 @@ from typing import Any, Dict, Mapping
 
 from pyaint.profile import ENV_CONFIG_KEYS, Profile
 
+# Environment keys that older config files may still contain. Dropped so they
+# do not leak into the preferences dict (and thus back into config.json).
+_LEGACY_ENV_KEYS = frozenset({"Custom Colors", "color_preview_spot", "color_selection"})
+
 
 def load_config(path: str) -> Dict[str, Any]:
     """Read a config file; return ``{}`` when missing or invalid."""
@@ -33,7 +37,11 @@ def save_config(path: str, payload: Mapping[str, Any]) -> bool:
 
 def split_preferences(config: Mapping[str, Any]) -> Dict[str, Any]:
     """Return only the non-environment (preference) keys from a config dict."""
-    return {key: value for key, value in config.items() if key not in ENV_CONFIG_KEYS}
+    return {
+        key: value
+        for key, value in config.items()
+        if key not in ENV_CONFIG_KEYS and key not in _LEGACY_ENV_KEYS
+    }
 
 
 def build_payload(

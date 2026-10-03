@@ -9,7 +9,7 @@ single re-apply.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor
 
 DARK = {
     "bg": "#1f1f1f",
@@ -57,7 +57,6 @@ LIGHT = {
     "warning": "#bf8803",
 }
 
-THEMES = {"dark": DARK, "light": LIGHT}
 THEME_MODES = ("auto", "dark", "light")
 THEME_LABELS = {"auto": "Auto (follow system)", "dark": "Dark", "light": "Light"}
 
@@ -88,13 +87,6 @@ def resolve_tokens(mode: str = "auto") -> dict:
     if mode == "dark":
         return DARK
     return LIGHT if system_scheme() == "light" else DARK
-
-
-def mono_font(size: int = 10) -> QFont:
-    font = QFont("Cascadia Mono")
-    font.setStyleHint(QFont.Monospace)
-    font.setPointSize(size)
-    return font
 
 
 def stylesheet(tokens: dict | None = None) -> str:

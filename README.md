@@ -5,7 +5,7 @@
 **Transform any image into automated brush strokes.**
 
 Pyaint recreates a picture by driving the mouse in a painting app — MS Paint,
-GIMP, skribbl.io, and anything else you can teach it.
+skribbl.io, and anything else with an on-screen palette you can teach it.
 
 [![license](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE.md)
 [![platform](https://img.shields.io/badge/platform-Windows-0078d4)](#requirements)
@@ -17,10 +17,6 @@ GIMP, skribbl.io, and anything else you can teach it.
 ---
 
 ## Demo
-
-https://github.com/user-attachments/assets/965556a4-f72b-4e24-a9ea-160732c6be51
-
-<sub>GIMP — custom colour calibration and automatic layers.</sub>
 
 https://github.com/user-attachments/assets/50f2f344-8ca9-439b-8722-0175356ad59e
 
@@ -38,12 +34,11 @@ auto-detected.
 |-----|---------|-------|
 | **skribbl.io** | Canvas + fixed 2×13 palette auto-detected | `Auto-detect` — no manual teaching |
 | **MS Paint** (Windows 11) | Canvas + palette auto-detected when maximized at 1920×1080 | `Auto-detect`, or teach manually |
-| **GIMP** | Layer workflow + colour-dialog calibration | Manual teach (recommended) |
-| **Clip Studio Paint** | Generic palette / colour-dialog path | Manual teach |
-| **Krita / Photoshop** | Generic path | Manual teach |
-| **Anything else** | Full manual setup | Manual teach |
+| **Anything else with a palette grid** | Generic path | Teach the palette and canvas |
 
-Recipes for more apps are data, not code — see
+Pyaint selects colours from an **on-screen palette**, so apps whose only colour
+picker is a dialog (GIMP, Clip Studio Paint, Photoshop) are not supported.
+Recipes for more palette apps are data, not code — see
 [target recipes](#target-recipes).
 
 ## Requirements
@@ -100,7 +95,7 @@ That's it. For skribbl.io the first draw should take about a minute.
 
 ```
 image  →  fit + downscale to the canvas (nearest-neighbour)
-       →  map each pixel to the nearest palette / custom colour
+       →  map each pixel to the nearest palette colour
        →  run-length encode each row into horizontal strokes
        →  replay strokes with pyautogui, selecting colours as it goes
 ```
@@ -122,12 +117,11 @@ source checkout) and are written whenever you change something in the UI.
 | Setting | Range | Meaning |
 |---------|-------|---------|
 | **Delay** | 0.0–1.0 s | Time between strokes |
-| **Pixel Size** | 3–50 px | Detail level (lower = more detail, slower) |
-| **Precision** | 0.0–1.0 | Colour accuracy |
+| **Pixel Size** | 1–50 px | Detail level (lower = more detail, slower) |
 | **Jump Delay** | 0.0–2.0 s | Pause inserted after large cursor jumps |
 
-Options include **Ignore White Pixels**, **Use Custom Colors**, **New Layer**,
-**Skip First Color**, and **MSPaint Mode** (double-click swatches).
+Options include **Ignore White Pixels**, **New Layer**, **Skip First Color**,
+and **MSPaint Mode** (double-click swatches).
 
 For a full reference see [`Docs/configuration.md`](Docs/configuration.md).
 
@@ -156,9 +150,9 @@ No. Pyaint relies on Windows screen capture and `pyautogui` input, and the
 detection is tuned for Windows apps.
 
 **Colors are wrong.**
-Make sure the target palette was sampled correctly (re-run **Setup**), lower
-**Pixel Size**, or use **Use Custom Colors** with calibration for a
-colour-dialog app. See [`Docs/troubleshooting.md`](Docs/troubleshooting.md).
+Re-run **Auto-detect** (or **Setup**) so the palette grid is sampled from the
+swatch centres, and lower **Pixel Size** for more detail. See
+[`Docs/troubleshooting.md`](Docs/troubleshooting.md).
 
 **Drawing is too slow / too fast.**
 Adjust **Delay** and **Pixel Size**. **Pre-compute** makes repeated runs start
@@ -170,9 +164,9 @@ Maximize the app on the primary monitor at 100% scaling and retry, or teach the
 tools manually with **Setup**.
 
 **Where does it save data?**
-`config.json`, `color_calibration.json`, `cache/`, and `targets/` sit next to
-the executable (the repo root for a source checkout). Nothing is uploaded; the
-only network request is downloading an image you give it by URL.
+`config.json`, `cache/`, and `targets/` sit next to the executable (the repo
+root for a source checkout). Nothing is uploaded; the only network request is
+downloading an image you give it by URL.
 
 **Can I use this on skribbl.io?**
 Locating the app's UI to draw your own image is allowed here, but using it to
@@ -188,7 +182,6 @@ responsible for complying with the terms of service of any app you use it with.
 
 ## Documentation
 
-- [Usage guide](Docs/usage-guide.md)
 - [Configuration](Docs/configuration.md)
 - [Architecture](Docs/architecture.md)
 - [Troubleshooting](Docs/troubleshooting.md)
@@ -204,7 +197,7 @@ python main.py               # GUI (Windows)
 python scripts/build_exe.py  # build dist/pyaint.exe
 ```
 
-The test suite is fully headless (118 tests); the GUI and screen input are
+The test suite is fully headless (109 tests); the GUI and screen input are
 verified manually on Windows.
 
 ## License

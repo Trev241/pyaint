@@ -102,15 +102,6 @@ def _draw_zap(p: QPainter, s: float) -> None:
                         (0.42, 0.9), (0.72, 0.43), (0.52, 0.43)))
 
 
-def _draw_wand(p: QPainter, s: float) -> None:
-    p.setBrush(Qt.NoBrush)
-    p.drawLine(QPointF(0.22 * s, 0.8 * s), QPointF(0.72 * s, 0.3 * s))
-    p.setBrush(p.pen().color())
-    for cx, cy, r in ((0.76, 0.2, 0.05), (0.62, 0.14, 0.035), (0.84, 0.36, 0.035)):
-        p.drawEllipse(QPointF(cx * s, cy * s), r * s, r * s)
-    p.setBrush(Qt.NoBrush)
-
-
 def _draw_trash(p: QPainter, s: float) -> None:
     p.setBrush(Qt.NoBrush)
     p.drawLine(QPointF(0.18 * s, 0.28 * s), QPointF(0.82 * s, 0.28 * s))
@@ -138,7 +129,6 @@ _DRAWERS = {
     "globe": _draw_globe,
     "download": _draw_download,
     "zap": _draw_zap,
-    "wand": _draw_wand,
     "trash": _draw_trash,
     "refresh": _draw_refresh,
 }

@@ -37,7 +37,6 @@ classifiers = [
     "Topic :: Multimedia :: Graphics",
 ]
 dependencies = [
-    "keyboard",
     "Pillow",
     "pyscreeze",
     "PyAutoGUI",

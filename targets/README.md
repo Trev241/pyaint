@@ -17,11 +17,10 @@ use, and how to auto-detect the canvas/palette.
 | `extends` | Optional parent `id`; parent fields are deep-merged then overridden by this recipe |
 | `hidden` | If true the recipe is infrastructure (a base) and is not shown in the dropdown |
 | `schema_version` | Recipe schema version (current: 1) |
-| `tools` | Which taught tools Setup should show, from: `Palette`, `Canvas`, `Custom Colors`, `New Layer`, `Color Button`, `Color Button Okay`, `color_preview_spot` |
-| `color_selection` | `auto`, `palette`, or `custom` |
-| `supports_custom_colors` / `supports_layers` / `supports_mspaint_mode` | Capability flags |
-| `drawing_settings` | Defaults applied on selection: `delay`, `pixel_size`, `precision`, `jump_delay`, `jump_threshold` |
-| `drawing_options` | `ignore_white_pixels`, `use_custom_colors` |
+| `tools` | Which taught tools Setup should show, from: `Palette`, `Canvas`, `New Layer`, `Color Button`, `Color Button Okay` |
+| `supports_layers` / `supports_mspaint_mode` | Capability flags |
+| `drawing_settings` | Defaults applied on selection: `delay`, `pixel_size`, `jump_delay`, `jump_threshold` |
+| `drawing_options` | `ignore_white_pixels` |
 | `skip_first_color` | bool |
 | `palette` | Optional fixed `[[r,g,b], ...]` list (used to *locate* a palette via `color_signature`) |
 | `detection` | Auto-detection specs (see below) |
@@ -76,7 +75,6 @@ so the child only specifies what it changes.
   "id": "myapp",
   "name": "My App",
   "tools": ["Palette", "Canvas"],
-  "color_selection": "palette",
   "drawing_options": { "ignore_white_pixels": true },
   "detection": {
     "canvas": { "type": "white_rect", "aspect": 1.3333, "aspect_tolerance": 0.2 },

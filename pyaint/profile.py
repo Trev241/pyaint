@@ -1,14 +1,9 @@
 """Taught-environment profile: the single source of truth for Pyaint's
-environment geometry and color-selection strategy.
+environment geometry.
 
 This module intentionally imports nothing from ``pyautogui`` or ``tkinter`` so
 that a profile can be serialized, tested, and shared as a preset without a
 display attached.
-
-It lives inside the ``pyaint`` package, so the filename ``profile.py`` does not
-shadow the standard-library ``profile`` (the profiler): intra-package imports
-are absolute (``pyaint.profile``) and external ``import profile`` still resolves
-to the stdlib.
 """
 
 from __future__ import annotations
@@ -17,28 +12,18 @@ import copy
 from collections.abc import Iterator, Mapping
 from typing import Any, Dict, Optional, Tuple
 
-# Color-selection strategies. ``AUTO`` preserves the historical behaviour:
-# use the palette when the colour is in it, otherwise fall back to the
-# calibrated custom-colour spectrum (or keyboard RGB entry).
-AUTO = "auto"
-PALETTE = "palette"
-CUSTOM = "custom"
-VALID_COLOR_SELECTION = (AUTO, PALETTE, CUSTOM)
-
 
 def _modifiers() -> Dict[str, bool]:
     return {"ctrl": False, "alt": False, "shift": False}
 
 
-# Ordered to preserve the existing Setup-window row order (color_preview_spot last).
+# Ordered to preserve the existing Setup-window row order.
 TOOL_KEYS = (
     "Palette",
     "Canvas",
-    "Custom Colors",
     "New Layer",
     "Color Button",
     "Color Button Okay",
-    "color_preview_spot",
 )
 
 DEFAULT_TOOLS: Dict[str, Dict[str, Any]] = {
@@ -48,12 +33,9 @@ DEFAULT_TOOLS: Dict[str, Dict[str, Any]] = {
         "rows": 6,
         "cols": 8,
         "color_coords": None,
-        "valid_positions": None,
-        "manual_centers": None,
         "preview": None,
     },
     "Canvas": {"status": False, "box": None, "preview": None},
-    "Custom Colors": {"status": False, "box": None, "preview": None},
     "New Layer": {
         "status": False,
         "coords": None,
@@ -74,22 +56,13 @@ DEFAULT_TOOLS: Dict[str, Dict[str, Any]] = {
         "delay": 0.1,
         "modifiers": _modifiers(),
     },
-    "color_preview_spot": {
-        "name": "Color Preview Spot",
-        "button": None,
-        "enabled": False,
-        "coords": None,
-        "data": None,
-        "modifiers": _modifiers(),
-        "status": False,
-    },
 }
 
 DEFAULT_MSPAINT_MODE: Dict[str, Any] = {"enabled": False, "delay": 0.5}
 
 # Keys that belong to the environment profile rather than to preferences.
 # Used to split a loaded config.json into Profile + preferences.
-ENV_CONFIG_KEYS = frozenset(TOOL_KEYS) | {"MSPaint Mode", "color_selection", "target"}
+ENV_CONFIG_KEYS = frozenset(TOOL_KEYS) | {"MSPaint Mode", "target"}
 
 
 def box_to_wh(box: Optional[Any]) -> Optional[Tuple[int, int, int, int]]:
@@ -111,17 +84,10 @@ class Profile(Mapping):
     while still mutating the single shared instance.
     """
 
-    # Re-export the strategy constants for convenient ``Profile.AUTO`` use.
-    AUTO = AUTO
-    PALETTE = PALETTE
-    CUSTOM = CUSTOM
-
     def __init__(
         self,
         tools: Optional[Mapping[str, Any]] = None,
         mspaint_mode: Optional[Mapping[str, Any]] = None,
-        color_selection: str = AUTO,
-        calibration: Optional[Mapping[Tuple[int, int, int], Any]] = None,
         target: str = "generic",
     ) -> None:
         self.tools: Dict[str, Dict[str, Any]] = {}
@@ -137,14 +103,9 @@ class Profile(Mapping):
         if isinstance(mspaint_mode, Mapping):
             self.mspaint_mode.update(copy.deepcopy(dict(mspaint_mode)))
 
-        # Name of the selected target recipe (``pyaint_targets``). Stored as a
+        # Name of the selected target recipe (``pyaint.targets``). Stored as a
         # plain string so this module does not depend on the registry.
         self.target = str(target) if target else "generic"
-        self.color_selection = (
-            color_selection if color_selection in VALID_COLOR_SELECTION else AUTO
-        )
-        # ``None`` (not ``{}``) preserves the "no calibration loaded" signal.
-        self.calibration = dict(calibration) if calibration else calibration
 
     # ------------------------------------------------------------------
     # Mapping access over tool entries
@@ -182,61 +143,21 @@ class Profile(Mapping):
         return cls(
             tools=tools,
             mspaint_mode=config.get("MSPaint Mode"),
-            color_selection=config.get("color_selection", AUTO),
             target=config.get("target", "generic"),
         )
 
     def to_config(self) -> Dict[str, Any]:
-        """Return the environment subset for merging into ``config.json``.
-
-        Calibration is deliberately excluded: it has its own file
-        (``color_calibration.json``) to preserve the on-disk layout.
-        """
+        """Return the environment subset for merging into ``config.json``."""
         payload: Dict[str, Any] = copy.deepcopy(self.tools)
         payload["MSPaint Mode"] = copy.deepcopy(self.mspaint_mode)
-        payload["color_selection"] = self.color_selection
         payload["target"] = self.target
         return payload
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Full, standalone, versioned representation (a shareable preset)."""
-        return {
-            "version": 1,
-            "target": self.target,
-            "color_selection": self.color_selection,
-            "mspaint_mode": copy.deepcopy(self.mspaint_mode),
-            "tools": copy.deepcopy(self.tools),
-            "calibration": {
-                f"{r},{g},{b}": list(xy)
-                for (r, g, b), xy in (self.calibration or {}).items()
-            },
-        }
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "Profile":
-        calibration: Dict[Tuple[int, int, int], Any] = {}
-        for key, xy in (data.get("calibration") or {}).items():
-            r, g, b = (int(part) for part in key.split(","))
-            calibration[(r, g, b)] = tuple(xy)
-        return cls(
-            tools=data.get("tools"),
-            mspaint_mode=data.get("mspaint_mode"),
-            color_selection=data.get("color_selection", AUTO),
-            calibration=calibration or None,
-            target=data.get("target", "generic"),
-        )
 
     # ------------------------------------------------------------------
     # Convenience helpers
     # ------------------------------------------------------------------
-    def is_ready(self, name: str) -> bool:
-        return bool(self.tools.get(name, {}).get("status"))
-
     def canvas_rect(self) -> Optional[Tuple[int, int, int, int]]:
         return box_to_wh(self.tools["Canvas"].get("box"))
-
-    def custom_colors_rect(self) -> Optional[Tuple[int, int, int, int]]:
-        return box_to_wh(self.tools["Custom Colors"].get("box"))
 
     def palette_rect(self) -> Optional[Tuple[int, int, int, int]]:
         return box_to_wh(self.tools["Palette"].get("box"))

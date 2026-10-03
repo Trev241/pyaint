@@ -129,6 +129,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   notes) and this `CHANGELOG.md`.
 
 ### Changed
+- `Palette` is a plain evenly-divided grid again; `Bot.settings` is
+  `[delay, pixel_size, jump_delay]`. `config.py` drops legacy environment keys
+  (`Custom Colors`, `color_preview_spot`, `color_selection`) on load.
 - **Auto-detect UX:** the annotated detection now opens in its own **Detection**
   tab next to the persistent **Image** tab, with in-tab **Apply / Retry /
   Cancel**. The source image is never replaced. The modal confirmation dialogs
@@ -219,11 +222,31 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   post-stroke path previously returned `'terminated'` but left `drawing` set).
 
 ### Removed
+- **Custom-colour capability retired.** The long-standing colour-dialog path
+  (built for the Windows 10 Paint "Edit Colors" dialog) is gone: deleted
+  `pyaint/calibration.py` (`calibrate_custom_colors`,
+  `get_calibrated_color_position`, save/load), the dead `_scan_spectrum` /
+  `_spectrum_map` screen scan, `ScreenPainter.enter_rgb_keyboard`, and the
+  calibrated/keyboard colour strategies. Colours now come only from the sampled
+  palette.
+  - Also removed the `Custom Colors` and `color_preview_spot` tools, the
+    `color_selection` field/strategy, `USE_CUSTOM_COLORS`, the `precision`
+    setting (it only fed custom-colour quantisation), the GIMP recipe
+    (colour-dialog only), and the unused `Capabilities` scaffold.
+- Deleted the superseded Tk UI (`pyaint/ui/window.py`, `pyaint/ui/setup.py`,
+  ~3.4k lines) and the now-unused `keyboard` dependency.
+- Removed other dead code: `Bot.config_file`, `Bot.progress`, the
+  `_click_swatch`/`_enter_rgb_keyboard` wrappers,
+  `Profile.is_ready`/`to_dict`/`from_dict`, `RecipeRegistry.ids`,
+  `BUILTIN_RECIPES`, `recipe_is_valid`, `theme.THEMES`/`mono_font`,
+  `CorruptConfigError`, `NoCustomColorsError`, and `Palette`'s unused
+  `valid_positions`/`manual_centers` support.
 - Duplicated per-pixel run-length/layering logic between `process()` and
   `process_region()` (now shared).
-- The Tk UI (`pyaint/ui/window.py`, `pyaint/ui/setup.py`) is superseded and no
-  longer launched. The files are retained for reference until the remaining
-  features reach parity.
+- Deleted the stale `Docs/tutorial.md` and `Docs/usage-guide.md`; rewrote
+  `README.md`, `Docs/README.md`, `Docs/api.md`, `Docs/architecture.md`,
+  `Docs/configuration.md`, and `Docs/troubleshooting.md` for the palette-only
+  design.
 
 ## [0.0.0] - 2026-01-17
 

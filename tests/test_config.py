@@ -39,5 +39,4 @@ def test_build_payload_merges_environment_and_preferences():
     payload = build_payload({"pause_key": "q"}, profile)
     assert payload["pause_key"] == "q"
     assert payload["target"] == "skribbl"
-    assert payload["color_selection"] == profile.color_selection
     assert "Palette" in payload
