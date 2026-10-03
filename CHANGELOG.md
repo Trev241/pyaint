@@ -13,6 +13,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Theme system (dark / light / auto):** `pyaint/ui/theme.py` now ships VS
+  Code "Dark Modern" and "Light Modern" token sets, an `auto` mode that follows
+  the OS colour scheme (`QGuiApplication.styleHints().colorScheme()`), and a
+  Settings → Appearance selector. The choice persists as `theme` in
+  `config.json`, and icons/stylesheet re-apply on change (including when the OS
+  scheme changes while in `auto`).
 - **PySide6 desktop UI (VS Code-inspired):** replaced the Tk interface with a
   Qt UI. New modules under `pyaint/ui/`: `main_window.py` (activity rail,
   sidebar panels, toolbar, status/progress), `setup_dialog.py` (manual tool

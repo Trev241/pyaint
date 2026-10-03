@@ -19,6 +19,7 @@ import urllib.request
 
 from PIL import Image
 from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -54,8 +55,8 @@ from pyaint.targets import (
     merge_drawing_options,
     merge_drawing_settings,
 )
+from pyaint.ui import theme
 from pyaint.ui.icons import icon
-from pyaint.ui.theme import TOKENS
 from pyaint.ui.widgets import ImagePreview, Section, SliderField, pil_to_qpixmap
 from pyaint.validation import validate_recipe
 
@@ -102,10 +103,28 @@ class MainWindow(QMainWindow):
         self.signals.image_ready.connect(self._set_image_path)
         self.bot.progress_callback = self._emit_progress
 
+        # Resolve the theme before building widgets so the first paint is right.
+        self._theme_mode = "auto"
+        try:
+            self._theme_mode = str(pyaint_config.load_config(self._config_path).get("theme", "auto"))
+        except Exception:
+            pass
+        if self._theme_mode not in theme.THEME_MODES:
+            self._theme_mode = "auto"
+        self.tokens = theme.resolve_tokens(self._theme_mode)
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply(app, self.tokens)
+
         self._build_ui()
         self._load_recipes()
         self.load_config()
         self._load_default_image()
+
+        hints = QGuiApplication.styleHints()
+        if hasattr(hints, "colorSchemeChanged"):
+            hints.colorSchemeChanged.connect(self._on_system_scheme_changed)
+        self._apply_theme()
         self._initializing = False
 
     # ------------------------------------------------------------------
@@ -129,16 +148,18 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(rail)
         layout.setContentsMargins(0, 6, 0, 6)
         layout.setSpacing(0)
+        self._activity_buttons = []
         for index, (name, icon_name) in enumerate(_PANELS):
             button = QToolButton()
             button.setCheckable(True)
             button.setAutoExclusive(True)
-            button.setIcon(icon(icon_name, TOKENS["fg_muted"], 22))
+            button.setIcon(icon(icon_name, self.tokens["fg_muted"], 22))
             button.setIconSize(QSize(22, 22))
             button.setFixedSize(48, 44)
             button.setToolTip(f"{name} panel")
             button.setChecked(index == 0)
             button.clicked.connect(lambda _=False, i=index: self._show_panel(i))
+            self._activity_buttons.append(button)
             layout.addWidget(button)
         layout.addStretch(1)
         return rail
@@ -291,6 +312,14 @@ class MainWindow(QMainWindow):
     def _build_settings_panel(self) -> QWidget:
         scroll, layout = self._scroll_panel()
 
+        appearance = Section("Appearance", "Follow the system theme or choose one explicitly.")
+        self._theme_combo = QComboBox()
+        for mode in theme.THEME_MODES:
+            self._theme_combo.addItem(theme.THEME_LABELS[mode], mode)
+        self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        appearance.add(self._theme_combo)
+        layout.insertWidget(layout.count() - 1, appearance)
+
         keys = Section("Input")
         key_row = QHBoxLayout()
         key_label = QLabel("Pause key")
@@ -361,7 +390,7 @@ class MainWindow(QMainWindow):
     def _tool_button(self, text: str, icon_name: str, slot, tooltip: str = "") -> QPushButton:
         button = QPushButton(text)
         button.setObjectName("ToolBarButton")
-        button.setIcon(icon(icon_name, TOKENS["fg"], 16))
+        button.setIcon(icon(icon_name, self.tokens["fg"], 16))
         button.setIconSize(QSize(16, 16))
         button.setToolTip(tooltip or text)
         button.clicked.connect(slot)
@@ -384,7 +413,7 @@ class MainWindow(QMainWindow):
 
         self._btn_start = QPushButton("Start")
         self._btn_start.setObjectName("Primary")
-        self._btn_start.setIcon(icon("play", TOKENS["accent_fg"], 16))
+        self._btn_start.setIcon(icon("play", self.tokens["accent_fg"], 16))
         self._btn_start.setIconSize(QSize(16, 16))
         self._btn_start.clicked.connect(self._on_start)
         self._btn_pause = self._tool_button("Pause", "pause", self._toggle_pause, "Pause / resume drawing")
@@ -507,11 +536,20 @@ class MainWindow(QMainWindow):
             self._last_url = last_url
             self._url_edit.setText(last_url)
 
+        self._theme_mode = str(self.tools.get("theme", "auto"))
+        if self._theme_mode not in theme.THEME_MODES:
+            self._theme_mode = "auto"
+        self._theme_combo.blockSignals(True)
+        index = self._theme_combo.findData(self._theme_mode)
+        self._theme_combo.setCurrentIndex(index if index >= 0 else 0)
+        self._theme_combo.blockSignals(False)
+
         self._restore_environment()
         self._refresh_drawing_widgets()
         self._refresh_option_widgets()
         self._sync_env_ui()
         self._refresh_detection_status()
+        self._apply_theme()
 
     def _restore_environment(self) -> None:
         palette = self.profile["Palette"]
@@ -565,6 +603,7 @@ class MainWindow(QMainWindow):
         self.tools["pause_key"] = self.bot.pause_key
         self.tools["skip_first_color"] = bool(self.bot.skip_first_color)
         self.tools["draw_mode"] = self._mode
+        self.tools["theme"] = self._theme_mode
         self.tools.setdefault("calibration_settings", {})["step_size"] = self._calib_step.value()
         if self._last_url:
             self.tools["last_image_url"] = self._last_url
@@ -680,6 +719,40 @@ class MainWindow(QMainWindow):
         self.bot.jump_threshold = int(value)
         self._store_drawing_settings()
         self._save_config()
+
+    def _on_theme_changed(self, _index: int) -> None:
+        if self._initializing:
+            return
+        self._theme_mode = self._theme_combo.currentData() or "auto"
+        self.tools["theme"] = self._theme_mode
+        self._apply_theme()
+        self._save_config()
+
+    def _on_system_scheme_changed(self, _scheme) -> None:
+        if self._theme_mode == "auto":
+            self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        """Re-resolve tokens, restyle the app, and recolour the icons."""
+        self.tokens = theme.resolve_tokens(self._theme_mode)
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply(app, self.tokens)
+        self._refresh_icons()
+
+    def _refresh_icons(self) -> None:
+        fg = self.tokens["fg"]
+        muted = self.tokens["fg_muted"]
+        accent_fg = self.tokens["accent_fg"]
+        for button, (_, icon_name) in zip(self._activity_buttons, _PANELS):
+            button.setIcon(icon(icon_name, muted, 22))
+        self._btn_precompute.setIcon(icon("download", fg, 16))
+        self._btn_test.setIcon(icon("zap", fg, 16))
+        self._btn_simple.setIcon(icon("play", fg, 16))
+        self._btn_calibrate.setIcon(icon("wand", fg, 16))
+        self._btn_start.setIcon(icon("play", accent_fg, 16))
+        self._btn_pause.setIcon(icon("pause", fg, 16))
+        self._btn_stop.setIcon(icon("stop", fg, 16))
 
     # ------------------------------------------------------------------
     # Threading / tasks
@@ -1153,7 +1226,7 @@ def run(bot: Bot) -> int:
     app.setApplicationName("Pyaint")
     from pyaint.ui import theme
 
-    theme.apply(app)
+    theme.apply(app, theme.resolve_tokens("auto"))
     window = MainWindow(bot)
     window.show()
     return app.exec()

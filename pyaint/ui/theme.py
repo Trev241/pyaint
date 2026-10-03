@@ -1,45 +1,93 @@
-"""Visual theme for the PySide6 UI.
+"""Theming for the PySide6 UI.
 
-Design tokens are based on VS Code's "Dark Modern" palette: flat surfaces,
-1px borders, no gradients or bevels, and a single blue accent. Everything is
-centralised here so the look can be adjusted (or a light theme added) in one
-place.
+Two flat token sets are provided — VS Code "Dark Modern" and "Light Modern" —
+plus an ``auto`` mode that follows the OS colour scheme. Everything visual
+(surfaces, text, accent) comes from these tokens, so switching themes is a
+single re-apply.
 """
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 
-# --- Design tokens ---------------------------------------------------------
-TOKENS = {
-    # Surfaces
-    "bg": "#1f1f1f",            # editor / content
-    "bg_activity": "#181818",   # activity rail
-    "bg_side": "#181818",       # side bar
-    "bg_status": "#181818",     # status bar
-    "bg_input": "#313131",      # text inputs, sliders
-    "bg_hover": "#2a2d2e",      # hover
-    "bg_active": "#37373d",     # pressed / selected control
-    "bg_card": "#232323",       # raised section
-    # Lines
+DARK = {
+    "bg": "#1f1f1f",
+    "bg_activity": "#181818",
+    "bg_side": "#181818",
+    "bg_status": "#181818",
+    "bg_input": "#313131",
+    "bg_hover": "#2a2d2e",
+    "bg_active": "#37373d",
+    "bg_card": "#232323",
     "border": "#2b2b2b",
     "border_input": "#3c3c3c",
-    # Text
     "fg": "#cccccc",
     "fg_muted": "#9d9d9d",
     "fg_dim": "#6e7681",
-    # Accent
     "accent": "#0078d4",
     "accent_hover": "#026ec1",
     "accent_pressed": "#025a9e",
     "accent_fg": "#ffffff",
-    # Feedback
     "danger": "#f14c4c",
     "success": "#4ec9b0",
     "warning": "#cca700",
 }
 
-ACCENT = TOKENS["accent"]
+LIGHT = {
+    "bg": "#ffffff",
+    "bg_activity": "#f8f8f8",
+    "bg_side": "#f8f8f8",
+    "bg_status": "#f8f8f8",
+    "bg_input": "#ffffff",
+    "bg_hover": "#e8e8e8",
+    "bg_active": "#dcdcdc",
+    "bg_card": "#f3f3f3",
+    "border": "#e5e5e5",
+    "border_input": "#cecece",
+    "fg": "#3b3b3b",
+    "fg_muted": "#616161",
+    "fg_dim": "#8b8b8b",
+    "accent": "#005fb8",
+    "accent_hover": "#0258a8",
+    "accent_pressed": "#024a8f",
+    "accent_fg": "#ffffff",
+    "danger": "#cd3131",
+    "success": "#107c10",
+    "warning": "#bf8803",
+}
+
+THEMES = {"dark": DARK, "light": LIGHT}
+THEME_MODES = ("auto", "dark", "light")
+THEME_LABELS = {"auto": "Auto (follow system)", "dark": "Dark", "light": "Light"}
+
+# Backwards-compatible default (the dark set). Prefer ``resolve_tokens``.
+TOKENS = DARK
+
+
+def system_scheme() -> str:
+    """Return ``"dark"`` or ``"light"`` for the current OS colour scheme.
+
+    Unknown schemes fall back to dark, matching the app's historical look.
+    """
+    try:
+        from PySide6.QtGui import QGuiApplication
+
+        scheme = QGuiApplication.styleHints().colorScheme()
+        if scheme == Qt.ColorScheme.Light:
+            return "light"
+    except Exception:
+        pass
+    return "dark"
+
+
+def resolve_tokens(mode: str = "auto") -> dict:
+    """Return the token set for a mode (``auto`` | ``dark`` | ``light``)."""
+    if mode == "light":
+        return LIGHT
+    if mode == "dark":
+        return DARK
+    return LIGHT if system_scheme() == "light" else DARK
 
 
 def mono_font(size: int = 10) -> QFont:
@@ -49,9 +97,9 @@ def mono_font(size: int = 10) -> QFont:
     return font
 
 
-def stylesheet() -> str:
-    """Return the application-wide Qt stylesheet."""
-    t = TOKENS
+def stylesheet(tokens: dict | None = None) -> str:
+    """Return the application-wide Qt stylesheet for ``tokens``."""
+    t = tokens or TOKENS
     return f"""
     * {{
         font-family: "Segoe UI", "SF Pro Text", "Ubuntu", sans-serif;
@@ -139,6 +187,19 @@ def stylesheet() -> str:
         font-size: 11px;
         font-weight: 600;
         padding: 0 12px;
+    }}
+
+    /* --- Dialog text ---------------------------------------------------- */
+    #DialogTitle {{
+        font-size: 18px;
+        font-weight: 600;
+        color: {t['fg']};
+    }}
+    #DialogHint {{
+        color: {t['fg_muted']};
+    }}
+    #DialogStatus {{
+        color: {t['success']};
     }}
 
     /* --- Buttons -------------------------------------------------------- */
@@ -234,7 +295,7 @@ def stylesheet() -> str:
     /* --- Sliders -------------------------------------------------------- */
     QSlider::groove:horizontal {{
         height: 3px;
-        background: {t['bg_input']};
+        background: {t['border_input']};
         border-radius: 1px;
     }}
     QSlider::sub-page:horizontal {{
@@ -252,7 +313,7 @@ def stylesheet() -> str:
 
     /* --- Progress / status --------------------------------------------- */
     QProgressBar {{
-        background: {t['bg_input']};
+        background: {t['border_input']};
         border: none;
         border-radius: 2px;
         height: 6px;
@@ -313,17 +374,19 @@ def stylesheet() -> str:
     """
 
 
-def apply(app) -> None:
+def apply(app, tokens: dict | None = None) -> None:
     """Apply the base palette and stylesheet to a QApplication."""
+    t = tokens or resolve_tokens("auto")
     app.setStyle("Fusion")
     palette = app.palette()
-    palette.setColor(palette.ColorRole.Window, QColor(TOKENS["bg"]))
-    palette.setColor(palette.ColorRole.WindowText, QColor(TOKENS["fg"]))
-    palette.setColor(palette.ColorRole.Base, QColor(TOKENS["bg_input"]))
-    palette.setColor(palette.ColorRole.AlternateBase, QColor(TOKENS["bg_card"]))
-    palette.setColor(palette.ColorRole.Text, QColor(TOKENS["fg"]))
-    palette.setColor(palette.ColorRole.ButtonText, QColor(TOKENS["fg"]))
-    palette.setColor(palette.ColorRole.Highlight, QColor(TOKENS["accent"]))
-    palette.setColor(palette.ColorRole.HighlightedText, QColor(TOKENS["accent_fg"]))
+    palette.setColor(palette.ColorRole.Window, QColor(t["bg"]))
+    palette.setColor(palette.ColorRole.WindowText, QColor(t["fg"]))
+    palette.setColor(palette.ColorRole.Base, QColor(t["bg_input"]))
+    palette.setColor(palette.ColorRole.AlternateBase, QColor(t["bg_card"]))
+    palette.setColor(palette.ColorRole.Text, QColor(t["fg"]))
+    palette.setColor(palette.ColorRole.Button, QColor(t["bg_input"]))
+    palette.setColor(palette.ColorRole.ButtonText, QColor(t["fg"]))
+    palette.setColor(palette.ColorRole.Highlight, QColor(t["accent"]))
+    palette.setColor(palette.ColorRole.HighlightedText, QColor(t["accent_fg"]))
     app.setPalette(palette)
-    app.setStyleSheet(stylesheet())
+    app.setStyleSheet(stylesheet(t))

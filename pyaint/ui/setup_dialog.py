@@ -79,16 +79,16 @@ class SetupDialog(QDialog):
         right_layout.setSpacing(10)
 
         self._name_label = QLabel()
-        self._name_label.setStyleSheet("font-size: 18px; font-weight: 600;")
+        self._name_label.setObjectName("DialogTitle")
         right_layout.addWidget(self._name_label)
 
         self._desc_label = QLabel()
+        self._desc_label.setObjectName("DialogHint")
         self._desc_label.setWordWrap(True)
-        self._desc_label.setStyleSheet("color: #9d9d9d;")
         right_layout.addWidget(self._desc_label)
 
         self._status_label = QLabel()
-        self._status_label.setStyleSheet("color: #4ec9b0;")
+        self._status_label.setObjectName("DialogStatus")
         right_layout.addWidget(self._status_label)
 
         self._teach_btn = QPushButton("Teach…")

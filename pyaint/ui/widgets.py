@@ -154,10 +154,3 @@ class ImagePreview(QLabel):
             self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         self.setPixmap(scaled)
-
-
-def hline() -> QFrame:
-    line = QFrame()
-    line.setFrameShape(QFrame.HLine)
-    line.setStyleSheet("color: #2b2b2b;")
-    return line

@@ -39,6 +39,17 @@ def test_main_window_builds(app, tmp_path, monkeypatch):
         window.close()
 
 
+def test_theme_resolution_and_stylesheet():
+    from pyaint.ui import theme
+
+    assert theme.resolve_tokens("dark") is theme.DARK
+    assert theme.resolve_tokens("light") is theme.LIGHT
+    # Unknown modes fall back to auto (a real token set).
+    assert theme.resolve_tokens("nonsense") in (theme.DARK, theme.LIGHT)
+    assert theme.stylesheet(theme.DARK) != theme.stylesheet(theme.LIGHT)
+    assert theme.DARK["bg"] != theme.LIGHT["bg"]
+
+
 def test_progress_signal_updates_bar(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bot = Bot()
