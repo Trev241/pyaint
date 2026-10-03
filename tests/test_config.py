@@ -1,7 +1,7 @@
 """Tests for config.json I/O and the environment/preferences split."""
 
-from pyaint_config import build_payload, load_config, save_config, split_preferences
-from pyaint_profile import Profile
+from pyaint.config import build_payload, load_config, save_config, split_preferences
+from pyaint.profile import Profile
 
 
 def test_load_config_missing_returns_empty(tmp_path):

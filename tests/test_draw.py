@@ -7,7 +7,7 @@ the pause/skip/resume behaviour so the engine can be refactored safely.
 
 import time
 
-from bot import Bot
+from pyaint.bot import Bot
 
 RED = (255, 0, 0)
 BLUE = (0, 0, 255)

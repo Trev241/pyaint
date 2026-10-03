@@ -1,7 +1,7 @@
 """Pytest root conftest.
 
-Ensures the repository root is importable so ``bot``, ``pyaint_profile`` and
-friends can be imported from tests regardless of the working directory.
+Ensures the repository root is importable so the ``pyaint`` package can be
+imported from tests regardless of the working directory.
 """
 
 import os

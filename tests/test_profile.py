@@ -2,8 +2,8 @@
 
 import copy
 
-import pyaint_profile
-from pyaint_profile import Profile, box_to_wh
+from pyaint import profile as pyaint_profile
+from pyaint.profile import Profile, box_to_wh
 
 
 def test_defaults_are_deep_isolated():

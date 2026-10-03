@@ -9,9 +9,9 @@ import os
 import pytest
 from PIL import Image
 
-import utils
-from bot import Bot, Palette
-from exceptions import NoCanvasError
+from pyaint import utils
+from pyaint.bot import Bot, Palette
+from pyaint.errors import NoCanvasError
 
 RED = (255, 0, 0)
 BLUE = (0, 0, 255)

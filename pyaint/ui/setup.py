@@ -1,6 +1,6 @@
-from pyaint_log import log
+from pyaint.log import log
 import re
-import utils
+from pyaint import utils
 
 from PIL import (
     Image, 

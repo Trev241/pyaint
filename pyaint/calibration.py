@@ -4,7 +4,7 @@ Extracted from ``bot.py`` into a mixin so the engine module stays cohesive.
 ``Bot`` inherits :class:`CalibrationMixin`; the methods keep using ``self`` and
 resolve ``color_calibration_map`` through ``Bot``'s property.
 """
-from pyaint_log import log
+from pyaint.log import log
 
 import json
 import math

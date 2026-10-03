@@ -1,24 +1,24 @@
-from pyaint_log import log
+from pyaint.log import log
 import pyautogui
 import time
-import utils
+from pyaint import utils
 import json
 import os
 import threading
 import tkinter as tk
 
-from exceptions import (
+from pyaint.errors import (
     NoCanvasError,
     NoPaletteError
 )
 from PIL import Image
 
-from pyaint_profile import Profile
-from pyaint_painter import ScreenPainter
-from pyaint_locators import detect_target
-from pyaint_palette import Palette
-from pyaint_calibration import CalibrationMixin
-from pyaint_cache import CacheMixin
+from pyaint.profile import Profile
+from pyaint.painter import ScreenPainter
+from pyaint.locators import detect_target
+from pyaint.palette import Palette
+from pyaint.calibration import CalibrationMixin
+from pyaint.cache import CacheMixin
 
 class Bot(CalibrationMixin, CacheMixin):
     DELAY, STEP, ACCURACY, JUMP_DELAY = tuple(i for i in range(4))
@@ -40,7 +40,7 @@ class Bot(CalibrationMixin, CacheMixin):
         self.skip_first_color = False  # Skip first color when drawing
         self.jump_threshold = 5  # Pixel distance threshold for jump detection (default 5)
 
-        # The taught environment lives in one shared Profile (pyaint_profile.py).
+        # The taught environment lives in one shared Profile (pyaint/profile.py).
         # The UI and this bot reference the same instance, giving a single
         # source of truth for palette/canvas/colour-selection configuration.
         self.profile = profile if profile is not None else Profile()
@@ -187,10 +187,10 @@ class Bot(CalibrationMixin, CacheMixin):
     def detect_target(self, recipe=None):
         """Run the target recipe's locators against the current screen.
 
-        Returns a ``pyaint_locators.Detection`` (falsy if nothing was found).
+        Returns a ``pyaint.locators.Detection`` (falsy if nothing was found).
         """
         if recipe is None:
-            from pyaint_targets import get_recipe
+            from pyaint.targets import get_recipe
             recipe = get_recipe(self.profile.target)
         return detect_target(recipe, self.capture_screen())
 

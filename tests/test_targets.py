@@ -2,9 +2,9 @@
 
 import json
 
-import pyaint_profile
-from pyaint_profile import Profile
-from pyaint_targets import (
+from pyaint import profile as pyaint_profile
+from pyaint.profile import Profile
+from pyaint.targets import (
     DEFAULT_RECIPE_ID,
     Recipe,
     RecipeRegistry,

@@ -2,7 +2,7 @@
 
 Extracted from ``bot.py`` so the engine module is smaller and this piece can be
 used/tested independently. ``bot`` re-exports :class:`Palette` for backwards
-compatibility (``from bot import Palette`` keeps working).
+compatibility (``from pyaint.bot import Palette`` keeps working).
 """
 
 import pyautogui

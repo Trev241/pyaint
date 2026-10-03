@@ -96,13 +96,26 @@ python main.py
 
 ```
 pyaint/
-├── main.py          # Entry point
-├── bot.py           # Drawing engine & image processing
-├── ui/
-│   ├── window.py    # GUI interface
-│   └── setup.py     # Configuration wizard
-├── utils.py         # Utilities
-└── config.json      # Settings storage
+├── main.py                    # Convenience launcher (python main.py)
+├── pyproject.toml             # Packaging + entry point
+├── pyaint/                    # The application package
+│   ├── __main__.py            # Entry point (python -m pyaint)
+│   ├── bot.py                 # Drawing engine (Bot facade)
+│   ├── palette.py             # Palette sampling / nearest colour
+│   ├── painter.py             # Screen-input driver (Painter seam)
+│   ├── calibration.py         # Custom-colour calibration
+│   ├── cache.py               # Pre-computation cache
+│   ├── config.py              # config.json I/O
+│   ├── profile.py             # Taught-environment profile
+│   ├── targets.py             # Target recipes / registry
+│   ├── locators.py            # Canvas/palette auto-detection
+│   ├── log.py, paths.py       # Logging + runtime paths
+│   ├── utils.py, errors.py
+│   └── ui/
+│       ├── window.py          # Main GUI
+│       └── setup.py           # Configuration wizard
+├── targets/                   # User-supplied recipe JSON
+└── tests/
 ```
 
 ## Color Calibration

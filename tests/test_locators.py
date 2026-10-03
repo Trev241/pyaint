@@ -2,9 +2,9 @@
 
 from PIL import Image
 
-from bot import Bot
-import bot as bot_module
-from pyaint_locators import (
+from pyaint.bot import Bot
+from pyaint import bot as bot_module
+from pyaint.locators import (
     Detection,
     detect_target,
     find_color_grid,
@@ -13,7 +13,7 @@ from pyaint_locators import (
     find_white_rect,
     window_relative_rect,
 )
-from pyaint_targets import SKRIBBL_PALETTE, Recipe, get_recipe
+from pyaint.targets import SKRIBBL_PALETTE, Recipe, get_recipe
 
 SWATCH_COLORS = [
     (255, 0, 0),

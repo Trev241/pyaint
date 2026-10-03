@@ -5,11 +5,10 @@ This module intentionally imports nothing from ``pyautogui`` or ``tkinter`` so
 that a profile can be serialized, tested, and shared as a preset without a
 display attached.
 
-Why the filename isn't ``profile.py``: the Python standard library ships a
-``profile`` module (the profiler). Shadowing it from the repo root would break
-tools such as ``cProfile``/``pstats`` for anyone who has the repo on
-``sys.path``. ``pyaint_profile`` keeps the import flat (matching ``util``/
-``exceptions``) without stepping on stdlib.
+It lives inside the ``pyaint`` package, so the filename ``profile.py`` does not
+shadow the standard-library ``profile`` (the profiler): intra-package imports
+are absolute (``pyaint.profile``) and external ``import profile`` still resolves
+to the stdlib.
 """
 
 from __future__ import annotations

@@ -3,7 +3,7 @@
 Extracted from ``bot.py`` into a mixin. Cluster into separate modules as
 useful. The methods use ``self.settings`` / ``self._canvas`` / ``self._palette``.
 """
-from pyaint_log import log
+from pyaint.log import log
 
 import hashlib
 import json

@@ -8,7 +8,7 @@ preferences (owned by the window).
 import json
 from typing import Any, Dict, Mapping
 
-from pyaint_profile import ENV_CONFIG_KEYS, Profile
+from pyaint.profile import ENV_CONFIG_KEYS, Profile
 
 
 def load_config(path: str) -> Dict[str, Any]:

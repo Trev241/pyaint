@@ -19,7 +19,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from pyaint_profile import AUTO, TOOL_KEYS, VALID_COLOR_SELECTION
+from pyaint import paths
+from pyaint.profile import AUTO, TOOL_KEYS, VALID_COLOR_SELECTION
 
 DEFAULT_RECIPE_ID = "generic"
 
@@ -48,7 +49,7 @@ class Recipe:
     skip_first_color: bool = False
     # Optional fixed palette [(r, g, b), ...] when the app's colours are known.
     palette: Optional[List[Sequence[int]]] = None
-    # Locator specs used for auto-detection (see ``pyaint_locators``).
+    # Locator specs used for auto-detection (see ``pyaint.locators``).
     detection: Dict[str, Any] = field(default_factory=dict)
     notes: str = ""
 
@@ -338,11 +339,7 @@ def get_recipe(recipe_id: str) -> Recipe:
 
 def default_recipe_dirs() -> List[str]:
     """Directories scanned for user-supplied recipes."""
-    repo_targets = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "targets"
-    )
-    user_targets = os.path.join(os.path.expanduser("~"), ".pyaint", "targets")
-    return [repo_targets, user_targets]
+    return [paths.TARGETS_DIR, paths.USER_TARGETS_DIR]
 
 
 def load_user_recipes(paths: Optional[Sequence[str]] = None) -> List[Recipe]:

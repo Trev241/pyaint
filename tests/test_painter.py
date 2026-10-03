@@ -5,8 +5,8 @@ records calls. They pin the behaviour that used to live inline in ``Bot`` so
 later driver work can move safely.
 """
 
-import pyaint_painter as painter_mod
-from bot import Bot
+from pyaint import painter as painter_mod
+from pyaint.bot import Bot
 
 
 class FakePyAutoGUI:

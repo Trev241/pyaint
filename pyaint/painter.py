@@ -15,7 +15,7 @@ The ``Painter`` talks to the bot through a duck-typed reference (no import of
 """
 
 from __future__ import annotations
-from pyaint_log import log
+from pyaint.log import log
 
 import os
 import time
@@ -24,15 +24,15 @@ from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 import pyautogui
 
-from exceptions import NoCustomColorsError
-from pyaint_profile import Profile
+from pyaint.errors import NoCustomColorsError
+from pyaint.profile import Profile
 
 
 @dataclass
 class Capabilities:
     """What the active target/driver can currently do.
 
-    Derived from the taught :class:`~pyaint_profile.Profile` so the planner can
+    Derived from the taught :class:`~pyaint.profile.Profile` so the planner can
     eventually branch on *capability* rather than on app identity. Phase 0 only
     populates it; behaviour is still driven by the same checks as before.
     """

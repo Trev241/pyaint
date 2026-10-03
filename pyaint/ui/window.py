@@ -1,15 +1,16 @@
-from pyaint_log import log
+from pyaint.log import log
 import os
 import time
 import tkinter
 import traceback
 import urllib.request
 import urllib.error as urllib_error
-import utils
-import pyaint_config
+from pyaint import utils
+from pyaint import config as pyaint_config
+from pyaint import paths
 
-from pyaint_profile import Profile
-from pyaint_targets import (
+from pyaint.profile import Profile
+from pyaint.targets import (
     apply_profile_defaults,
     get_recipe,
     list_recipes,
@@ -17,10 +18,10 @@ from pyaint_targets import (
     merge_drawing_options,
     merge_drawing_settings,
 )
-from pyaint_locators import detect_target
-from ui.setup import SetupWindow
+from pyaint.locators import detect_target
+from pyaint.ui.setup import SetupWindow
 from tkinter import filedialog
-from bot import Bot
+from pyaint.bot import Bot
 from genericpath import isfile
 from PIL import (
     Image, 
@@ -99,7 +100,7 @@ class Window:
         self._initializing = True
         # Config path should be available immediately because some widget
         # callbacks trigger during initialization and may attempt to save.
-        self._config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+        self._config_path = paths.CONFIG_PATH
 
         self._root.title(title)
         # Center the window on screen
@@ -123,7 +124,7 @@ class Window:
         self.busy = False
 
         # The taught environment. This is the single source of truth and is
-        # shared with the bot (see pyaint_profile.py).
+        # shared with the bot (see pyaint/profile.py).
         self.profile = Profile()
         self.bot.profile = self.profile
 
@@ -146,7 +147,7 @@ class Window:
         
         self._set_img(path='assets/sample.png')
         # Determine config file path relative to project root (one level up from ui/)
-        self._config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+        self._config_path = paths.CONFIG_PATH
         self.load_config()  # Load saved config
         # UI initialization finished - allow saving
         self._initializing = False
@@ -1769,7 +1770,7 @@ class Window:
         if messagebox.askyesno(self.title, "Are you sure you want to remove the color calibration file?\n\nThis will delete: color_calibration.json"):
             try:
                 import os
-                calib_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'color_calibration.json')
+                calib_path = os.path.join(paths.PROJECT_ROOT, 'color_calibration.json')
                 if os.path.exists(calib_path):
                     os.remove(calib_path)
                     self.tlabel['text'] = "Color calibration file removed successfully."
@@ -1788,7 +1789,7 @@ class Window:
         if messagebox.askyesno(self.title, "Are you sure you want to reset to default settings?\n\nThis will delete: config.json\n\nAll your tool positions, settings, and preferences will be lost."):
             try:
                 import os
-                config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+                config_path = paths.CONFIG_PATH
                 if os.path.exists(config_path):
                     os.remove(config_path)
                     self.tlabel['text'] = "Config file removed successfully. Please restart the application to use defaults."

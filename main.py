@@ -1,45 +1,9 @@
-from pyaint_log import log
-from bot import Bot
-from ui.window import Window
+"""Convenience launcher for ``python main.py``.
 
-from pynput import keyboard as pynput_keyboard
+The canonical entry point is ``pyaint.__main__`` (``python -m pyaint``).
+"""
 
-bot = Bot()
+from pyaint.__main__ import main
 
-def on_pynput_key(key):
-    try:
-        # Handle ESC key for termination
-        if key == pynput_keyboard.Key.esc:
-            bot.terminate = True
-            return
-
-        # Handle pause/resume when bot is actively drawing
-        if bot.drawing:
-            # Get key name for pause key comparison
-            key_name = None
-            if hasattr(key, 'char') and key.char:
-                key_name = key.char.lower()
-            elif hasattr(key, 'name'):
-                key_name = key.name.lower()
-            else:
-                key_name = str(key).lower().replace('key.', '')
-
-            # Check if it matches the pause key
-            if key_name == bot.pause_key.lower():
-                bot.paused = not bot.paused
-                log.info(f"Pause toggled: {bot.paused}")
-                return
-
-    except Exception as e:
-        log.info(f"Keyboard error: {e}")
-
-if __name__ == '__main__':
-    # Start pynput keyboard listener in background
-    pynput_listener = pynput_keyboard.Listener(on_press=on_pynput_key)
-    pynput_listener.start()
-
-    try:
-        Window('pyaint', bot, 1600, 900, 5, 5)
-    finally:
-        # Stop listener when done
-        pynput_listener.stop()
+if __name__ == "__main__":
+    main()

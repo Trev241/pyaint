@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyaint"
+version = "0.1.0"
+description = "Transform images into automated brush strokes"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "GPL-3.0-or-later" }
+dependencies = [
+    "keyboard",
+    "Pillow",
+    "pyscreeze",
+    "PyAutoGUI",
+    "pynput",
+]
+
+[project.scripts]
+pyaint = "pyaint.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["pyaint*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"

@@ -4,7 +4,7 @@ These pin the colour-lookup and persistence behaviour before the methods are
 moved out of ``bot.py`` into a mixin.
 """
 
-from bot import Bot
+from pyaint.bot import Bot
 
 RED = (255, 0, 0)
 BLUE = (0, 0, 255)

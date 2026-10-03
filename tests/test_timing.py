@@ -1,7 +1,7 @@
 """Characterization tests for time formatting and drawing-time estimation."""
 
-import utils
-from bot import Bot
+from pyaint import utils
+from pyaint.bot import Bot
 
 RED = (255, 0, 0)
 BLUE = (0, 0, 255)

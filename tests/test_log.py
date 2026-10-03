@@ -1,7 +1,7 @@
 """Tests for the logging shim."""
 
-import pyaint_log
-from pyaint_log import _Log
+import pyaint.log as pyaint_log
+from pyaint.log import _Log
 
 
 def test_default_level_shows_everything(capsys):

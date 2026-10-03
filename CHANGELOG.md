@@ -123,6 +123,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   commented `RESOURCES`, the unused `Bot.options`, `_find_nearest_spectrum_color`)
   and unused imports; `ui/window.py` reads/writes config through
   `pyaint_config`.
+- **Project restructured into the `pyaint/` package** (no behavior change):
+  dropped the `pyaint_` module prefixes, moved `ui/` under `pyaint/ui/`, renamed
+  `exceptions.py` → `pyaint/errors.py` and `utils.py` → `pyaint/utils.py`, and
+  added `pyaint/__init__.py`, `pyaint/__main__.py` and `pyaint/paths.py`.
+  Added `pyproject.toml` (metadata, deps, `pyaint` console script). Root
+  `main.py` is now a launcher shim; `python main.py` and `python -m pyaint` both
+  work, and imports are now `from pyaint.bot import Bot`.
 - `bot.py`: added `capture_screen()`, `detect_target()`, and
   `apply_detection()` so a recipe's locators can populate the canvas/palette
   without manual teaching.

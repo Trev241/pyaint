@@ -130,6 +130,10 @@ dmypy.json
 /pyaint-env
 /cache
 
+# Python bytecode caches (any level, incl. pyaint/ and pyaint/ui/)
+__pycache__/
+*.py[cod]
+
 # Agent workspace (analysis, notes, specs, progress for future sessions)
 /AGENTS/
 
