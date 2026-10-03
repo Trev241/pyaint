@@ -92,10 +92,12 @@ def test_countdown_banner_counts_down_and_captures(app):
     banner.captured.connect(lambda: captured.append(True))
     try:
         banner.start(seconds=2)
+        assert banner._timer.isActive()  # regression: the timer must actually run
         banner._tick()  # 2 -> 1
         assert banner._title.text().endswith("1s…")
         banner._tick()  # 1 -> captured
         assert captured == [True]
+        assert not banner._timer.isActive()
     finally:
         banner.close()
 

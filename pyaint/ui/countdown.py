@@ -71,6 +71,7 @@ class CountdownBanner(QFrame):
         self._bar.setValue(self._total)
         self._title.setText(f"Capturing the screen in {self._remaining}s…")
         self.show()
+        self._timer.start(1000)
 
     def stop(self) -> None:
         self._timer.stop()
