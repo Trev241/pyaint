@@ -21,6 +21,25 @@ CENTER_OUTLINE = (20, 20, 20)
 _MAX_CENTER_DOTS = 400
 
 
+def annotate_palette(image: Image.Image, box, rows: int, cols: int) -> Image.Image:
+    """Return a crop of ``box`` with a dot at every palette cell centre.
+
+    Used by Setup so manually-taught palettes can be verified visually, the same
+    way auto-detect shows them.
+    """
+    x, y, w, h = (int(v) for v in box)
+    crop = image.crop((x, y, x + w, y + h)).convert("RGB")
+    draw = ImageDraw.Draw(crop)
+    for cx, cy in utils.grid_centers(box, rows, cols):
+        rx, ry = cx - x, cy - y
+        draw.ellipse(
+            [rx - 3, ry - 3, rx + 3, ry + 3],
+            fill=CENTER_FILL,
+            outline=CENTER_OUTLINE,
+        )
+    return crop
+
+
 def annotate_detection(image: Image.Image, detection) -> Image.Image:
     """Return a copy of ``image`` with the detection drawn on top."""
     annotated = image.convert("RGB").copy()

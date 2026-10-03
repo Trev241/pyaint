@@ -38,8 +38,12 @@ class CountdownBanner(QFrame):
         text.setSpacing(2)
         self._title = QLabel()
         self._title.setObjectName("CountdownTitle")
-        self._hint = QLabel("Bring the target application to the front now.")
+        self._hint = QLabel(
+            "Make sure the canvas is blank and the app is maximized on the primary "
+            "monitor, then bring it to the front."
+        )
         self._hint.setObjectName("CountdownHint")
+        self._hint.setWordWrap(True)
         text.addWidget(self._title)
         text.addWidget(self._hint)
         top.addLayout(text, 1)

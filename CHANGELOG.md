@@ -138,6 +138,21 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   notes) and this `CHANGELOG.md`.
 
 ### Changed
+- **Onboarding & navigation pass:**
+  - **Readiness strip** above the toolbar (Target › Canvas & palette › Image ›
+    Draw) with ✓/○ state; **Start** is enabled only when the canvas/palette and
+    an image are ready.
+  - **Blank-canvas requirement surfaced** in the auto-detect countdown banner,
+    the detection empty-state, the Setup panel note, and the docs.
+  - **Sidebar regrouped by task:** Setup (target + detect/teach) · Image · Draw
+    (speed & quality, drawing, options, app behaviour), with appearance/input/
+    files tucked into a collapsible **Advanced** section.
+  - **Plain-language labels** (Quality/Fast, Detail, Pause after big moves,
+    Prepare & cache, Brush test) with tooltips; "Teach manually…" replaces the
+    ambiguous "Setup…".
+  - **Detection results shown as a checklist** (✓/✗ per region).
+  - **Setup shows a palette preview** with a dot at every sampled swatch centre
+    (`annotate.annotate_palette`), so manual teaching can be verified.
 - **Auto-detect countdown:** the small status-bar hint was replaced with a
   large **in-window countdown banner** (`pyaint/ui/countdown.py`) that clearly
   warns the screen will be captured and the window minimized. It is non-modal —

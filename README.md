@@ -27,8 +27,8 @@ https://github.com/user-attachments/assets/50f2f344-8ca9-439b-8722-0175356ad59e
 ## Supported apps
 
 Pyaint finds the canvas and palette on screen, then replays the image as
-horizontal brush strokes. Support level depends on how much of the app can be
-auto-detected.
+horizontal brush strokes. Auto-detect needs a **blank** canvas; support level
+depends on how much of the app can be detected.
 
 | App | Support | Setup |
 |-----|---------|-------|
@@ -78,10 +78,11 @@ python main.py
 
 ### 2. Draw
 
-1. Pick your app in the **Target App** dropdown.
-2. Click **Auto-detect** (minimize Pyaint, let the target show, confirm the
-   preview) — or click **Setup** and teach the Palette and Canvas by clicking
-   their corners.
+1. Pick your app in the **Target App** dropdown (Setup panel).
+2. Click **Auto-detect** — make sure the canvas is **blank**, the app is
+   maximized on the primary monitor at 100% scaling, then confirm the
+   **Detection** tab. Or click **Teach manually** and click the canvas and
+   palette corners.
 3. Load an image from a file or URL.
 4. Click **Start**. Press `ESC` to stop, `P` to pause/resume.
 
@@ -102,9 +103,9 @@ image  →  fit + downscale to the canvas (nearest-neighbour)
 
 Two processing modes:
 
-- **Layered** (default) — sorts colours by frequency and repaints lower layers,
+- **Quality** (layered) — sorts colours by frequency and repaints lower layers,
   producing fewer, cleaner colour switches.
-- **Slotted** — a direct colour→lines mapping; faster to process.
+- **Fast** (slotted) — a direct colour→lines mapping; faster to process.
 
 Processing can be **pre-computed** into `cache/` so repeat draws start
 instantly, and any draw can be **paused/resumed** from the exact stroke.
@@ -116,9 +117,9 @@ source checkout) and are written whenever you change something in the UI.
 
 | Setting | Range | Meaning |
 |---------|-------|---------|
-| **Delay** | 0.0–1.0 s | Time between strokes |
-| **Pixel Size** | 1–50 px | Detail level (lower = more detail, slower) |
-| **Jump Delay** | 0.0–2.0 s | Pause inserted after large cursor jumps |
+| **Delay between strokes** | 0.0–1.0 s | Time between strokes |
+| **Detail** | 1–50 px | Lower = finer detail, slower |
+| **Pause after big moves** | 0.0–2.0 s | Pause inserted after large cursor jumps |
 
 Options include **Ignore White Pixels**, **New Layer**, **Skip First Color**,
 and **MSPaint Mode** (double-click swatches).
@@ -159,9 +160,10 @@ Adjust **Delay** and **Pixel Size**. **Pre-compute** makes repeated runs start
 instantly but does not change drawing speed.
 
 **Auto-detect found nothing.**
-The window may be resized, on a non-primary monitor, or under display scaling.
-Maximize the app on the primary monitor at 100% scaling and retry, or teach the
-tools manually with **Setup**.
+The canvas must be **blank** — existing artwork defeats detection. Also make
+sure the window is maximized on the primary monitor at 100% display scaling.
+Clear the canvas and retry, or teach the canvas and palette with **Teach
+manually**.
 
 **Where does it save data?**
 `config.json`, `cache/`, and `targets/` sit next to the executable (the repo

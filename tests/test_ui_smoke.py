@@ -116,6 +116,32 @@ def test_countdown_banner_cancel_emits(app):
         banner.close()
 
 
+def test_readiness_strip_states(app):
+    from pyaint.ui.widgets import ReadinessStrip
+
+    strip = ReadinessStrip()
+    try:
+        strip.update_steps("skribbl", environment_ready=True, image_ready=False)
+        assert strip._chips[0].property("done") is True
+        assert strip._chips[1].property("done") is True
+        assert strip._chips[2].property("done") is False
+        assert strip._chips[3].property("done") is False
+    finally:
+        strip.close()
+
+
+def test_detection_checklist(app):
+    from pyaint.locators import Detection
+    from pyaint.ui.main_window import MainWindow
+
+    good = Detection(canvas=(1, 2, 3, 4), palette=(5, 6, 7, 8), palette_rows=2, palette_cols=3)
+    text = MainWindow._detection_checklist(good)
+    assert "✓ Canvas" in text and "✓ Palette 2×3" in text
+
+    empty = MainWindow._detection_checklist(Detection())
+    assert "✗ Canvas" in empty and "✗ Palette" in empty
+
+
 def test_theme_resolution_and_stylesheet():
     from pyaint.ui import theme
 

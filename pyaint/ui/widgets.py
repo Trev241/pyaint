@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -25,6 +26,81 @@ def pil_to_qpixmap(image) -> QPixmap:
     data = image.tobytes("raw", "RGBA")
     qimage = QImage(data, image.width, image.height, QImage.Format_RGBA8888)
     return QPixmap.fromImage(qimage.copy())
+
+
+class ReadinessStrip(QFrame):
+    """A compact step indicator: Target › Canvas & palette › Image › Draw."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ReadinessStrip")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(6)
+        self._chips = []
+        for index, text in enumerate(("Target", "Canvas & palette", "Image", "Draw")):
+            if index:
+                separator = QLabel("›")
+                separator.setObjectName("ReadySep")
+                layout.addWidget(separator)
+            chip = QLabel(text)
+            chip.setObjectName("ReadyChip")
+            chip.setProperty("done", False)
+            layout.addWidget(chip)
+            self._chips.append(chip)
+        layout.addStretch(1)
+
+    def _set_step(self, index: int, text: str, done: bool) -> None:
+        chip = self._chips[index]
+        chip.setText(("✓ " if done else "○ ") + text)
+        chip.setProperty("done", bool(done))
+        chip.style().unpolish(chip)
+        chip.style().polish(chip)
+
+    def update_steps(self, target_name: str, environment_ready: bool, image_ready: bool) -> None:
+        self._set_step(0, f"Target · {target_name}", True)
+        self._set_step(1, "Canvas & palette", environment_ready)
+        self._set_step(2, "Image", image_ready)
+        self._set_step(3, "Draw", environment_ready and image_ready)
+
+
+class CollapsibleSection(QFrame):
+    """A section whose body can be expanded/collapsed by clicking its header."""
+
+    def __init__(self, title: str, expanded: bool = False, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Section")
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 8)
+        self._layout.setSpacing(4)
+
+        self._toggle = QToolButton()
+        self._toggle.setObjectName("CollapsibleHeader")
+        self._toggle.setText(title)
+        self._toggle.setCheckable(True)
+        self._toggle.setChecked(expanded)
+        self._toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+        self._toggle.clicked.connect(self._on_toggle)
+        self._layout.addWidget(self._toggle)
+
+        self._body = QWidget()
+        self._body_layout = QVBoxLayout(self._body)
+        self._body_layout.setContentsMargins(0, 0, 0, 0)
+        self._body_layout.setSpacing(4)
+        self._body.setVisible(expanded)
+        self._layout.addWidget(self._body)
+
+    def add(self, widget: QWidget) -> QWidget:
+        self._body_layout.addWidget(widget)
+        return widget
+
+    def add_layout(self, layout) -> None:
+        self._body_layout.addLayout(layout)
+
+    def _on_toggle(self, checked: bool) -> None:
+        self._toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+        self._body.setVisible(checked)
 
 
 class Section(QFrame):

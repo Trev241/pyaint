@@ -18,7 +18,7 @@ import urllib.error as urllib_error
 import urllib.request
 
 from PIL import Image
-from PySide6.QtCore import QObject, QSize, QTimer, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
@@ -61,10 +61,18 @@ from pyaint.ui import theme
 from pyaint.ui.countdown import CountdownBanner
 from pyaint.ui.icons import icon
 from pyaint.ui.overlay import ProgressOverlay
-from pyaint.ui.widgets import ImagePreview, Section, SliderField, ToolControls, pil_to_qpixmap
+from pyaint.ui.widgets import (
+    CollapsibleSection,
+    ImagePreview,
+    ReadinessStrip,
+    Section,
+    SliderField,
+    ToolControls,
+    pil_to_qpixmap,
+)
 from pyaint.validation import validate_recipe
 
-_PANELS = (("Draw", "target"), ("Image", "image"), ("Settings", "sliders"))
+_PANELS = (("Setup", "target"), ("Image", "image"), ("Draw", "sliders"))
 
 
 class UiSignals(QObject):
@@ -180,13 +188,13 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(side)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self._side_title = QLabel("DRAW")
+        self._side_title = QLabel("SETUP")
         self._side_title.setObjectName("SideBarTitle")
         layout.addWidget(self._side_title)
         self._panels = QStackedWidget()
-        self._panels.addWidget(self._build_draw_panel())
+        self._panels.addWidget(self._build_setup_panel())
         self._panels.addWidget(self._build_image_panel())
-        self._panels.addWidget(self._build_settings_panel())
+        self._panels.addWidget(self._build_draw_panel())
         layout.addWidget(self._panels, 1)
         return side
 
@@ -202,40 +210,56 @@ class MainWindow(QMainWindow):
         scroll.setWidget(container)
         return scroll, layout
 
-    def _build_draw_panel(self) -> QWidget:
+    def _build_setup_panel(self) -> QWidget:
         scroll, layout = self._scroll_panel()
 
-        target = Section("Target", "Pick your drawing app, then detect its canvas and palette.")
+        target = Section("Choose your app", "Pick the drawing app, then detect or teach its canvas and palette.")
         self._target_combo = QComboBox()
         self._target_combo.currentIndexChanged.connect(self._on_target_changed)
         target.add(self._target_combo)
         detect_row = QHBoxLayout()
         self._auto_btn = QPushButton("Auto-detect")
+        self._auto_btn.setToolTip("Find the canvas and palette from a screenshot")
         self._auto_btn.clicked.connect(self.auto_detect)
-        setup_btn = QPushButton("Setup…")
-        setup_btn.clicked.connect(self.open_setup)
+        teach_btn = QPushButton("Teach manually…")
+        teach_btn.setToolTip("Point at the canvas and palette yourself")
+        teach_btn.clicked.connect(self.open_setup)
         detect_row.addWidget(self._auto_btn)
-        detect_row.addWidget(setup_btn)
+        detect_row.addWidget(teach_btn)
         target.add_layout(detect_row)
+        needs = QLabel(
+            "Auto-detect needs a blank canvas, the app maximized on the primary "
+            "monitor, at 100% display scaling."
+        )
+        needs.setObjectName("SectionHint")
+        needs.setWordWrap(True)
+        target.add(needs)
         self._detection_label = QLabel("No regions detected yet.")
         self._detection_label.setObjectName("SectionHint")
         self._detection_label.setWordWrap(True)
         target.add(self._detection_label)
         layout.insertWidget(layout.count() - 1, target)
 
-        mode = Section("Draw mode")
+        return scroll
+
+    def _build_draw_panel(self) -> QWidget:
+        scroll, layout = self._scroll_panel()
+
+        mode = Section("Speed & quality", "Quality repaints backgrounds first; Fast is a direct, quicker pass.")
         self._mode_combo = QComboBox()
-        self._mode_combo.addItem("Layered (best quality)", Bot.LAYERED)
-        self._mode_combo.addItem("Slotted (fast)", Bot.SLOTTED)
+        self._mode_combo.addItem("Quality", Bot.LAYERED)
+        self._mode_combo.addItem("Fast", Bot.SLOTTED)
+        self._mode_combo.setItemData(0, "Layered: fewer, cleaner colour switches (default)", Qt.ToolTipRole)
+        self._mode_combo.setItemData(1, "Slotted: direct colour-to-lines mapping, faster to process", Qt.ToolTipRole)
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         mode.add(self._mode_combo)
         layout.insertWidget(layout.count() - 1, mode)
 
-        drawing = Section("Drawing")
+        drawing = Section("Drawing", "How slowly and how finely Pyaint paints.")
         self._setters = [
-            SliderField("Delay", 0.0, 1.0, 0.1, 0.01),
-            SliderField("Pixel size", 1, 50, 12, 1),
-            SliderField("Jump delay", 0.0, 2.0, 0.5, 0.05),
+            SliderField("Delay between strokes", 0.0, 1.0, 0.1, 0.01),
+            SliderField("Detail (lower = finer)", 1, 50, 12, 1),
+            SliderField("Pause after big moves", 0.0, 2.0, 0.5, 0.05),
         ]
         for index, field in enumerate(self._setters):
             field.changed.connect(lambda value, i=index: self._on_setting_changed(i, value))
@@ -244,14 +268,16 @@ class MainWindow(QMainWindow):
 
         options = Section("Options")
         self._chk_ignore = QCheckBox("Ignore white pixels")
+        self._chk_ignore.setToolTip("Skip pure-white areas, e.g. a blank background")
         self._chk_skip = QCheckBox("Skip first color")
+        self._chk_skip.setToolTip("Don't paint the first colour in the map")
         self._chk_ignore.toggled.connect(self._on_options_changed)
         self._chk_skip.toggled.connect(self._on_skip_changed)
         for box in (self._chk_ignore, self._chk_skip):
             options.add(box)
         layout.insertWidget(layout.count() - 1, options)
 
-        tools = Section("App tools", "Enable only what your target app provides.")
+        tools = Section("App behaviour", "Enable only what your target app provides.")
         self._tool_controls = []
         for name, supports_delay in (
             ("New Layer", False),
@@ -263,6 +289,7 @@ class MainWindow(QMainWindow):
             tools.add(control)
             self._tool_controls.append(control)
         self._chk_mspaint = QCheckBox("MS Paint double-click")
+        self._chk_mspaint.setToolTip("Some palettes need a double-click to select a colour")
         self._chk_mspaint.toggled.connect(self._on_mspaint_toggled)
         tools.add(self._chk_mspaint)
         self._mspaint_delay = QSpinBox()
@@ -273,7 +300,53 @@ class MainWindow(QMainWindow):
         tools.add(self._mspaint_delay)
         layout.insertWidget(layout.count() - 1, tools)
 
+        advanced = CollapsibleSection("Advanced")
+        self._build_advanced_into(advanced)
+        layout.insertWidget(layout.count() - 1, advanced)
+
         return scroll
+
+    def _build_advanced_into(self, container) -> None:
+        appearance = Section("Appearance", "Follow the system theme or choose one explicitly.")
+        self._theme_combo = QComboBox()
+        for mode in theme.THEME_MODES:
+            self._theme_combo.addItem(theme.THEME_LABELS[mode], mode)
+        self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        appearance.add(self._theme_combo)
+        container.add(appearance)
+
+        keys = Section("Input")
+        key_row = QHBoxLayout()
+        key_label = QLabel("Pause key")
+        key_label.setObjectName("FieldLabel")
+        self._pause_edit = QLineEdit()
+        self._pause_edit.setMaxLength(1)
+        self._pause_edit.setFixedWidth(48)
+        self._pause_edit.textChanged.connect(self._on_pause_key_changed)
+        key_row.addWidget(key_label)
+        key_row.addStretch(1)
+        key_row.addWidget(self._pause_edit)
+        keys.add_layout(key_row)
+
+        jump_row = QHBoxLayout()
+        jump_label = QLabel("Big-move threshold (px)")
+        jump_label.setObjectName("FieldLabel")
+        self._jump_threshold = QSpinBox()
+        self._jump_threshold.setRange(1, 200)
+        self._jump_threshold.setValue(5)
+        self._jump_threshold.valueChanged.connect(self._on_jump_threshold_changed)
+        jump_row.addWidget(jump_label)
+        jump_row.addStretch(1)
+        jump_row.addWidget(self._jump_threshold)
+        keys.add_layout(jump_row)
+        container.add(keys)
+
+        files = Section("Files")
+        reset = QPushButton("Reset config")
+        reset.setObjectName("Danger")
+        reset.clicked.connect(self._on_reset_config)
+        files.add(reset)
+        container.add(files)
 
     def _build_image_panel(self) -> QWidget:
         scroll, layout = self._scroll_panel()
@@ -317,57 +390,13 @@ class MainWindow(QMainWindow):
 
         return scroll
 
-    def _build_settings_panel(self) -> QWidget:
-        scroll, layout = self._scroll_panel()
-
-        appearance = Section("Appearance", "Follow the system theme or choose one explicitly.")
-        self._theme_combo = QComboBox()
-        for mode in theme.THEME_MODES:
-            self._theme_combo.addItem(theme.THEME_LABELS[mode], mode)
-        self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
-        appearance.add(self._theme_combo)
-        layout.insertWidget(layout.count() - 1, appearance)
-
-        keys = Section("Input")
-        key_row = QHBoxLayout()
-        key_label = QLabel("Pause key")
-        key_label.setObjectName("FieldLabel")
-        self._pause_edit = QLineEdit()
-        self._pause_edit.setMaxLength(1)
-        self._pause_edit.setFixedWidth(48)
-        self._pause_edit.textChanged.connect(self._on_pause_key_changed)
-        key_row.addWidget(key_label)
-        key_row.addStretch(1)
-        key_row.addWidget(self._pause_edit)
-        keys.add_layout(key_row)
-
-        jump_row = QHBoxLayout()
-        jump_label = QLabel("Jump threshold (px)")
-        jump_label.setObjectName("FieldLabel")
-        self._jump_threshold = QSpinBox()
-        self._jump_threshold.setRange(1, 200)
-        self._jump_threshold.setValue(5)
-        self._jump_threshold.valueChanged.connect(self._on_jump_threshold_changed)
-        jump_row.addWidget(jump_label)
-        jump_row.addStretch(1)
-        jump_row.addWidget(self._jump_threshold)
-        keys.add_layout(jump_row)
-        layout.insertWidget(layout.count() - 1, keys)
-
-        files = Section("Files")
-        reset = QPushButton("Reset config")
-        reset.setObjectName("Danger")
-        reset.clicked.connect(self._on_reset_config)
-        files.add(reset)
-        layout.insertWidget(layout.count() - 1, files)
-
-        return scroll
-
     def _build_content(self) -> QWidget:
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self._readiness = ReadinessStrip()
+        layout.addWidget(self._readiness)
         layout.addWidget(self._build_toolbar())
 
         self._countdown_banner = CountdownBanner()
@@ -446,9 +475,9 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(4)
 
-        self._btn_precompute = self._tool_button("Pre-compute", "download", self._on_precompute, "Process and cache the image")
+        self._btn_precompute = self._tool_button("Prepare & cache", "download", self._on_precompute, "Process the image now so Start is instant")
         self._btn_test = self._tool_button("Test draw", "zap", self._on_test_draw, "Draw the first 20 strokes")
-        self._btn_simple = self._tool_button("Simple test", "play", self._on_simple_test, "Draw 5 lines to tune the brush")
+        self._btn_simple = self._tool_button("Brush test", "play", self._on_simple_test, "Draw 5 lines to tune the brush size")
         for button in (self._btn_precompute, self._btn_test, self._btn_simple):
             layout.addWidget(button)
         layout.addStretch(1)
@@ -655,6 +684,7 @@ class MainWindow(QMainWindow):
         self._chk_mspaint.setChecked(bool(self.profile.mspaint_mode.get("enabled")))
         self._mspaint_delay.setValue(int(float(self.profile.mspaint_mode.get("delay", 0.5)) * 1000))
         self._mspaint_delay.setEnabled(self._chk_mspaint.isChecked())
+        self._refresh_readiness()
 
     def _refresh_detection_status(self) -> None:
         canvas = self.profile.canvas_rect()
@@ -665,8 +695,40 @@ class MainWindow(QMainWindow):
         if palette:
             parts.append(f"palette {palette}")
         self._detection_label.setText(
-            "Detected: " + "; ".join(parts) if parts else "No regions detected yet — run Auto-detect or Setup."
+            "Detected: " + "; ".join(parts) if parts else "No regions detected yet — run Auto-detect or teach it manually."
         )
+        self._refresh_readiness()
+
+    def _refresh_readiness(self) -> None:
+        recipe = get_recipe(self.profile.target)
+        environment_ready = (
+            getattr(self.bot, "_canvas", None) is not None
+            and getattr(self.bot, "_palette", None) is not None
+        )
+        image_ready = self._has_image()
+        self._readiness.update_steps(recipe.name, environment_ready, image_ready)
+        if not self._busy:
+            self._btn_start.setEnabled(environment_ready and image_ready)
+
+    @staticmethod
+    def _detection_checklist(detection) -> str:
+        lines = []
+        if getattr(detection, "canvas", None):
+            lines.append(f"✓ Canvas {detection.canvas}")
+        else:
+            lines.append("✗ Canvas not found")
+        if (
+            getattr(detection, "palette", None)
+            and detection.palette_rows
+            and detection.palette_cols
+        ):
+            lines.append(
+                f"✓ Palette {detection.palette_rows}×{detection.palette_cols} {detection.palette}"
+                " — dots mark sampled centres"
+            )
+        else:
+            lines.append("✗ Palette not found")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Setting slots
@@ -817,6 +879,8 @@ class MainWindow(QMainWindow):
             self._retry_detection_btn.setEnabled(not running)
             self._cancel_detection_btn.setEnabled(not running)
             self._apply_detection_btn.setEnabled(not running and self._detection_result is not None)
+        if not running:
+            self._refresh_readiness()
 
     def _set_status(self, text: str) -> None:
         self._status_label.setText(text)
@@ -911,6 +975,7 @@ class MainWindow(QMainWindow):
             self._set_status("Cached result available" if has_cache else "No cache — will process live")
         else:
             self._set_status("Image loaded. Detect or teach the canvas next.")
+        self._refresh_readiness()
 
     # Drag & drop
     def dragEnterEvent(self, event):  # noqa: N802
@@ -991,15 +1056,14 @@ class MainWindow(QMainWindow):
                 log.info(f"[AutoDetect] annotation failed: {exc}")
                 annotated = image.convert("RGB")
             self._detection_preview.set_pixmap(pil_to_qpixmap(annotated))
-            self._detection_summary.setText(
-                f"Detected: {detection.summary()}  —  white dots mark palette cell centres."
-            )
+            self._detection_summary.setText(self._detection_checklist(detection))
         else:
             self._detection_result = None
             self._detection_preview.set_pixmap(pil_to_qpixmap(image.convert("RGB")))
             self._detection_summary.setText(
-                "No regions detected. Retry with the target app maximized on the "
-                "primary monitor, or Cancel and use Setup."
+                "No regions found. Make sure the canvas is blank and the target "
+                "app is maximized on the primary monitor at 100% scaling, then "
+                "Retry — or Cancel and teach it manually."
             )
         self._apply_detection_btn.setEnabled(self._detection_result is not None)
         self._tabs.setCurrentWidget(self._detection_view)

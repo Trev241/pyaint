@@ -3,7 +3,7 @@
 from PIL import Image
 
 from pyaint import utils
-from pyaint.annotate import annotate_detection
+from pyaint.annotate import annotate_detection, annotate_palette
 from pyaint.locators import Detection
 from pyaint.palette import sample_median
 
@@ -51,6 +51,15 @@ def test_annotate_detection_draws_palette_centres():
     assert annotated.getpixel((25, 9)) == (255, 255, 255)
     # The source image must not be mutated.
     assert image.getpixel((15, 9)) == (0, 0, 0)
+
+
+def test_annotate_palette_crops_and_dots_centres():
+    image = Image.new("RGB", (40, 20), (0, 0, 0))
+    out = annotate_palette(image, (10, 5, 20, 8), rows=1, cols=2)
+    assert out.size == (20, 8)
+    # Cell centres, relative to the crop: (5, 4) and (15, 4).
+    assert out.getpixel((5, 4)) == (255, 255, 255)
+    assert out.getpixel((15, 4)) == (255, 255, 255)
 
 
 def test_annotate_handles_empty_detection():

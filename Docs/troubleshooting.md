@@ -25,10 +25,13 @@ colour with no close swatch may be skipped.
 
 ## Auto-detect found nothing
 
+- **The canvas must be blank.** Detection assumes a uniform canvas (white for
+  skribbl, a solid colour for MS Paint); existing artwork defeats it. Clear the
+  canvas and retry.
 - Maximize the target app on the **primary** monitor at **100%** display
   scaling.
 - The window may have been moved or resized since the recipe was tuned; use
-  **Setup** to teach the palette and canvas manually.
+  **Teach manually** to point at the palette and canvas.
 - Detection failures are silent by design — it never draws in the wrong place.
 
 ## Drawing is slow

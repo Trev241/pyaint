@@ -169,6 +169,33 @@ def stylesheet(tokens: dict | None = None) -> str:
         font-size: 11px;
         padding: 0 12px 6px 12px;
     }}
+    #CollapsibleHeader {{
+        background: transparent;
+        border: none;
+        color: {t['fg_muted']};
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+        padding: 12px 10px 2px 8px;
+        text-align: left;
+    }}
+    #CollapsibleHeader:hover {{ color: {t['fg']}; }}
+
+    /* --- Readiness strip ------------------------------------------------ */
+    #ReadinessStrip {{
+        background: {t['bg_side']};
+        border-bottom: 1px solid {t['border']};
+    }}
+    #ReadyChip {{
+        color: {t['fg_dim']};
+        font-size: 11px;
+        padding: 2px 4px;
+    }}
+    #ReadyChip[done="true"] {{
+        color: {t['success']};
+        font-weight: 600;
+    }}
+    #ReadySep {{ color: {t['fg_dim']}; }}
     #FieldLabel {{
         color: {t['fg_muted']};
         font-size: 11px;

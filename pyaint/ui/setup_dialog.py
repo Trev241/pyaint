@@ -21,8 +21,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pyaint.annotate import annotate_palette
 from pyaint.log import log
 from pyaint.ui.capture import pick_points
+from pyaint.ui.widgets import ImagePreview, pil_to_qpixmap
 
 _FRIENDLY = {
     "Palette": "Palette",
@@ -109,6 +111,11 @@ class SetupDialog(QDialog):
         palette_layout.addStretch(1)
         right_layout.addWidget(self._palette_box)
 
+        self._palette_preview = ImagePreview()
+        self._palette_preview.setMinimumHeight(90)
+        self._palette_preview.setVisible(False)
+        right_layout.addWidget(self._palette_preview)
+
         # Enabling (optional tools)
         self._enable_box = QWidget()
         enable_layout = QVBoxLayout(self._enable_box)
@@ -183,6 +190,7 @@ class SetupDialog(QDialog):
         status = "Configured" if entry.get("status") else "Not set"
         self._status_label.setText(f"Status: {status}")
         self._palette_box.setVisible(name == "Palette")
+        self._palette_preview.setVisible(name == "Palette")
         self._enable_box.setVisible(name in _MODIFIER_TOOLS)
         self._enable.setChecked(bool(entry.get("enabled")))
         modifiers = entry.get("modifiers", {}) or {}
@@ -239,6 +247,17 @@ class SetupDialog(QDialog):
                 image=image,
             )
             entry["color_coords"] = {str(k): list(v) for k, v in palette.colors_pos.items()}
+            if image is not None:
+                try:
+                    preview = annotate_palette(
+                        image,
+                        (box[0], box[1], box[2] - box[0], box[3] - box[1]),
+                        rows,
+                        cols,
+                    )
+                    self._palette_preview.set_pixmap(pil_to_qpixmap(preview))
+                except Exception as exc:  # noqa: BLE001
+                    log.info(f"[Setup] palette preview failed: {exc}")
             if len(palette.colors) <= 1:
                 QMessageBox.warning(
                     self,
