@@ -37,6 +37,25 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   the choice (`Profile.target`).
 - `tests/test_targets.py`: recipe registry/validation plus `Profile.target`
   round-trip coverage.
+- `pyaint_locators.py`: auto-detection engine — `white_rect`, `color_rect`
+  (solid-colour canvas), `color_grid` (palette bbox + rows/cols),
+  `color_signature`, and `window_relative` locators, plus `detect_target()`
+  orchestration. Detection specs may be a single locator or an ordered **chain**
+  (tried until one succeeds), and rectangle locators accept an optional
+  `aspect`/`aspect_tolerance` filter. `color_signature` picks the blob covering
+  the most *distinct* target colours, so a multi-colour palette is chosen over
+  large single-colour UI panels. Pure over a PIL image, so it is testable
+  headless.
+- Recipe `detection` specs: skribbl auto-detects its canvas (white 800x600 / 4:3,
+  with a `color_rect` fallback that is also aspect-checked) and its exact 2x13
+  palette (26 sampled colours, `gap: 0`); MS Paint auto-detects its canvas.
+- Main window **Auto-detect** button: finds the target's regions, shows an
+  annotated preview for confirmation, and falls back to manual teaching when it
+  finds nothing. The window briefly minimizes with a 3-second countdown so the
+  target app is in front when the screen is captured (one click, no manual
+  screenshots).
+- `tests/test_locators.py`: synthetic-image coverage for the locator algorithms,
+  `detect_target`, and `Bot.apply_detection`.
 - `_color_source()` / `_select_color()` color-selection strategy in `Bot`,
   driven by `Profile.color_selection` (`auto` | `palette` | `custom`) instead
   of ad-hoc conditionals.
@@ -65,10 +84,20 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   profile, `from_config`/`to_config`, and the preset `to_dict`/`from_dict`.
 - `ui/setup.py`: the Setup window now only lists the tools the selected target
   recipe uses (e.g. skribbl shows just Palette and Canvas).
+- `bot.py`: added `capture_screen()`, `detect_target()`, and
+  `apply_detection()` so a recipe's locators can populate the canvas/palette
+  without manual teaching.
 
 ### Fixed
 - `get_cache_filename()` no longer fails when the canvas is uninitialized; it
   returns `None` instead of raising.
+- Auto-detection now finds skribbl's canvas and palette. The canvas is a **white
+  800x600 (4:3)** region, so detection prefers `white_rect` filtered to 4:3 and
+  only falls back to a `color_rect` (also 4:3) if the surface is filled — this
+  stops a large dark *drawing* from being mistaken for the canvas. The page
+  background is itself saturated, so the palette is found via `color_signature`
+  over the real 2x13 swatch colours with `gap: 0` (dilation previously merged
+  the palette into the white canvas panel).
 
 ### Removed
 - Duplicated per-pixel run-length/layering logic between `process()` and

@@ -19,6 +19,7 @@ from PIL import Image
 
 from pyaint_profile import Profile, box_to_wh
 from pyaint_painter import ScreenPainter
+from pyaint_locators import detect_target
 
 class Palette:
     def __init__(self, colors_pos=None, box=None, rows=None, columns=None, valid_positions=None, manual_centers=None):
@@ -256,6 +257,47 @@ class Bot:
             except Exception as e:
                 print(f"[Color Calibration] Error loading calibration data: {e}")
     
+    # ------------------------------------------------------------------
+    # Auto-detection (Phase 2)
+    # ------------------------------------------------------------------
+    def capture_screen(self):
+        """Return the current full-screen image as a PIL image."""
+        return pyautogui.screenshot()
+
+    def detect_target(self, recipe=None):
+        """Run the target recipe's locators against the current screen.
+
+        Returns a ``pyaint_locators.Detection`` (falsy if nothing was found).
+        """
+        if recipe is None:
+            from pyaint_targets import get_recipe
+            recipe = get_recipe(self.profile.target)
+        return detect_target(recipe, self.capture_screen())
+
+    def apply_detection(self, detection):
+        """Apply a Detection to the live profile/palette; return what was used."""
+        applied = []
+        if detection.canvas:
+            x, y, w, h = detection.canvas
+            self.init_canvas((x, y, x + w, y + h))
+            self.profile['Canvas']['status'] = True
+            applied.append('canvas')
+        if detection.palette and detection.palette_rows and detection.palette_cols:
+            x, y, w, h = detection.palette
+            palette = self.init_palette(
+                pbox=(x, y, w, h),
+                prows=detection.palette_rows,
+                pcols=detection.palette_cols,
+            )
+            entry = self.profile['Palette']
+            entry['box'] = [x, y, x + w, y + h]
+            entry['rows'] = detection.palette_rows
+            entry['cols'] = detection.palette_cols
+            entry['color_coords'] = {str(k): v for k, v in palette.colors_pos.items()}
+            entry['status'] = True
+            applied.append('palette')
+        return applied
+
     def _scan_spectrum(self, ccbox):
         """
         Scan the custom colors spectrum to create a color-to-position map.

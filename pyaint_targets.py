@@ -12,6 +12,7 @@ falls back to fully manual configuration for anything not covered.
 
 from __future__ import annotations
 
+import copy
 import glob
 import json
 import os
@@ -47,6 +48,8 @@ class Recipe:
     skip_first_color: bool = False
     # Optional fixed palette [(r, g, b), ...] when the app's colours are known.
     palette: Optional[List[Sequence[int]]] = None
+    # Locator specs used for auto-detection (see ``pyaint_locators``).
+    detection: Dict[str, Any] = field(default_factory=dict)
     notes: str = ""
 
     # ------------------------------------------------------------------
@@ -80,6 +83,7 @@ class Recipe:
             drawing_options=dict(data.get("drawing_options") or {}),
             skip_first_color=bool(data.get("skip_first_color", False)),
             palette=palette,
+            detection=copy.deepcopy(dict(data.get("detection") or {})),
             notes=str(data.get("notes", "")),
         )
 
@@ -97,8 +101,24 @@ class Recipe:
             "drawing_options": dict(self.drawing_options),
             "skip_first_color": self.skip_first_color,
             "palette": [list(c) for c in self.palette] if self.palette else None,
+            "detection": copy.deepcopy(self.detection),
             "notes": self.notes,
         }
+
+
+# skribbl.io's fixed 2x13 palette (top row then bottom row), sampled from a
+# real screenshot. Used only to *locate* the palette grid; the drawing colours
+# are still sampled from the screen.
+SKRIBBL_PALETTE = [
+    (255, 255, 255), (193, 193, 193), (239, 19, 11), (255, 113, 0),
+    (255, 228, 0), (0, 204, 0), (0, 255, 145), (0, 178, 255),
+    (35, 31, 211), (163, 0, 186), (223, 105, 167), (255, 172, 142),
+    (160, 82, 45),
+    (0, 0, 0), (80, 80, 80), (116, 11, 7), (194, 56, 0),
+    (232, 162, 0), (0, 70, 25), (0, 120, 93), (0, 86, 158),
+    (14, 8, 101), (85, 0, 105), (135, 53, 84), (204, 119, 77),
+    (99, 48, 13),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +153,7 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
             "jump_threshold": 5,
         },
         "drawing_options": {"ignore_white_pixels": True, "use_custom_colors": False},
+        "detection": {"canvas": {"type": "white_rect"}},
         "notes": "Sampled palette. Enable MSPaint Mode if the app needs double-clicks to pick colours.",
     },
     {
@@ -175,6 +196,27 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
         # Phase 2 will populate/verify the fixed palette via colour-signature
         # detection; until then the palette is sampled from the screen.
         "palette": None,
+        "detection": {
+            "canvas": [
+                {"type": "white_rect", "aspect": 1.3333, "aspect_tolerance": 0.2},
+                {
+                    "type": "color_rect",
+                    "color": [0, 0, 0],
+                    "tolerance": 40,
+                    "aspect": 1.3333,
+                    "aspect_tolerance": 0.2,
+                },
+            ],
+            "palette": {
+                "type": "color_signature",
+                "colors": SKRIBBL_PALETTE,
+                "tolerance": 25,
+                "gap": 0,
+                "min_colors": 5,
+                "rows": 2,
+                "cols": 13,
+            },
+        },
         "notes": "Teach only the palette grid and the canvas. Fast settings tuned for a short turn timer.",
     },
 )

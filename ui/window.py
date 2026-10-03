@@ -9,6 +9,7 @@ import utils
 
 from pyaint_profile import Profile, ENV_CONFIG_KEYS
 from pyaint_targets import get_recipe, list_recipes
+from pyaint_locators import detect_target
 from ui.setup import SetupWindow
 from tkinter import filedialog
 from bot import Bot
@@ -198,6 +199,7 @@ class Window:
         # Options
         btn_names = [
             'Setup',
+            'Auto-detect',
             # 'Inspect',
             'Pre-compute',
             'Test Draw',
@@ -212,12 +214,13 @@ class Window:
             b.grid(column=0, row=curr_row + i, columnspan=2, padx=5, pady=5, sticky='ew')
             buttons.append(b)
         buttons[0]['command'] = self.setup
-        # buttons[1]['command'] = self.test
-        buttons[1]['command'] = self.start_precompute_thread
-        buttons[2]['command'] = self.start_test_draw_thread
-        buttons[3]['command'] = self.start_simple_test_draw_thread
-        buttons[4]['command'] = self.start_calibration_thread
-        buttons[5]['command'] = self.start_draw_thread
+        buttons[1]['command'] = self.auto_detect
+        # buttons[2]['command'] = self.test
+        buttons[2]['command'] = self.start_precompute_thread
+        buttons[3]['command'] = self.start_test_draw_thread
+        buttons[4]['command'] = self.start_simple_test_draw_thread
+        buttons[5]['command'] = self.start_calibration_thread
+        buttons[6]['command'] = self.start_draw_thread
         curr_row += len(btn_names)
 
         self._teclbl = Label(self._cframe, text='Draw Mode', font=Window.TITLE_FONT)
@@ -487,6 +490,84 @@ class Window:
         """Mirror the ``draw_options`` bit flags into the checkbuttons."""
         self._checkbutton_vars[0].set(1 if self.draw_options & Bot.IGNORE_WHITE else 0)
         self._checkbutton_vars[1].set(1 if self.draw_options & Bot.USE_CUSTOM_COLORS else 0)
+
+    @is_free
+    def auto_detect(self):
+        """Capture the screen after a short countdown and locate the target."""
+        recipe = get_recipe(self.profile.target)
+        if not recipe.detection:
+            messagebox.showinfo(
+                self.title,
+                f'No auto-detection is configured for "{recipe.name}". '
+                'Please use Setup to teach its tools manually.')
+            self._set_busy(False)
+            return
+
+        # Get pyaint out of the way and give the user a moment to bring the
+        # target application to the front before capturing.
+        messagebox.showinfo(
+            self.title,
+            'Auto-detect will capture the screen in 3 seconds.\n\n'
+            'Bring the target application to the front now.')
+        self._pending_recipe = recipe
+        self._root.iconify()
+        self._root.after(3000, self._finish_auto_detect)
+
+    def _finish_auto_detect(self):
+        try:
+            recipe = self._pending_recipe
+            image = self.bot.capture_screen()
+            detection = detect_target(recipe, image)
+            print(f"[AutoDetect] {recipe.id}: screen={image.size} canvas={detection.canvas} "
+                  f"palette={detection.palette} rows={detection.palette_rows} cols={detection.palette_cols}")
+            self._root.deiconify()
+            self._root.wm_state('normal')
+            if not detection:
+                messagebox.showwarning(
+                    self.title,
+                    f'Could not auto-detect "{recipe.name}". '
+                    'Please use Setup to teach its tools manually.')
+                self.tlabel['text'] = 'Auto-detect found nothing - use Setup.'
+                return
+
+            self._show_detection_preview(image, detection)
+            if messagebox.askyesno(
+                self.title,
+                f'Detected: {detection.summary()}\n\nApply these regions?'):
+                applied = self.bot.apply_detection(detection)
+                self._sync_env_ui()
+                self._store_drawing_settings()
+                self._store_drawing_options()
+                self._save_config()
+                self.tlabel['text'] = f'Auto-detect applied ({", ".join(applied)}).'
+            else:
+                self.tlabel['text'] = 'Auto-detect cancelled - use Setup to teach tools manually.'
+        except Exception as e:
+            traceback.print_exc()
+            try:
+                self._root.deiconify()
+                self._root.wm_state('normal')
+            except Exception:
+                pass
+            messagebox.showerror(self.title, f'Auto-detect failed: {e}')
+        finally:
+            self._set_busy(False)
+
+    def _show_detection_preview(self, image, detection):
+        """Draw detected regions onto a copy of the screenshot and preview it."""
+        try:
+            from PIL import ImageDraw
+            annotated = image.convert('RGB').copy()
+            draw = ImageDraw.Draw(annotated)
+            if detection.canvas:
+                x, y, w, h = detection.canvas
+                draw.rectangle([x, y, x + w, y + h], outline='red', width=3)
+            if detection.palette:
+                x, y, w, h = detection.palette
+                draw.rectangle([x, y, x + w, y + h], outline='lime', width=3)
+            self._set_img(image=annotated)
+        except Exception as e:
+            print(f'[AutoDetect] Could not render preview: {e}')
 
     def _init_ipanel(self):
         # IMAGE PREVIEW FRAME
