@@ -50,6 +50,33 @@ def test_theme_resolution_and_stylesheet():
     assert theme.DARK["bg"] != theme.LIGHT["bg"]
 
 
+def test_detection_lives_in_its_own_tab(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    from pyaint.locators import Detection
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        image = Image.new("RGB", (80, 60), (10, 20, 30))
+        window._present_detection(image, Detection(canvas=(5, 5, 50, 40)))
+        # A second, named tab is added and selected; the image tab is untouched.
+        assert window._tabs.count() == 2
+        assert window._tabs.tabText(1) == "Detection"
+        assert window._tabs.currentWidget() is window._detection_view
+        assert window._apply_detection_btn.isEnabled()
+
+        window._cancel_detection()
+        assert window._tabs.currentWidget() is window._image_view
+
+        # A failed detection keeps the tab but disables Apply.
+        window._present_detection(image, Detection())
+        assert not window._apply_detection_btn.isEnabled()
+    finally:
+        window.close()
+
+
 def test_progress_signal_updates_bar(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bot = Bot()

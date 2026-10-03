@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QStackedWidget,
+    QTabWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -96,6 +97,10 @@ class MainWindow(QMainWindow):
         self._recipes = []
         self._recipes_by_name = {}
         self._imname = os.path.join(paths.PROJECT_ROOT, "assets", "sample.png")
+        self._detecting = False
+        self._detection_result = None
+        self._detection_view = None
+        self._countdown = 0
 
         self.signals = UiSignals()
         self.signals.progress.connect(self._on_progress)
@@ -379,14 +384,60 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
         layout.addWidget(self._build_toolbar())
 
+        self._detection_view = None
+        self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
+        self._image_view = self._build_preview_view("Source image", is_detection=False)
+        self._tabs.addTab(self._image_view, "Image")
+        layout.addWidget(self._tabs, 1)
+        return content
+
+    def _build_preview_view(self, header_text: str, is_detection: bool) -> QWidget:
         stage = QFrame()
         stage.setObjectName("PreviewStage")
         stage_layout = QVBoxLayout(stage)
-        stage_layout.setContentsMargins(18, 18, 18, 18)
-        self._preview = ImagePreview()
-        stage_layout.addWidget(self._preview)
-        layout.addWidget(stage, 1)
-        return content
+        stage_layout.setContentsMargins(16, 12, 16, 12)
+        stage_layout.setSpacing(6)
+
+        header = QLabel(header_text)
+        header.setObjectName("StageHeader")
+        stage_layout.addWidget(header)
+
+        preview = ImagePreview()
+        stage_layout.addWidget(preview, 1)
+
+        if is_detection:
+            self._detection_preview = preview
+            row = QHBoxLayout()
+            self._detection_summary = QLabel("No detection yet.")
+            self._detection_summary.setObjectName("StageHeader")
+            self._detection_summary.setWordWrap(True)
+            row.addWidget(self._detection_summary, 1)
+            self._apply_detection_btn = QPushButton("Apply")
+            self._apply_detection_btn.setObjectName("Primary")
+            self._apply_detection_btn.clicked.connect(self._apply_detection)
+            self._retry_detection_btn = QPushButton("Retry")
+            self._retry_detection_btn.clicked.connect(self.auto_detect)
+            self._cancel_detection_btn = QPushButton("Cancel")
+            self._cancel_detection_btn.clicked.connect(self._cancel_detection)
+            row.addWidget(self._apply_detection_btn)
+            row.addWidget(self._retry_detection_btn)
+            row.addWidget(self._cancel_detection_btn)
+            stage_layout.addLayout(row)
+        else:
+            self._preview = preview
+        return stage
+
+    def _ensure_detection_tab(self) -> None:
+        if self._detection_view is None:
+            self._detection_view = self._build_preview_view(
+                "Detection preview — screen capture", is_detection=True
+            )
+            self._tabs.addTab(self._detection_view, "Detection")
+
+    def _show_image_tab(self) -> None:
+        if getattr(self, "_tabs", None) is not None:
+            self._tabs.setCurrentWidget(self._image_view)
 
     def _tool_button(self, text: str, icon_name: str, slot, tooltip: str = "") -> QPushButton:
         button = QPushButton(text)
@@ -802,6 +853,10 @@ class MainWindow(QMainWindow):
             button.setEnabled(not running)
         self._btn_stop.setEnabled(running)
         self._btn_pause.setEnabled(running)
+        if self._detection_view is not None:
+            self._retry_detection_btn.setEnabled(not running)
+            self._cancel_detection_btn.setEnabled(not running)
+            self._apply_detection_btn.setEnabled(not running and self._detection_result is not None)
 
     def _set_status(self, text: str) -> None:
         self._status_label.setText(text)
@@ -888,6 +943,7 @@ class MainWindow(QMainWindow):
             return
         self._imname = path
         self._preview.set_pixmap(pil_to_qpixmap(image))
+        self._show_image_tab()
         self._image_info.setText(f"{os.path.basename(path)} — {image.width}×{image.height}px")
         canvas = getattr(self.bot, "_canvas", None)
         if canvas is not None:
@@ -910,6 +966,8 @@ class MainWindow(QMainWindow):
     # Auto-detection
     # ------------------------------------------------------------------
     def auto_detect(self) -> None:
+        if self._detecting:
+            return
         recipe = get_recipe(self.profile.target)
         if not recipe.detection:
             QMessageBox.information(
@@ -917,13 +975,26 @@ class MainWindow(QMainWindow):
                 f'No auto-detection configured for "{recipe.name}".\n\nUse Setup to teach its tools.',
             )
             return
-        QMessageBox.information(
-            self, self.title,
-            "Auto-detect captures the screen in 3 seconds.\n\nBring the target app to the front now.",
-        )
+        self._detecting = True
         self._pending_recipe = recipe
-        self.showMinimized()
-        QTimer.singleShot(3000, self._finish_auto_detect)
+        self._detection_result = None
+        self._countdown = 3
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self._tick_countdown()
+
+    def _tick_countdown(self) -> None:
+        if self._countdown > 0:
+            self._set_status(
+                f"Auto-detect: capturing in {self._countdown}s — bring the target app to the front."
+            )
+            self._countdown -= 1
+            QTimer.singleShot(1000, self._tick_countdown)
+        else:
+            self.showMinimized()
+            # Let the minimize take effect before grabbing the screen.
+            QTimer.singleShot(400, self._finish_auto_detect)
 
     def _finish_auto_detect(self) -> None:
         try:
@@ -934,40 +1005,56 @@ class MainWindow(QMainWindow):
             self.raise_()
             self.activateWindow()
             log.info(f"[AutoDetect] {recipe.id}: canvas={detection.canvas} palette={detection.palette}")
-            if not detection:
-                QMessageBox.warning(
-                    self, self.title,
-                    f'Could not auto-detect "{recipe.name}".\n\nUse Setup to teach its tools.',
-                )
-                self._set_status("Auto-detect found nothing — use Setup.")
-                return
-            self._show_detection_preview(image, detection)
-            answer = QMessageBox.question(
-                self, self.title,
-                f"Detected: {detection.summary()}\n\n"
-                "White dots mark the palette cell centres that will be sampled; "
-                "check they sit inside the swatches.\n\nApply these regions?",
+            self._present_detection(image, detection)
+            self._set_status(
+                "Review the detection (white dots = palette cell centres), then Apply or Cancel."
             )
-            if answer == QMessageBox.StandardButton.Yes:
-                applied = self.bot.apply_detection(detection)
-                self._sync_env_ui()
-                self._refresh_detection_status()
-                self._store_drawing_settings()
-                self._store_drawing_options()
-                self._save_config()
-                self._set_status(f"Auto-detect applied ({', '.join(applied) or 'nothing'}).")
-            else:
-                self._set_status("Auto-detect cancelled.")
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             self.showNormal()
             QMessageBox.critical(self, self.title, f"Auto-detect failed: {exc}")
+        finally:
+            self._detecting = False
 
-    def _show_detection_preview(self, image, detection) -> None:
-        try:
-            self._preview.set_pixmap(pil_to_qpixmap(annotate_detection(image, detection)))
-        except Exception as exc:  # noqa: BLE001
-            log.info(f"[AutoDetect] preview failed: {exc}")
+    def _present_detection(self, image, detection) -> None:
+        """Show the detection result in its own tab, leaving the image tab alone."""
+        self._ensure_detection_tab()
+        if detection:
+            self._detection_result = detection
+            try:
+                annotated = annotate_detection(image, detection)
+            except Exception as exc:  # noqa: BLE001
+                log.info(f"[AutoDetect] annotation failed: {exc}")
+                annotated = image.convert("RGB")
+            self._detection_preview.set_pixmap(pil_to_qpixmap(annotated))
+            self._detection_summary.setText(
+                f"Detected: {detection.summary()}  —  white dots mark palette cell centres."
+            )
+        else:
+            self._detection_result = None
+            self._detection_preview.set_pixmap(pil_to_qpixmap(image.convert("RGB")))
+            self._detection_summary.setText(
+                "No regions detected. Retry with the target app maximized on the "
+                "primary monitor, or Cancel and use Setup."
+            )
+        self._apply_detection_btn.setEnabled(self._detection_result is not None)
+        self._tabs.setCurrentWidget(self._detection_view)
+
+    def _apply_detection(self) -> None:
+        if not self._detection_result:
+            return
+        applied = self.bot.apply_detection(self._detection_result)
+        self._sync_env_ui()
+        self._refresh_detection_status()
+        self._store_drawing_settings()
+        self._store_drawing_options()
+        self._save_config()
+        self._set_status(f"Auto-detect applied ({', '.join(applied) or 'nothing'}).")
+        self._show_image_tab()
+
+    def _cancel_detection(self) -> None:
+        self._set_status("Auto-detect cancelled.")
+        self._show_image_tab()
 
     # ------------------------------------------------------------------
     # Drawing actions

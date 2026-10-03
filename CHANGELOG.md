@@ -129,6 +129,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   notes) and this `CHANGELOG.md`.
 
 ### Changed
+- **Auto-detect UX:** the annotated detection now opens in its own **Detection**
+  tab next to the persistent **Image** tab, with in-tab **Apply / Retry /
+  Cancel**. The source image is never replaced. The modal confirmation dialogs
+  and the pre-detect message box are gone — the 3-second countdown now shows in
+  the status bar, keeping the whole flow in-window. Tabs use VS Code-style
+  editor-tab styling from `theme.py`.
 - **Palette sampling robustness:** `Palette` now samples the median of a small
   (3×3 where cells are large enough) neighbourhood instead of a single pixel,
   making colour reads robust to anti-aliased borders/gaps. `utils.grid_centers()`

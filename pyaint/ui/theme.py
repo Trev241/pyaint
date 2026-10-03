@@ -337,12 +337,44 @@ def stylesheet(tokens: dict | None = None) -> str:
         border-bottom: 1px solid {t['border']};
     }}
 
+    /* --- Editor tabs ---------------------------------------------------- */
+    QTabWidget::pane {{
+        border: none;
+        background: {t['bg']};
+    }}
+    QTabBar {{
+        background: {t['bg_activity']};
+        qproperty-drawBase: 0;
+    }}
+    QTabBar::tab {{
+        background: {t['bg_activity']};
+        color: {t['fg_muted']};
+        padding: 6px 14px;
+        border: none;
+        border-right: 1px solid {t['border']};
+        border-top: 1px solid transparent;
+    }}
+    QTabBar::tab:hover {{
+        background: {t['bg_hover']};
+        color: {t['fg']};
+    }}
+    QTabBar::tab:selected {{
+        background: {t['bg']};
+        color: {t['fg']};
+        border-top: 1px solid {t['accent']};
+    }}
+
     /* --- Preview -------------------------------------------------------- */
     #PreviewStage {{
         background: {t['bg']};
     }}
     #PreviewImage {{
         background: transparent;
+    }}
+    #StageHeader {{
+        color: {t['fg_muted']};
+        font-size: 11px;
+        padding: 0 2px;
     }}
 
     /* --- Lists (setup dialog) ------------------------------------------ */
