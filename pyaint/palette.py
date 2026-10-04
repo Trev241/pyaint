@@ -83,5 +83,10 @@ class Palette:
         """Squared Euclidean distance between two RGB triplets.
 
         The square root is unnecessary for ordering, so it is skipped.
+
+        TODO: raw Euclidean RGB is not perceptual and can pick a visibly wrong
+        swatch for near-neutral colours. Consider a different approximation
+        (CIE76/CIEDE2000 in Lab, or weighted RGB) behind `nearest_color`; see
+        `AGENTS/HANDOFF.md` → Deferred / open decisions.
         """
         return sum((s - q) ** 2 for s, q in zip(colx, coly))

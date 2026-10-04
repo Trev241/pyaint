@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -24,7 +23,7 @@ from PySide6.QtWidgets import (
 from pyaint.annotate import annotate_palette
 from pyaint.log import log
 from pyaint.ui.capture import pick_points
-from pyaint.ui.widgets import ImagePreview, pil_to_qpixmap
+from pyaint.ui.widgets import CheckBox, ImagePreview, pil_to_qpixmap
 
 _FRIENDLY = {
     "Palette": "Palette",
@@ -120,7 +119,7 @@ class SetupDialog(QDialog):
         self._enable_box = QWidget()
         enable_layout = QVBoxLayout(self._enable_box)
         enable_layout.setContentsMargins(0, 0, 0, 0)
-        self._enable = QCheckBox("Enable this tool")
+        self._enable = CheckBox("Enable this tool")
         self._enable.toggled.connect(self._on_enable_toggled)
         enable_layout.addWidget(self._enable)
 
@@ -128,7 +127,7 @@ class SetupDialog(QDialog):
         modifier_row.addWidget(QLabel("Modifiers:"))
         self._modifiers = {}
         for key in ("ctrl", "alt", "shift"):
-            box = QCheckBox(key.capitalize())
+            box = CheckBox(key.capitalize())
             box.toggled.connect(self._on_modifiers_toggled)
             self._modifiers[key] = box
             modifier_row.addWidget(box)
@@ -259,6 +258,10 @@ class SetupDialog(QDialog):
                 except Exception as exc:  # noqa: BLE001
                     log.info(f"[Setup] palette preview failed: {exc}")
             if len(palette.colors) <= 1:
+                # Make sure the warning is not a hidden modal if the picker
+                # left the dialog behind/ inactive.
+                self.raise_()
+                self.activateWindow()
                 QMessageBox.warning(
                     self,
                     "Palette",

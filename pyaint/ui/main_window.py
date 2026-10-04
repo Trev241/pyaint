@@ -18,11 +18,10 @@ import urllib.error as urllib_error
 import urllib.request
 
 from PIL import Image
-from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -34,6 +33,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSlider,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -42,7 +42,6 @@ from PySide6.QtWidgets import (
 
 from pyaint import config as pyaint_config
 from pyaint import paths
-from pyaint.annotate import annotate_detection
 from pyaint.bot import Bot
 from pyaint.locators import detect_target
 from pyaint.log import log
@@ -58,8 +57,9 @@ from pyaint.targets import (
 from pyaint.ui import theme
 from pyaint.ui.countdown import CountdownBanner
 from pyaint.ui.icons import icon
-from pyaint.ui.overlay import ProgressOverlay
+from pyaint.ui.overlay import DetectionOverlay, ProgressOverlay
 from pyaint.ui.widgets import (
+    CheckBox,
     CollapsibleSection,
     ImagePreview,
     NoticeBanner,
@@ -80,6 +80,24 @@ class UiSignals(QObject):
     finished = Signal(str)
     image_ready = Signal(str)
     message = Signal(str)
+
+
+class WheelGuard(QObject):
+    """Forward wheel events over value widgets to their scroll area.
+
+    Without this, hovering a slider, spinbox, or combobox while scrolling the
+    settings panel changes the control's value instead of scrolling the panel.
+    """
+
+    def __init__(self, scroll: QScrollArea, parent=None):
+        super().__init__(parent)
+        self._scroll = scroll
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        if event.type() == QEvent.Type.Wheel:
+            QApplication.sendEvent(self._scroll.viewport(), event)
+            return True
+        return super().eventFilter(obj, event)
 
 
 class MainWindow(QMainWindow):
@@ -108,7 +126,6 @@ class MainWindow(QMainWindow):
         self._detecting = False
         self._detection_result = None
         self._detection_image = None
-        self._detection_view = None
         # Per-target environment snapshots, so switching targets is instant.
         self._environments = {}
         self._last_error = None
@@ -135,6 +152,11 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._overlay = ProgressOverlay()
+        self._detection_overlay = DetectionOverlay()
+        self._detection_overlay.confirmed.connect(self._apply_detection)
+        self._detection_overlay.retry_requested.connect(self._retry_detection)
+        self._detection_overlay.teach_requested.connect(self._teach_detection)
+        self._detection_overlay.dismissed.connect(self._dismiss_detection)
         self.signals.message.connect(self._overlay.show_message)
         self._load_recipes()
         self.load_config()
@@ -251,18 +273,30 @@ class MainWindow(QMainWindow):
         env.add(needs)
         layout.insertWidget(layout.count() - 1, env)
 
-        load = Section("Image", "Paste a URL, choose a file, or drag an image onto the window.")
+        load = Section(
+            "Image",
+            "Paste an image URL or file path, browse for a file, or drag an image onto the preview.",
+        )
         self._url_edit = QLineEdit()
         self._url_edit.setPlaceholderText("https://… or C:\\path\\image.png")
+        self._url_edit.setToolTip("Image URL or local file path")
         self._url_edit.returnPressed.connect(self._on_load_clicked)
+        # Browse is a trailing action *inside* the field, so it reads as a
+        # navigation helper for the path rather than a second submit button.
+        self._browse_action = self._url_edit.addAction(
+            icon("folder", self.tokens["fg"], 16), QLineEdit.TrailingPosition
+        )
+        self._browse_action.setToolTip("Browse for an image file…")
+        self._browse_action.triggered.connect(self._open_file)
+        self._url_edit.textChanged.connect(self._on_url_changed)
         load.add(self._url_edit)
         row = QHBoxLayout()
-        load_btn = QPushButton("Load")
-        load_btn.clicked.connect(self._on_load_clicked)
-        file_btn = QPushButton("Open file…")
-        file_btn.clicked.connect(self._open_file)
-        row.addWidget(load_btn)
-        row.addWidget(file_btn)
+        self._load_btn = QPushButton("Load")
+        self._load_btn.setToolTip("Load the URL or file path above")
+        self._load_btn.setEnabled(False)
+        self._load_btn.clicked.connect(self._on_load_clicked)
+        row.addWidget(self._load_btn)
+        row.addStretch(1)
         load.add_layout(row)
         self._image_info = QLabel("No image loaded.")
         self._image_info.setObjectName("SectionHint")
@@ -320,9 +354,9 @@ class MainWindow(QMainWindow):
         layout.insertWidget(layout.count() - 1, drawing)
 
         options = Section("Options")
-        self._chk_ignore = QCheckBox("Ignore white pixels")
+        self._chk_ignore = CheckBox("Ignore white pixels")
         self._chk_ignore.setToolTip("Skip pure-white areas, e.g. a blank background")
-        self._chk_skip = QCheckBox("Skip first color")
+        self._chk_skip = CheckBox("Skip first color")
         self._chk_skip.setToolTip(
             "Don't paint the first colour — useful when it is already on the canvas."
         )
@@ -351,7 +385,7 @@ class MainWindow(QMainWindow):
         mspaint_layout = QVBoxLayout(self._mspaint_box)
         mspaint_layout.setContentsMargins(0, 0, 0, 0)
         mspaint_layout.setSpacing(2)
-        self._chk_mspaint = QCheckBox("MS Paint double-click")
+        self._chk_mspaint = CheckBox("MS Paint double-click")
         self._chk_mspaint.setToolTip("Some palettes need a double-click to select a colour")
         self._chk_mspaint.toggled.connect(self._on_mspaint_toggled)
         mspaint_layout.addWidget(self._chk_mspaint)
@@ -408,7 +442,15 @@ class MainWindow(QMainWindow):
         layout.insertWidget(layout.count() - 1, advanced)
 
         side_layout.addWidget(scroll, 1)
+        self._guard_scroll_wheel(scroll)
         return side
+
+    def _guard_scroll_wheel(self, scroll: QScrollArea) -> None:
+        """Make wheel scrolling move the panel, not the control under the cursor."""
+        guard = WheelGuard(scroll, self)
+        for widget in scroll.findChildren(QWidget):
+            if isinstance(widget, (QComboBox, QSpinBox, QSlider)):
+                widget.installEventFilter(guard)
 
     def _build_advanced_into(self, container) -> None:
         appearance = Section("Appearance", "Follow the system theme or choose one explicitly.")
@@ -445,15 +487,14 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self._detection_view = None
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)
-        self._image_view = self._build_preview_view("Source image", is_detection=False)
+        self._image_view = self._build_preview_view("Source image")
         self._tabs.addTab(self._image_view, "Image")
         layout.addWidget(self._tabs, 1)
         return content
 
-    def _build_preview_view(self, header_text: str, is_detection: bool) -> QWidget:
+    def _build_preview_view(self, header_text: str) -> QWidget:
         stage = QFrame()
         stage.setObjectName("PreviewStage")
         stage_layout = QVBoxLayout(stage)
@@ -464,41 +505,18 @@ class MainWindow(QMainWindow):
         header.setObjectName("StageHeader")
         stage_layout.addWidget(header)
 
-        preview = ImagePreview()
-        stage_layout.addWidget(preview, 1)
+        self._preview = ImagePreview()
+        self._preview.fileDropped.connect(self._load_local_path)
+        stage_layout.addWidget(self._preview, 1)
 
-        if is_detection:
-            self._detection_preview = preview
-            row = QHBoxLayout()
-            self._detection_summary = QLabel("No detection yet.")
-            self._detection_summary.setObjectName("StageHeader")
-            self._detection_summary.setWordWrap(True)
-            row.addWidget(self._detection_summary, 1)
-            self._apply_detection_btn = QPushButton("Apply")
-            self._apply_detection_btn.setObjectName("Primary")
-            self._apply_detection_btn.clicked.connect(self._apply_detection)
-            self._retry_detection_btn = QPushButton("Retry")
-            self._retry_detection_btn.clicked.connect(self.auto_detect)
-            self._cancel_detection_btn = QPushButton("Cancel")
-            self._cancel_detection_btn.clicked.connect(self._cancel_detection)
-            row.addWidget(self._apply_detection_btn)
-            row.addWidget(self._retry_detection_btn)
-            row.addWidget(self._cancel_detection_btn)
-            stage_layout.addLayout(row)
-        else:
-            self._preview = preview
+        hint = QLabel(
+            "Tip: drag an image file onto this preview to load it, or use the Image panel."
+        )
+        hint.setObjectName("StageHint")
+        hint.setWordWrap(True)
+        hint.setAlignment(Qt.AlignCenter)
+        stage_layout.addWidget(hint)
         return stage
-
-    def _ensure_detection_tab(self) -> None:
-        if self._detection_view is None:
-            self._detection_view = self._build_preview_view(
-                "Detection preview — screen capture", is_detection=True
-            )
-            self._tabs.addTab(self._detection_view, "Detection")
-
-    def _show_image_tab(self) -> None:
-        if getattr(self, "_tabs", None) is not None:
-            self._tabs.setCurrentWidget(self._image_view)
 
     def _tool_button(self, text: str, icon_name: str, slot, tooltip: str = "") -> QPushButton:
         button = QPushButton(text)
@@ -532,13 +550,7 @@ class MainWindow(QMainWindow):
         self._btn_start.setIcon(icon("play", self.tokens["accent_fg"], 16))
         self._btn_start.setIconSize(QSize(16, 16))
         self._btn_start.clicked.connect(self._on_start)
-        self._btn_pause = self._tool_button("Pause", "pause", self._toggle_pause, "Pause / resume drawing")
-        self._btn_stop = self._tool_button("Stop", "stop", self._stop_draw, "Stop drawing (ESC)")
-        self._btn_pause.setEnabled(False)
-        self._btn_stop.setEnabled(False)
         layout.addWidget(self._btn_start)
-        layout.addWidget(self._btn_pause)
-        layout.addWidget(self._btn_stop)
         return bar
 
     def _build_statusbar(self) -> None:
@@ -948,8 +960,7 @@ class MainWindow(QMainWindow):
         self._btn_test.setIcon(icon("zap", fg, 16))
         self._btn_simple.setIcon(icon("play", fg, 16))
         self._btn_start.setIcon(icon("play", accent_fg, 16))
-        self._btn_pause.setIcon(icon("pause", fg, 16))
-        self._btn_stop.setIcon(icon("stop", fg, 16))
+        self._browse_action.setIcon(icon("folder", fg, 16))
 
     # ------------------------------------------------------------------
     # Threading / tasks
@@ -962,6 +973,9 @@ class MainWindow(QMainWindow):
         if total > 0:
             self._progress.setValue(int(100 * completed / total))
         self._overlay.update_progress(completed, total, eta)
+        # Pause/stop are toggled by the global hotkey listener, so mirror the
+        # bot's pause state onto the overlay here.
+        self._overlay.set_paused(self.bot.paused)
         self._set_status(f"Drawing {completed}/{total} strokes")
 
     def _start_task(
@@ -1017,27 +1031,13 @@ class MainWindow(QMainWindow):
     def _set_running(self, running: bool, interruptible: bool = True) -> None:
         for button in (self._btn_precompute, self._btn_test, self._btn_simple, self._btn_start, self._auto_btn):
             button.setEnabled(not running)
-        self._btn_stop.setEnabled(running and interruptible)
-        self._btn_pause.setEnabled(running and interruptible)
-        if self._detection_view is not None:
-            self._retry_detection_btn.setEnabled(not running)
-            self._cancel_detection_btn.setEnabled(not running)
-            self._apply_detection_btn.setEnabled(not running and self._detection_result is not None)
         if not running:
+            self._overlay.set_paused(False)
             self._refresh_readiness()
 
     def _set_status(self, text: str) -> None:
         self._status_label.setText(text)
         log.info(text)
-
-    def _toggle_pause(self) -> None:
-        if self.bot.drawing:
-            self.bot.paused = not self.bot.paused
-            self._set_status("Paused" if self.bot.paused else "Resumed")
-
-    def _stop_draw(self) -> None:
-        self.bot.terminate = True
-        self._set_status("Stopping…")
 
     # ------------------------------------------------------------------
     # Image loading
@@ -1048,14 +1048,18 @@ class MainWindow(QMainWindow):
         else:
             self._preview.set_placeholder("Drop an image here or load one from the Image panel.")
 
+    def _on_url_changed(self, text: str) -> None:
+        self._load_btn.setEnabled(bool(text.strip()))
+
     def _on_load_clicked(self) -> None:
         text = self._url_edit.text().strip()
         if not text:
-            self._open_file()
-        elif text.lower().startswith(("http://", "https://")):
+            self._set_status("Enter an image URL or file path, or click the folder to browse.")
+            return
+        if text.lower().startswith(("http://", "https://")):
             self._start_task("Download image", lambda: self._download_and_show(text), interruptible=False)
         elif os.path.exists(text):
-            self._set_image_path(text)
+            self._load_local_path(text)
         else:
             self._set_status(f"File not found: {text}")
 
@@ -1100,8 +1104,19 @@ class MainWindow(QMainWindow):
             "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All files (*)",
         )
         if path:
-            self._last_url = ""
-            self._set_image_path(path)
+            self._load_local_path(path)
+
+    def _load_local_path(self, path: str) -> None:
+        """Load a local image and mirror it into the URL/path field.
+
+        Also forgets any remembered URL so a later restart doesn't resurrect a
+        remote source that is no longer the loaded image.
+        """
+        self._last_url = ""
+        self.tools["last_image_url"] = ""
+        if self._url_edit.text().strip() != path:
+            self._url_edit.setText(path)
+        self._set_image_path(path)
 
     def _set_image_path(self, path: str) -> None:
         try:
@@ -1111,7 +1126,6 @@ class MainWindow(QMainWindow):
             return
         self._imname = path
         self._preview.set_pixmap(pil_to_qpixmap(image))
-        self._show_image_tab()
         self._image_info.setText(f"{os.path.basename(path)} — {image.width}×{image.height}px")
         canvas = getattr(self.bot, "_canvas", None)
         if canvas is not None:
@@ -1129,7 +1143,7 @@ class MainWindow(QMainWindow):
     def dropEvent(self, event):  # noqa: N802
         urls = event.mimeData().urls()
         if urls and urls[0].isLocalFile():
-            self._set_image_path(urls[0].toLocalFile())
+            self._load_local_path(urls[0].toLocalFile())
 
     # ------------------------------------------------------------------
     # Auto-detection
@@ -1137,6 +1151,7 @@ class MainWindow(QMainWindow):
     def auto_detect(self) -> None:
         if self._detecting:
             return
+        self._detection_overlay.hide_detection()
         recipe = get_recipe(self.profile.target)
         if not recipe.detection:
             self._notice.show_notice(
@@ -1174,48 +1189,43 @@ class MainWindow(QMainWindow):
             recipe = self._pending_recipe
             image = self.bot.capture_screen()
             detection = detect_target(recipe, image)
-            self.showNormal()
-            self.raise_()
-            self.activateWindow()
             log.info(f"[AutoDetect] {recipe.id}: canvas={detection.canvas} palette={detection.palette}")
             self._present_detection(image, detection)
-            self._set_status(
-                "Review the detection (white dots = palette cell centres), then Apply or Cancel."
-            )
+            self._set_status("Review the detected regions, then use or discard them.")
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             self.showNormal()
+            self.raise_()
+            self.activateWindow()
             QMessageBox.critical(self, self.title, f"Auto-detect failed: {exc}")
         finally:
             self._detecting = False
             self._set_running(False)
 
     def _present_detection(self, image, detection) -> None:
-        """Show the detection result in its own tab, leaving the image tab alone."""
+        """Review the detection on-screen, over the still-minimized target app."""
         self._detection_image = image
-        self._ensure_detection_tab()
-        if detection:
-            self._detection_result = detection
-            try:
-                annotated = annotate_detection(image, detection)
-            except Exception as exc:  # noqa: BLE001
-                log.info(f"[AutoDetect] annotation failed: {exc}")
-                annotated = image.convert("RGB")
-            self._detection_preview.set_pixmap(pil_to_qpixmap(annotated))
-            self._detection_summary.setText(self._detection_checklist(detection))
-        else:
-            self._detection_result = None
-            self._detection_preview.set_pixmap(pil_to_qpixmap(image.convert("RGB")))
-            self._detection_summary.setText(
-                "No regions found. Make sure the canvas is blank and the target "
-                "app is maximized on the primary monitor at 100% scaling, then "
-                "Retry — or Cancel and teach it manually."
+        self._detection_result = detection if detection else None
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            self.showNormal()
+            self._notice.show_notice("Could not open the detection review overlay.", "error")
+            return
+        summary = self._detection_checklist(detection)
+        if not detection:
+            summary += (
+                "\n\nMake sure the canvas is blank and the target app is maximized "
+                "on the primary monitor at 100% display scaling."
             )
-        self._apply_detection_btn.setEnabled(self._detection_result is not None)
-        self._tabs.setCurrentWidget(self._detection_view)
+        self._detection_overlay.show_detection(detection, image.size, summary, screen)
 
     def _apply_detection(self) -> None:
+        self._detection_overlay.hide_detection()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
         if not self._detection_result:
+            self._set_status("Nothing to apply.")
             return
         applied = self.bot.apply_detection(self._detection_result, image=self._detection_image)
         self._sync_env_ui()
@@ -1230,17 +1240,46 @@ class MainWindow(QMainWindow):
                 "The palette sampled as a single colour — the target app may have "
                 "been covered. Re-run Auto-detect with the app in front, or teach it.",
                 "error",
-                "Retry",
+                "Re-detect",
                 self.auto_detect,
             )
         else:
             self._notice.show_notice("Canvas and palette detected.", "success")
         self._set_status(f"Auto-detect applied ({', '.join(applied) or 'nothing'}).")
-        self._show_image_tab()
 
-    def _cancel_detection(self) -> None:
-        self._set_status("Auto-detect cancelled.")
-        self._show_image_tab()
+    def _retry_detection(self) -> None:
+        self._detection_overlay.hide_detection()
+        if self._detecting:
+            return
+        self._detecting = True
+        QTimer.singleShot(300, self._finish_auto_detect)
+
+    def _teach_detection(self) -> None:
+        self._detection_overlay.hide_detection()
+        # Open Setup from the next event-loop turn. Opening a modal dialog from
+        # inside the overlay button's own event can leave the dialog unable to
+        # take focus (the app was only just activated by that same click).
+        QTimer.singleShot(0, self._open_setup_from_detection)
+
+    def _open_setup_from_detection(self) -> None:
+        # The window was minimized for the detection capture; make sure it is
+        # genuinely restored and active before opening a modal dialog, or the
+        # dialog can end up owned by a minimized window and become a hidden
+        # modal that blocks all input.
+        self.setWindowState(
+            (self.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive
+        )
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self.open_setup()
+
+    def _dismiss_detection(self) -> None:
+        self._detection_overlay.hide_detection()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self._set_status("Auto-detect dismissed — no changes made.")
 
     # ------------------------------------------------------------------
     # Drawing actions
@@ -1433,6 +1472,12 @@ class MainWindow(QMainWindow):
     def open_setup(self) -> None:
         from pyaint.ui.setup_dialog import SetupDialog
 
+        # Never open the modal Setup dialog from a minimized/background window:
+        # it can become a hidden modal that blocks all input.
+        self.setWindowState((self.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive)
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
         recipe = get_recipe(self.profile.target)
         dialog = SetupDialog(self, self.bot, self.profile, required_tools=recipe.tools)
         if dialog.exec():
@@ -1466,6 +1511,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def closeEvent(self, event):  # noqa: N802
         self._overlay.hide_overlay()
+        self._detection_overlay.hide_detection()
         self._countdown_banner.stop()
         try:
             cache_dir = os.path.join(paths.PROJECT_ROOT, "cache")

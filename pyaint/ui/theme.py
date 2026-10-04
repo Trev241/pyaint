@@ -32,6 +32,12 @@ DARK = {
     "danger": "#f14c4c",
     "success": "#4ec9b0",
     "warning": "#cca700",
+    "notice_info_bg": "rgba(0, 120, 212, 0.14)",
+    "notice_success_bg": "rgba(78, 201, 176, 0.14)",
+    "notice_warning_bg": "rgba(204, 167, 0, 0.14)",
+    "notice_error_bg": "rgba(241, 76, 76, 0.14)",
+    "scrollbar": "rgba(121, 121, 121, 0.40)",
+    "scrollbar_hover": "rgba(150, 150, 150, 0.75)",
 }
 
 LIGHT = {
@@ -55,6 +61,12 @@ LIGHT = {
     "danger": "#cd3131",
     "success": "#107c10",
     "warning": "#bf8803",
+    "notice_info_bg": "rgba(0, 95, 184, 0.10)",
+    "notice_success_bg": "rgba(16, 124, 16, 0.10)",
+    "notice_warning_bg": "rgba(191, 136, 3, 0.12)",
+    "notice_error_bg": "rgba(205, 49, 49, 0.10)",
+    "scrollbar": "rgba(100, 100, 100, 0.35)",
+    "scrollbar_hover": "rgba(80, 80, 80, 0.60)",
 }
 
 THEME_MODES = ("auto", "dark", "light")
@@ -151,6 +163,58 @@ def stylesheet(tokens: dict | None = None) -> str:
         background: transparent;
     }}
 
+    /* --- Scrollbars ----------------------------------------------------- */
+    QScrollBar:vertical {{
+        background: transparent;
+        width: 12px;
+        margin: 0;
+        border: none;
+    }}
+    QScrollBar::handle:vertical {{
+        background: {t['scrollbar']};
+        min-height: 28px;
+        border-radius: 5px;
+        margin: 2px;
+    }}
+    QScrollBar::handle:vertical:hover {{
+        background: {t['scrollbar_hover']};
+    }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+        height: 0;
+        background: none;
+        border: none;
+    }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+        background: transparent;
+    }}
+    QScrollBar:horizontal {{
+        background: transparent;
+        height: 12px;
+        margin: 0;
+        border: none;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: {t['scrollbar']};
+        min-width: 28px;
+        border-radius: 5px;
+        margin: 2px;
+    }}
+    QScrollBar::handle:horizontal:hover {{
+        background: {t['scrollbar_hover']};
+    }}
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        width: 0;
+        background: none;
+        border: none;
+    }}
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+        background: transparent;
+    }}
+    QAbstractScrollArea::corner {{
+        background: transparent;
+        border: none;
+    }}
+
     /* --- Sections ------------------------------------------------------- */
     #Section {{
         background: transparent;
@@ -195,11 +259,14 @@ def stylesheet(tokens: dict | None = None) -> str:
         color: {t['success']};
         font-weight: 600;
     }}
+    #ReadyChip[state="missing"] {{
+        color: {t['warning']};
+        font-weight: 600;
+    }}
     #ReadySep {{ color: {t['fg_dim']}; }}
     #FieldLabel {{
         color: {t['fg_muted']};
         font-size: 11px;
-        padding: 0 12px;
     }}
     #FieldHint {{
         color: {t['fg_muted']};
@@ -209,7 +276,6 @@ def stylesheet(tokens: dict | None = None) -> str:
         color: {t['fg']};
         font-size: 11px;
         font-weight: 600;
-        padding: 0 12px;
     }}
 
     /* --- Dialog text ---------------------------------------------------- */
@@ -241,15 +307,27 @@ def stylesheet(tokens: dict | None = None) -> str:
 
     /* --- Persistent notice banner -------------------------------------- */
     #NoticeBanner {{
-        background: {t['bg_card']};
+        background: {t['notice_info_bg']};
         border-bottom: 1px solid {t['border']};
-        border-left: 3px solid {t['accent']};
+        border-left: 4px solid {t['accent']};
     }}
-    #NoticeBanner[severity="success"] {{ border-left: 3px solid {t['success']}; }}
-    #NoticeBanner[severity="warning"] {{ border-left: 3px solid {t['warning']}; }}
-    #NoticeBanner[severity="error"]   {{ border-left: 3px solid {t['danger']}; }}
-    #NoticeIcon {{ color: {t['fg']}; font-weight: 700; }}
-    #NoticeText {{ color: {t['fg']}; }}
+    #NoticeBanner[severity="success"] {{
+        background: {t['notice_success_bg']};
+        border-left: 4px solid {t['success']};
+    }}
+    #NoticeBanner[severity="warning"] {{
+        background: {t['notice_warning_bg']};
+        border-left: 4px solid {t['warning']};
+    }}
+    #NoticeBanner[severity="error"] {{
+        background: {t['notice_error_bg']};
+        border-left: 4px solid {t['danger']};
+    }}
+    #NoticeIcon {{ color: {t['accent']}; font-weight: 700; }}
+    #NoticeBanner[severity="success"] #NoticeIcon {{ color: {t['success']}; }}
+    #NoticeBanner[severity="warning"] #NoticeIcon {{ color: {t['warning']}; }}
+    #NoticeBanner[severity="error"]   #NoticeIcon {{ color: {t['danger']}; }}
+    #NoticeText {{ color: {t['fg']}; font-weight: 600; }}
     #NoticeAction {{ padding: 3px 10px; }}
     #NoticeClose {{
         background: transparent;
@@ -281,6 +359,10 @@ def stylesheet(tokens: dict | None = None) -> str:
         border-top: 1px solid {t['border']};
     }}
     #ReadinessStripInline {{ background: transparent; border: none; }}
+    #ReadinessStripInline[ready="false"] {{
+        background: {t['notice_warning_bg']};
+        border-top: 1px solid {t['warning']};
+    }}
     #FixButton {{ color: {t['warning']}; border-color: {t['warning']}; }}
 
     /* --- Overlay severity ---------------------------------------------- */
@@ -355,7 +437,7 @@ def stylesheet(tokens: dict | None = None) -> str:
     QCheckBox {{
         color: {t['fg']};
         spacing: 8px;
-        padding: 3px 12px;
+        padding: 3px 0;
     }}
     QCheckBox:disabled {{
         color: {t['fg_dim']};
@@ -455,8 +537,18 @@ def stylesheet(tokens: dict | None = None) -> str:
     #PreviewImage {{
         background: transparent;
     }}
+    #PreviewImage[dragActive="true"] {{
+        background: {t['bg_card']};
+        border: 2px dashed {t['accent']};
+        border-radius: 6px;
+    }}
     #StageHeader {{
         color: {t['fg_muted']};
+        font-size: 11px;
+        padding: 0 2px;
+    }}
+    #StageHint {{
+        color: {t['fg_dim']};
         font-size: 11px;
         padding: 0 2px;
     }}
@@ -474,6 +566,22 @@ def stylesheet(tokens: dict | None = None) -> str:
     #OverlayHint {{
         color: {t['fg_dim']};
         font-size: 11px;
+    }}
+
+    /* --- Detection review overlay --------------------------------------- */
+    #DetectionCard {{
+        background: {t['bg_card']};
+        border: 1px solid {t['border_input']};
+        border-radius: 8px;
+    }}
+    #DetectionTitle {{
+        color: {t['fg']};
+        font-size: 14px;
+        font-weight: 600;
+    }}
+    #DetectionSummary {{
+        color: {t['fg_muted']};
+        font-size: 12px;
     }}
 
     /* --- Lists (setup dialog) ------------------------------------------ */

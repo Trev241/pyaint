@@ -12,7 +12,44 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Manual teaching no longer strands the app.** The point picker
+  (`pyaint/ui/capture.py`) hid the parent dialog to grab a clean palette
+  screenshot, but hiding a `QDialog` ends its `exec()` loop — Setup dropped out
+  of its modal loop mid-teach and the window became unresponsive. The picker now
+  minimizes the window chain and restores it, and finishes the screenshot on a
+  clean event-loop turn.
+- **The drawing progress overlay can't block the target app.** It is
+  click-through again (`Qt.WindowTransparentForInput`), so it no longer
+  intercepts the bot's clicks (e.g. on a palette behind the card); Pause/Stop are
+  keyboard-only because the bot owns the mouse.
+- **Wheel-scrolling the settings panel** no longer changes the slider,
+  combobox, or spinbox under the cursor.
+- **Checkboxes show a check mark** instead of an unlabelled filled square.
+- **The detection review overlay is focusable**, so *Teach manually…* opens
+  Setup correctly, and Setup normalizes a minimized/background window before it
+  opens.
+
 ### Changed
+- **Detection review is now an on-screen overlay, not a tab.** Auto-detect keeps
+  the window minimized and spotlights the detected canvas/palette on the live
+  screen with palette cell-centre dots, plus a card offering **Use these
+  regions / Try again / Teach manually… / Not now**. Leaving it makes no
+  changes.
+- **Settings inspector polish:** inputs and buttons no longer hug the panel edge,
+  and the readiness checklist flags missing steps in warning colour with a
+  tinted strip; the notice banner is more prominent (severity background and
+  icon).
+- **Image panel: one submit, not two.** `Load` and `Open file…` were peer
+  buttons beside a generic URL/path field, so an empty field made both open the
+  file dialog. The file picker is now a folder action *inside* the field (and
+  mirrors the chosen path back into it), `Load` is the only submit button
+  (disabled until the field has text), and an empty submit shows a hint instead
+  of silently opening a dialog.
+- **Modern flat scrollbars** replace the native Windows scrollbar.
+- **Pause/Stop are keyboard-only:** the overlay buttons were unreachable while
+  the bot controlled the mouse, so the overlay is click-through and shows the
+  `ESC`/pause hints instead.
 - **Main window is now a hub, not a toolbox:** the activity rail and the
   Setup/Image/Draw sidebar are gone. The image preview is the hero, settings
   live in a single right-hand inspector, and one always-visible top bar holds
@@ -41,6 +78,15 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   inspector, leaving Start drawing as the single primary action.
 
 ### Added
+- **Drag-and-drop onto the preview:** `ImagePreview` accepts image files dropped
+  on it (highlighting its frame while a valid file is hovered) and emits
+  `fileDropped`; the preview shows a persistent "drag an image here" hint and
+  drops are routed through the same local-path loader as the file picker.
+- `DetectionOverlay` (`pyaint/ui/overlay.py`): a full-screen review of an
+  auto-detection result with canvas/palette spotlights, palette cell-centre
+  dots, and confirm/retry/teach/dismiss actions. `CheckBox`
+  (`pyaint/ui/widgets.py`): a `QCheckBox` that draws a real check mark over the
+  accent fill.
 - `NoticeBanner` widget (`pyaint/ui/widgets.py`) and per-target environment
   snapshots in `Profile` (`pyaint/profile.py`). The floating overlay gained
   `show_message` / `show_error`.

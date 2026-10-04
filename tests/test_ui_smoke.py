@@ -50,15 +50,22 @@ def test_main_window_has_tool_controls(app, tmp_path, monkeypatch):
 
 
 def test_progress_overlay_updates(app):
+    from PySide6.QtCore import Qt
+
     from pyaint.ui.overlay import ProgressOverlay
 
     overlay = ProgressOverlay()
     try:
+        # Click-through: the bot owns the mouse, so the overlay must never
+        # intercept clicks meant for the target app (e.g. the palette).
+        assert overlay.windowFlags() & Qt.WindowTransparentForInput
         overlay.show_overlay("Drawing…", "p")
         overlay.update_progress(5, 10, 30.0)
         assert overlay._bar.value() == 50
         assert "5/10" in overlay._label.text()
         assert overlay._hint.text().startswith("ESC stop")
+        overlay.set_paused(True)
+        assert "PAUSED" in overlay._hint.text()
     finally:
         overlay.close()
 
@@ -153,7 +160,7 @@ def test_theme_resolution_and_stylesheet():
     assert theme.DARK["bg"] != theme.LIGHT["bg"]
 
 
-def test_detection_lives_in_its_own_tab(app, tmp_path, monkeypatch):
+def test_detection_uses_review_overlay(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from PIL import Image
 
@@ -162,22 +169,54 @@ def test_detection_lives_in_its_own_tab(app, tmp_path, monkeypatch):
     bot = Bot()
     window = MainWindow(bot)
     try:
+        # Detection no longer opens a tab; it stays in the single image view.
+        assert window._tabs.count() == 1
+
         image = Image.new("RGB", (80, 60), (10, 20, 30))
         window._present_detection(image, Detection(canvas=(5, 5, 50, 40)))
-        # A second, named tab is added and selected; the image tab is untouched.
-        assert window._tabs.count() == 2
-        assert window._tabs.tabText(1) == "Detection"
-        assert window._tabs.currentWidget() is window._detection_view
-        assert window._apply_detection_btn.isEnabled()
+        assert window._detection_overlay.isVisible()
+        assert window._detection_overlay._confirm_btn.isEnabled()
+        assert window._detection_result is not None
 
-        window._cancel_detection()
-        assert window._tabs.currentWidget() is window._image_view
-
-        # A failed detection keeps the tab but disables Apply.
+        # A failed detection shows the same overlay but disables confirm.
         window._present_detection(image, Detection())
-        assert not window._apply_detection_btn.isEnabled()
+        assert window._detection_overlay.isVisible()
+        assert not window._detection_overlay._confirm_btn.isEnabled()
+        assert window._detection_result is None
+
+        window._dismiss_detection()
+        assert not window._detection_overlay.isVisible()
     finally:
         window.close()
+
+
+def test_pick_points_minimizes_instead_of_hiding_parent(app, monkeypatch):
+    """Hiding a dialog ends its exec() loop, which broke manual teaching."""
+    from PySide6.QtWidgets import QDialog, QWidget
+
+    import pyaint.ui.capture as capture
+
+    parent = QWidget()
+    parent.show()
+    seen = {}
+
+    class FakeOverlay:
+        def __init__(self, count, prompt):
+            self.points = [(1, 1), (2, 2)]
+            self.image = None
+
+        def exec(self):
+            seen["minimized_during"] = parent.isMinimized()
+            return QDialog.Accepted
+
+    monkeypatch.setattr(capture, "_PickOverlay", FakeOverlay)
+    try:
+        result = capture.pick_points(parent, 2, "prompt")
+        assert seen["minimized_during"] is True
+        assert not parent.isMinimized()
+        assert result is not None and len(result.points) == 2
+    finally:
+        parent.close()
 
 
 def test_progress_signal_updates_bar(app, tmp_path, monkeypatch):
@@ -263,3 +302,66 @@ def test_preflight_reports_missing_pieces(app, tmp_path, monkeypatch):
         assert window._fix_btn.isVisibleTo(window)
     finally:
         window.close()
+
+
+def test_image_field_browse_action_and_empty_load(app, tmp_path, monkeypatch):
+    """Browse is a field helper; an empty Load must not silently open a dialog."""
+    from PIL import Image
+    from PySide6.QtWidgets import QFileDialog
+
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        picked = tmp_path / "picked.png"
+        Image.new("RGB", (24, 24), (1, 2, 3)).save(picked)
+        calls = {"count": 0}
+
+        def fake_dialog(*args, **kwargs):
+            calls["count"] += 1
+            return str(picked), "Images (*.png)"
+
+        monkeypatch.setattr(QFileDialog, "getOpenFileName", fake_dialog)
+
+        # Empty field: Load is disabled and never reaches the file dialog.
+        window._url_edit.clear()
+        assert not window._load_btn.isEnabled()
+        window._on_load_clicked()
+        assert calls["count"] == 0
+
+        # The folder action opens the picker and mirrors the path into the field.
+        window._browse_action.trigger()
+        assert calls["count"] == 1
+        assert window._url_edit.text() == str(picked)
+        assert window._load_btn.isEnabled()
+        assert window._imname == str(picked)
+    finally:
+        window.close()
+
+
+def test_image_preview_accepts_file_drops(app):
+    from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+
+    from pyaint.ui.widgets import ImagePreview
+
+    preview = ImagePreview()
+    seen = []
+    preview.fileDropped.connect(seen.append)
+    try:
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile("C:/tmp/pic.png")])
+        enter = QDragEnterEvent(
+            QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        preview.dragEnterEvent(enter)
+        assert preview.property("dragActive") == "true"
+
+        drop = QDropEvent(
+            QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        preview.dropEvent(drop)
+        assert seen == ["C:/tmp/pic.png"]
+        assert preview.property("dragActive") == "false"
+    finally:
+        preview.close()

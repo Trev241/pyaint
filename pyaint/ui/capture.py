@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import pyautogui
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QRect, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QVBoxLayout
 
 
@@ -61,17 +61,25 @@ class _PickOverlay(QDialog):
             point = event.globalPosition().toPoint()
             self.points.append((point.x(), point.y()))
             if len(self.points) >= self._count:
-                # Grab the screen with the overlay hidden so the target app (not
-                # pyaint) is captured for colour sampling.
+                # Hide now, then finish on the next event-loop turn. Doing the
+                # screenshot and accept() inside the mouse event (after
+                # processEvents) can re-enter the modal loop and leave a hidden
+                # modal dialog blocking the app.
                 self.hide()
-                QApplication.processEvents()
-                try:
-                    self.image = pyautogui.screenshot()
-                except Exception:
-                    self.image = None
-                self.accept()
+                # Give the window manager a moment to actually remove the veil
+                # before grabbing the screen.
+                QTimer.singleShot(50, self._finish)
             else:
                 self._update()
+
+    def _finish(self) -> None:
+        # Grab the screen with the overlay hidden so the target app (not
+        # pyaint) is captured for colour sampling.
+        try:
+            self.image = pyautogui.screenshot()
+        except Exception:
+            self.image = None
+        self.accept()
 
     def keyPressEvent(self, event):  # noqa: N802
         if event.key() == Qt.Key_Escape:
@@ -84,21 +92,43 @@ class _PickOverlay(QDialog):
         self.setFocus()
 
 
+def _window_chain(widget) -> List[object]:
+    """Return ``widget`` plus its top-level owner, if it is a separate window."""
+    chain = []
+    if widget is None or not widget.isVisible():
+        return chain
+    chain.append(widget)
+    owner = widget.parentWidget()
+    if owner is not None and owner.isWindow() and owner.isVisible():
+        chain.append(owner)
+    return chain
+
+
 def pick_points(
     parent=None, count: int = 2, prompt: str = "Click a point"
 ) -> Optional[PickResult]:
-    """Show the overlay and return the click points (and a screenshot), or None."""
+    """Show the overlay and return the click points (and a screenshot), or None.
+
+    The window chain is *minimized*, never hidden: hiding a dialog ends its
+    ``exec()`` loop, which drops Setup out of its modal loop mid-teach and
+    leaves the app looking hung. Minimized windows also stay out of the
+    screenshot taken for palette sampling.
+    """
     overlay = _PickOverlay(count, prompt)
-    hidden = parent is not None and parent.isVisible()
-    if hidden:
-        parent.hide()
+    minimized = _window_chain(parent)
+    for widget in minimized:
+        widget.showMinimized()
     try:
         accepted = overlay.exec() == QDialog.Accepted
     finally:
-        if hidden:
-            parent.show()
-            parent.raise_()
-            parent.activateWindow()
+        # Restore owners first so the modal dialog is shown and activated last.
+        for widget in reversed(minimized):
+            widget.setWindowState(
+                (widget.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive
+            )
+            widget.showNormal()
+            widget.raise_()
+            widget.activateWindow()
     if not accepted:
         return None
     return PickResult(overlay.points, overlay.image)
