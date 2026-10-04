@@ -83,7 +83,8 @@ python main.py
    maximized on the primary monitor at 100% scaling, then confirm the
    **Detection** tab. Or click **Teach manually** and click the canvas and
    palette corners.
-3. Load an image from a file or URL.
+3. Load an image from a file, a URL, or drag one in — or type words like
+   *cartoon cat* to search online for a drawing.
 4. Click **Start**. Press `ESC` to stop, `P` to pause/resume.
 
 That's it. For skribbl.io the first draw should take about a minute.
@@ -168,8 +169,9 @@ manually**.
 
 **Where does it save data?**
 `config.json`, `cache/`, and `targets/` sit next to the executable (the repo
-root for a source checkout). Nothing is uploaded; the only network request is
-downloading an image you give it by URL.
+root for a source checkout). Nothing is uploaded; the network is used only to
+fetch an image you give it by URL, or to search Wikimedia Commons when you type
+search words instead of a URL/path.
 
 **Can I use this on skribbl.io?**
 Locating the app's UI to draw your own image is allowed here, but using it to

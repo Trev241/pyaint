@@ -20,7 +20,7 @@ use, and how to auto-detect the canvas/palette.
 | `tools` | Which taught tools Setup should show, from: `Palette`, `Canvas`, `New Layer`, `Color Button`, `Color Button Okay` |
 | `supports_layers` / `supports_mspaint_mode` | Capability flags |
 | `drawing_settings` | Defaults applied on selection: `delay`, `pixel_size`, `jump_delay`, `jump_threshold` |
-| `drawing_options` | `ignore_white_pixels` |
+| `drawing_options` | `ignore_white_pixels`, `ignore_transparent_pixels` |
 | `skip_first_color` | bool |
 | `palette` | Optional fixed `[[r,g,b], ...]` list (used to *locate* a palette via `color_signature`) |
 | `detection` | Auto-detection specs (see below) |
@@ -75,7 +75,7 @@ so the child only specifies what it changes.
   "id": "myapp",
   "name": "My App",
   "tools": ["Palette", "Canvas"],
-  "drawing_options": { "ignore_white_pixels": true },
+  "drawing_options": { "ignore_white_pixels": true, "ignore_transparent_pixels": true },
   "detection": {
     "canvas": { "type": "white_rect", "aspect": 1.3333, "aspect_tolerance": 0.2 },
     "palette": {

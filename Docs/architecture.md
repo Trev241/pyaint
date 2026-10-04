@@ -178,6 +178,8 @@ persist; otherwise it uses the repository root.
 
 - No application APIs: everything is screen coordinates plus synthetic input.
 - Windows-first; no cross-platform guarantees.
-- The only network request is downloading an image the user supplies by URL.
+- Network access is limited to fetching an image the user supplies by URL, or
+  searching Wikimedia Commons when the Image field holds search words
+  (`pyaint/image_search.py`).
 - No anti-detection / input-spoofing code. Locating a target's UI is in scope;
   hiding automation is not.

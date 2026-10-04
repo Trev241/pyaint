@@ -13,7 +13,7 @@ from pyaint.profile import TOOL_KEYS
 from pyaint.targets import CURRENT_RECIPE_SCHEMA, Recipe
 
 _SETTING_KEYS = {"delay", "pixel_size", "jump_delay", "jump_threshold"}
-_OPTION_KEYS = {"ignore_white_pixels"}
+_OPTION_KEYS = {"ignore_white_pixels", "ignore_transparent_pixels"}
 
 
 def _validate_detection(detection: Any) -> List[str]:

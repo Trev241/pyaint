@@ -12,7 +12,7 @@ from PIL import Image
 from pyaint.profile import Profile
 from pyaint.painter import ScreenPainter
 from pyaint.locators import detect_target
-from pyaint.palette import Palette
+from pyaint.palette import DEFAULT_METRIC, Palette
 from pyaint.cache import CacheMixin
 
 class Bot(CacheMixin):
@@ -22,6 +22,8 @@ class Bot(CacheMixin):
     LAYERED = 'layered'
 
     IGNORE_WHITE = 1 << 0
+    IGNORE_TRANSPARENT = 1 << 1
+    ALPHA_CUTOFF = 128  # alpha below this counts as transparent
 
     def __init__(self, profile=None):
         self.terminate = False
@@ -31,6 +33,7 @@ class Bot(CacheMixin):
         self.drawing = False  # Flag to indicate if currently drawing
         self.skip_first_color = False  # Skip first color when drawing
         self.jump_threshold = 5  # Pixel distance threshold for jump detection (default 5)
+        self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
 
         # The taught environment lives in one shared Profile (pyaint/profile.py).
         # The UI and this bot reference the same instance, giving a single
@@ -218,6 +221,10 @@ class Bot(CacheMixin):
     def _emit_run(self, cmap, table_lines, table_colors, col_freq, row, color, start, end, mode, flags):
         """Record one horizontal run as a stroke (or a layer-table row)."""
         if color is None:
+            # Transparent run: never painted, but in Layered it must still be
+            # recorded so merged spans break at it instead of bridging over it.
+            if mode == Bot.LAYERED:
+                table_lines[row].append((None, (start, end)))
             return
         if mode == Bot.SLOTTED:
             if color == (255, 255, 255) and flags & Bot.IGNORE_WHITE:
@@ -246,11 +253,14 @@ class Bot(CacheMixin):
 
                 start, end, exposed = None, None, False
                 for idl, line in enumerate(row):
-                    if idc <= col_index[line[0]]:
+                    # A transparent run ranks below every colour, so it always
+                    # breaks a span: it is never bridged and never painted.
+                    rank = -1 if line[0] is None else col_index[line[0]]
+                    if idc <= rank:
                         start = line[1][0] if start is None else start
                         end = line[1][1]
-                        exposed = exposed or idc == col_index[line[0]]
-                    if start is not None and (idc > col_index[line[0]] or idl == len(row) - 1):
+                        exposed = exposed or idc == rank
+                    if start is not None and (idc > rank or idl == len(row) - 1):
                         if exposed:
                             cmap.setdefault(col, []).append((start, end))
                         start, exposed = None, False
@@ -269,6 +279,7 @@ class Bot(CacheMixin):
         table_lines = []
         table_colors = []
         y = y0
+        ignore_transparent = bool(flags & Bot.IGNORE_TRANSPARENT)
 
         for i in range(h):
             if mode == Bot.LAYERED:
@@ -279,13 +290,19 @@ class Bot(CacheMixin):
             start = (x, y)
             old_col = None
             for j in range(w):
-                r, g, b = pix[j, i][:3]
+                pixel = pix[j, i]
+                alpha = pixel[3] if len(pixel) > 3 else 255
+                if ignore_transparent and alpha < Bot.ALPHA_CUTOFF:
+                    col = None
+                else:
+                    key = (pixel[0], pixel[1], pixel[2])
+                    if key not in nearest_colors:
+                        nearest_colors[key] = self._palette.nearest_color(
+                            key, self.color_metric
+                        )
+                    col = nearest_colors[key]
 
-                if (r, g, b) not in nearest_colors:
-                    nearest_colors[(r, g, b)] = self._palette.nearest_color((r, g, b))
-                col = nearest_colors[(r, g, b)]
-
-                if old_col is not None and old_col != col:
+                if j > 0 and old_col != col:
                     self._emit_run(cmap, table_lines, table_colors, col_freq,
                                    i, old_col, start, (x - step, y), mode, flags)
                     start = (x, y)

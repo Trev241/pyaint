@@ -6,7 +6,7 @@
   **Setup**.
 - The **Palette** must be configured. Auto-detect or teach the grid and its
   rows/columns.
-- Load an image first (file, URL, or drag-and-drop).
+- Load an image first (file, URL, search words, or drag-and-drop).
 - If a run is already in progress, wait for it or press `ESC`.
 
 ## Colours are wrong

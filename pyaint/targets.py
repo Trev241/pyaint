@@ -130,13 +130,23 @@ def merge_drawing_settings(
     return merged
 
 
-def merge_drawing_options(flags: int, updates: Mapping[str, bool], ignore_white_bit: int) -> int:
-    """Apply ``ignore_white_pixels`` to a flag bitmask."""
+def merge_drawing_options(
+    flags: int,
+    updates: Mapping[str, bool],
+    ignore_white_bit: int,
+    ignore_transparent_bit: Optional[int] = None,
+) -> int:
+    """Apply recipe-provided drawing-option flags to a bitmask."""
     if "ignore_white_pixels" in updates:
         if updates["ignore_white_pixels"]:
             flags |= ignore_white_bit
         else:
             flags &= ~ignore_white_bit
+    if ignore_transparent_bit is not None and "ignore_transparent_pixels" in updates:
+        if updates["ignore_transparent_pixels"]:
+            flags |= ignore_transparent_bit
+        else:
+            flags &= ~ignore_transparent_bit
     return flags
 
 
@@ -271,10 +281,14 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
         "extends": "browser-base",
         "description": "Browser drawing game with a fixed on-screen palette.",
         "drawing_settings": {
-            "delay": 0.03,
+            "delay": 0.05,
             "pixel_size": 8,
-            "jump_delay": 0.2,
+            "jump_delay": 0.5,
             "jump_threshold": 5,
+        },
+        "drawing_options": {
+            "ignore_white_pixels": True,
+            "ignore_transparent_pixels": True,
         },
         "skip_first_color": False,
         "palette": None,

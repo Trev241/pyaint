@@ -531,6 +531,9 @@ def stylesheet(tokens: dict | None = None) -> str:
     }}
 
     /* --- Preview -------------------------------------------------------- */
+    #ImagePanel {{
+        background: {t['bg']};
+    }}
     #PreviewStage {{
         background: {t['bg']};
     }}
@@ -552,6 +555,20 @@ def stylesheet(tokens: dict | None = None) -> str:
         font-size: 11px;
         padding: 0 2px;
     }}
+
+    /* --- Search gallery ------------------------------------------------- */
+    #Gallery {{
+        background: {t['bg']};
+        border: none;
+    }}
+    #GalleryContainer {{ background: {t['bg']}; }}
+    #GalleryTile {{
+        background: {t['bg_card']};
+        border: 1px solid {t['border']};
+        border-radius: 4px;
+    }}
+    #GalleryTile:hover {{ border: 1px solid {t['accent']}; }}
+    #GalleryImage {{ background: {t['bg_input']}; }}
 
     /* --- Floating progress overlay -------------------------------------- */
     #ProgressOverlay {{

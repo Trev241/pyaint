@@ -8,7 +8,9 @@ callback that emits a Qt signal, so all UI updates happen on the main thread.
 
 from __future__ import annotations
 
+import io
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -17,9 +19,11 @@ import traceback
 import urllib.error as urllib_error
 import urllib.request
 
+from typing import Optional
+
 from PIL import Image
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtGui import QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -35,16 +39,18 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSpinBox,
-    QTabWidget,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from pyaint import config as pyaint_config
+from pyaint import image_search
 from pyaint import paths
 from pyaint.bot import Bot
 from pyaint.locators import detect_target
 from pyaint.log import log
+from pyaint.palette import DEFAULT_METRIC, METRIC_CIEDE2000, METRIC_RGB, METRICS
 from pyaint.profile import Profile
 from pyaint.targets import (
     apply_profile_defaults,
@@ -62,6 +68,7 @@ from pyaint.ui.widgets import (
     CheckBox,
     CollapsibleSection,
     ImagePreview,
+    MasonryGallery,
     NoticeBanner,
     ReadinessStrip,
     Section,
@@ -100,6 +107,14 @@ class WheelGuard(QObject):
         return super().eventFilter(obj, event)
 
 
+_PATH_LIKE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|\.{1,2}[\\/]|[\\/]|~)")
+
+
+def _looks_like_path(text: str) -> bool:
+    """True when ``text`` looks like a filesystem path, not a search query."""
+    return bool(_PATH_LIKE.match(text))
+
+
 class MainWindow(QMainWindow):
     def __init__(self, bot: Bot):
         super().__init__()
@@ -119,6 +134,11 @@ class MainWindow(QMainWindow):
         self._mode = Bot.LAYERED
         self._busy = False
         self._last_url = ""
+        self._pending_source = None
+        self._search_query = ""
+        self._search_continue = None
+        self._search_generation = 0
+        self._search_loading = False
         self._redraw_region = None
         self._recipes = []
         self._recipes_by_name = {}
@@ -128,6 +148,8 @@ class MainWindow(QMainWindow):
         self._detection_image = None
         # Per-target environment snapshots, so switching targets is instant.
         self._environments = {}
+        # Per-target drawing settings/options, so each app keeps its own tuning.
+        self._drawing_by_target = {}
         self._last_error = None
 
         self.signals = UiSignals()
@@ -273,37 +295,6 @@ class MainWindow(QMainWindow):
         env.add(needs)
         layout.insertWidget(layout.count() - 1, env)
 
-        load = Section(
-            "Image",
-            "Paste an image URL or file path, browse for a file, or drag an image onto the preview.",
-        )
-        self._url_edit = QLineEdit()
-        self._url_edit.setPlaceholderText("https://… or C:\\path\\image.png")
-        self._url_edit.setToolTip("Image URL or local file path")
-        self._url_edit.returnPressed.connect(self._on_load_clicked)
-        # Browse is a trailing action *inside* the field, so it reads as a
-        # navigation helper for the path rather than a second submit button.
-        self._browse_action = self._url_edit.addAction(
-            icon("folder", self.tokens["fg"], 16), QLineEdit.TrailingPosition
-        )
-        self._browse_action.setToolTip("Browse for an image file…")
-        self._browse_action.triggered.connect(self._open_file)
-        self._url_edit.textChanged.connect(self._on_url_changed)
-        load.add(self._url_edit)
-        row = QHBoxLayout()
-        self._load_btn = QPushButton("Load")
-        self._load_btn.setToolTip("Load the URL or file path above")
-        self._load_btn.setEnabled(False)
-        self._load_btn.clicked.connect(self._on_load_clicked)
-        row.addWidget(self._load_btn)
-        row.addStretch(1)
-        load.add_layout(row)
-        self._image_info = QLabel("No image loaded.")
-        self._image_info.setObjectName("SectionHint")
-        self._image_info.setWordWrap(True)
-        load.add(self._image_info)
-        layout.insertWidget(layout.count() - 1, load)
-
         mode = Section("Stroke mode", "How the image is turned into strokes.")
         self._mode_combo = QComboBox()
         self._mode_combo.addItem("Layered (fewer strokes)", Bot.LAYERED)
@@ -354,15 +345,42 @@ class MainWindow(QMainWindow):
         layout.insertWidget(layout.count() - 1, drawing)
 
         options = Section("Options")
+        metric_row = QHBoxLayout()
+        metric_label = QLabel("Colour matching")
+        metric_label.setObjectName("FieldHint")
+        self._metric_combo = QComboBox()
+        self._metric_combo.addItem("Perceptual (CIEDE2000)", METRIC_CIEDE2000)
+        self._metric_combo.addItem("Legacy (squared RGB)", METRIC_RGB)
+        self._metric_combo.setItemData(
+            0,
+            "Matches colours by perceived difference in CIELAB; picks the "
+            "visually closest swatch (default).",
+            Qt.ToolTipRole,
+        )
+        self._metric_combo.setItemData(
+            1,
+            "Original squared-distance RGB matching; kept for comparison.",
+            Qt.ToolTipRole,
+        )
+        self._metric_combo.currentIndexChanged.connect(self._on_metric_changed)
+        metric_row.addWidget(metric_label)
+        metric_row.addStretch(1)
+        metric_row.addWidget(self._metric_combo)
+        options.add_layout(metric_row)
         self._chk_ignore = CheckBox("Ignore white pixels")
         self._chk_ignore.setToolTip("Skip pure-white areas, e.g. a blank background")
+        self._chk_transparent = CheckBox("Ignore transparent pixels")
+        self._chk_transparent.setToolTip(
+            "Skip see-through areas of a PNG instead of painting them black."
+        )
         self._chk_skip = CheckBox("Skip first color")
         self._chk_skip.setToolTip(
             "Don't paint the first colour — useful when it is already on the canvas."
         )
         self._chk_ignore.toggled.connect(self._on_options_changed)
+        self._chk_transparent.toggled.connect(self._on_options_changed)
         self._chk_skip.toggled.connect(self._on_skip_changed)
-        for box in (self._chk_ignore, self._chk_skip):
+        for box in (self._chk_ignore, self._chk_transparent, self._chk_skip):
             options.add(box)
         layout.insertWidget(layout.count() - 1, options)
 
@@ -483,40 +501,100 @@ class MainWindow(QMainWindow):
         container.add(files)
 
     def _build_content(self) -> QWidget:
-        content = QWidget()
-        layout = QVBoxLayout(content)
+        """The Image panel: source controls stacked over preview/gallery."""
+        panel = QFrame()
+        panel.setObjectName("ImagePanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
+
+        layout.addWidget(self._build_image_header())
+
+        # The stage swaps between a committed image, the search gallery, and a
+        # message (searching / no results / failed).
+        self._image_stack = QStackedWidget()
+        self._image_stack.addWidget(self._build_preview_page())
+        self._gallery = MasonryGallery()
+        self._gallery.candidateSelected.connect(self._on_candidate_selected)
+        self._gallery.nearBottom.connect(self._load_more_results)
+        self._image_stack.addWidget(self._gallery)
+        self._image_message = QLabel("")
+        self._image_message.setObjectName("StageHint")
+        self._image_message.setAlignment(Qt.AlignCenter)
+        self._image_message.setWordWrap(True)
+        self._image_stack.addWidget(self._image_message)
+        layout.addWidget(self._image_stack, 1)
+        return panel
+
+    def _build_image_header(self) -> QWidget:
+        header = QWidget()
+        layout = QVBoxLayout(header)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self._tabs = QTabWidget()
-        self._tabs.setDocumentMode(True)
-        self._image_view = self._build_preview_view("Source image")
-        self._tabs.addTab(self._image_view, "Image")
-        layout.addWidget(self._tabs, 1)
-        return content
+        layout.setSpacing(4)
 
-    def _build_preview_view(self, header_text: str) -> QWidget:
-        stage = QFrame()
-        stage.setObjectName("PreviewStage")
-        stage_layout = QVBoxLayout(stage)
-        stage_layout.setContentsMargins(16, 12, 16, 12)
-        stage_layout.setSpacing(6)
+        title = QLabel("Image")
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
 
-        header = QLabel(header_text)
-        header.setObjectName("StageHeader")
-        stage_layout.addWidget(header)
+        row = QHBoxLayout()
+        self._url_edit = QLineEdit()
+        self._url_edit.setPlaceholderText(
+            "https://…, C:\\path\\image.png, or search words"
+        )
+        self._url_edit.setToolTip(
+            "Image URL or file path — or type words to search online"
+        )
+        self._url_edit.returnPressed.connect(self._on_load_clicked)
+        # Browse is a trailing action *inside* the field, so it reads as a
+        # navigation helper for the path rather than a second submit button.
+        self._browse_action = self._url_edit.addAction(
+            icon("folder", self.tokens["fg"], 16), QLineEdit.TrailingPosition
+        )
+        self._browse_action.setToolTip("Browse for an image file…")
+        self._browse_action.triggered.connect(self._open_file)
+        self._url_edit.textChanged.connect(self._on_url_changed)
+        row.addWidget(self._url_edit, 1)
+        self._load_btn = QPushButton("Load")
+        self._load_btn.setToolTip("Load the URL or path, or search for the words above")
+        self._load_btn.setEnabled(False)
+        self._load_btn.clicked.connect(self._on_load_clicked)
+        row.addWidget(self._load_btn)
+        layout.addLayout(row)
+
+        info_row = QHBoxLayout()
+        self._back_btn = QPushButton("← Results")
+        self._back_btn.setObjectName("ToolBarButton")
+        self._back_btn.setToolTip("Back to the search results")
+        self._back_btn.clicked.connect(self._show_results)
+        self._back_btn.setVisible(False)
+        info_row.addWidget(self._back_btn)
+        self._image_info = QLabel("No image loaded.")
+        self._image_info.setObjectName("SectionHint")
+        self._image_info.setWordWrap(True)
+        info_row.addWidget(self._image_info, 1)
+        layout.addLayout(info_row)
+        return header
+
+    def _build_preview_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
 
         self._preview = ImagePreview()
         self._preview.fileDropped.connect(self._load_local_path)
-        stage_layout.addWidget(self._preview, 1)
+        layout.addWidget(self._preview, 1)
 
         hint = QLabel(
-            "Tip: drag an image file onto this preview to load it, or use the Image panel."
+            "Tip: drag an image file onto this preview to load it, or use the "
+            "field above."
         )
         hint.setObjectName("StageHint")
         hint.setWordWrap(True)
         hint.setAlignment(Qt.AlignCenter)
-        stage_layout.addWidget(hint)
-        return stage
+        layout.addWidget(hint)
+        self._preview_page = page
+        return page
 
     def _tool_button(self, text: str, icon_name: str, slot, tooltip: str = "") -> QPushButton:
         button = QPushButton(text)
@@ -600,8 +678,13 @@ class MainWindow(QMainWindow):
         if previous == recipe.id:
             return
 
-        # Remember the old target's geometry, then restore the new one's.
+        # Remember the old target's geometry and drawing prefs, then restore
+        # the new target's. Capture the incoming snapshot before applying the
+        # recipe: syncing the widgets can fire a save that re-snapshots the
+        # target, so reading it afterwards could pick up the recipe defaults.
         self._environments[previous] = self.profile.snapshot_environment()
+        self._drawing_by_target[previous] = self._drawing_snapshot()
+        saved_drawing = self._drawing_by_target.get(recipe.id)
         self.profile.target = recipe.id
         if recipe.id in self._environments:
             self.profile.apply_environment(self._environments[recipe.id])
@@ -609,6 +692,9 @@ class MainWindow(QMainWindow):
             self.profile.apply_environment(Profile().snapshot_environment())
 
         self._apply_recipe(recipe)
+        if saved_drawing is not None:
+            self._apply_drawing(saved_drawing)
+            self._drawing_by_target[recipe.id] = self._drawing_snapshot()
         self._restore_environment()
         self._store_drawing_settings()
         self._store_drawing_options()
@@ -634,7 +720,8 @@ class MainWindow(QMainWindow):
             self.bot.jump_threshold = int(recipe.drawing_settings["jump_threshold"])
             self._jump_threshold.setValue(self.bot.jump_threshold)
         self.draw_options = merge_drawing_options(
-            self.draw_options, recipe.drawing_options or {}, Bot.IGNORE_WHITE,
+            self.draw_options, recipe.drawing_options or {},
+            Bot.IGNORE_WHITE, Bot.IGNORE_TRANSPARENT,
         )
         self.bot.skip_first_color = bool(recipe.skip_first_color)
         self._refresh_drawing_widgets()
@@ -683,10 +770,21 @@ class MainWindow(QMainWindow):
         self.draw_options = 0
         if options.get("ignore_white_pixels", True):
             self.draw_options |= Bot.IGNORE_WHITE
+        if options.get("ignore_transparent_pixels", True):
+            self.draw_options |= Bot.IGNORE_TRANSPARENT
 
         self.bot.skip_first_color = bool(self.tools.get("skip_first_color", False))
         mode = self.tools.get("draw_mode", Bot.LAYERED)
         self._mode = mode if mode in (Bot.SLOTTED, Bot.LAYERED) else Bot.LAYERED
+
+        metric = self.tools.get("color_metric", DEFAULT_METRIC)
+        if metric not in METRICS:
+            metric = DEFAULT_METRIC
+        self.bot.color_metric = metric
+        metric_index = self._metric_combo.findData(metric)
+        self._metric_combo.blockSignals(True)
+        self._metric_combo.setCurrentIndex(metric_index if metric_index >= 0 else 0)
+        self._metric_combo.blockSignals(False)
 
         last_url = self.tools.get("last_image_url", "")
         if last_url:
@@ -701,6 +799,15 @@ class MainWindow(QMainWindow):
         self._theme_combo.setCurrentIndex(index if index >= 0 else 0)
         self._theme_combo.blockSignals(False)
 
+        drawing_by_target = self.tools.get("drawing_by_target")
+        self._drawing_by_target = (
+            dict(drawing_by_target) if isinstance(drawing_by_target, dict) else {}
+        )
+        if self.profile.target not in self._drawing_by_target:
+            # Migrate the legacy global drawing prefs to the active target.
+            self._drawing_by_target[self.profile.target] = self._drawing_snapshot()
+        self._apply_drawing(self._drawing_by_target[self.profile.target])
+
         self._restore_environment()
         self._refresh_drawing_widgets()
         self._refresh_option_widgets()
@@ -714,18 +821,20 @@ class MainWindow(QMainWindow):
         self.bot._palette = None
         palette = self.profile["Palette"]
         try:
-            if palette.get("box") and palette.get("rows") and palette.get("cols"):
+            # Prefer the saved colour/position map: it rebuilds the palette
+            # offline. Re-sampling the saved box instead needs the target app
+            # to be open and uncovered at that exact spot, which is rarely true
+            # at startup -- that produced a one-colour palette and forced users
+            # to auto-detect again on every launch.
+            colors_pos = self._stored_palette_positions(palette)
+            if colors_pos:
+                self.bot.init_palette(colors_pos=colors_pos)
+            elif palette.get("box") and palette.get("rows") and palette.get("cols"):
                 box = palette["box"]
                 self.bot.init_palette(
                     pbox=(box[0], box[1], box[2] - box[0], box[3] - box[1]),
                     prows=palette["rows"], pcols=palette["cols"],
                 )
-            elif palette.get("color_coords"):
-                colors_pos = {
-                    tuple(map(int, key[1:-1].split(", "))): tuple(value)
-                    for key, value in palette["color_coords"].items()
-                }
-                self.bot.init_palette(colors_pos=colors_pos)
         except Exception as e:
             log.info(f"[Config] palette restore failed: {e}")
         try:
@@ -733,6 +842,67 @@ class MainWindow(QMainWindow):
                 self.bot.init_canvas(self.profile["Canvas"]["box"])
         except Exception as e:
             log.info(f"[Config] canvas restore failed: {e}")
+
+    @staticmethod
+    def _stored_palette_positions(palette) -> Optional[dict]:
+        """Rebuild ``{colour: (x, y)}`` from saved ``Palette.color_coords``.
+
+        Returns ``None`` when the entry is absent or malformed, so callers can
+        fall back to re-sampling the saved box.
+        """
+        coords = palette.get("color_coords")
+        if not isinstance(coords, dict) or not coords:
+            return None
+        positions = {}
+        try:
+            for key, value in coords.items():
+                colour = tuple(int(part) for part in str(key).strip("()").split(","))
+                position = tuple(int(part) for part in value)
+                if len(colour) < 3 or len(position) != 2:
+                    return None
+                positions[colour[:3]] = position
+        except (TypeError, ValueError):
+            return None
+        return positions or None
+
+    def _drawing_snapshot(self) -> dict:
+        """Current target's drawing settings/options, for per-target memory."""
+        return {
+            "settings": [float(v) for v in self.bot.settings],
+            "jump_threshold": int(self.bot.jump_threshold),
+            "drawing_options": {
+                "ignore_white_pixels": bool(self.draw_options & Bot.IGNORE_WHITE),
+                "ignore_transparent_pixels": bool(
+                    self.draw_options & Bot.IGNORE_TRANSPARENT
+                ),
+            },
+            "draw_mode": self._mode,
+            "skip_first_color": bool(self.bot.skip_first_color),
+        }
+
+    def _apply_drawing(self, data) -> None:
+        """Apply a per-target drawing snapshot, then sync the widgets."""
+        if not isinstance(data, dict):
+            return
+        settings = data.get("settings")
+        if isinstance(settings, (list, tuple)) and len(settings) >= 3:
+            self.bot.settings = [
+                float(settings[0]), float(settings[1]), float(settings[2])
+            ]
+        if "jump_threshold" in data:
+            self.bot.jump_threshold = int(data["jump_threshold"])
+        options = data.get("drawing_options") or {}
+        self.draw_options = 0
+        if options.get("ignore_white_pixels", True):
+            self.draw_options |= Bot.IGNORE_WHITE
+        if options.get("ignore_transparent_pixels", True):
+            self.draw_options |= Bot.IGNORE_TRANSPARENT
+        mode = data.get("draw_mode", Bot.LAYERED)
+        self._mode = mode if mode in (Bot.SLOTTED, Bot.LAYERED) else Bot.LAYERED
+        self.bot.skip_first_color = bool(data.get("skip_first_color", False))
+        self._jump_threshold.setValue(self.bot.jump_threshold)
+        self._refresh_drawing_widgets()
+        self._refresh_option_widgets()
 
     def _store_drawing_settings(self) -> None:
         settings = self.tools.setdefault("drawing_settings", {})
@@ -744,6 +914,9 @@ class MainWindow(QMainWindow):
     def _store_drawing_options(self) -> None:
         options = self.tools.setdefault("drawing_options", {})
         options["ignore_white_pixels"] = bool(self.draw_options & Bot.IGNORE_WHITE)
+        options["ignore_transparent_pixels"] = bool(
+            self.draw_options & Bot.IGNORE_TRANSPARENT
+        )
 
     def _save_config(self) -> None:
         if self._initializing:
@@ -751,9 +924,12 @@ class MainWindow(QMainWindow):
         self.tools["pause_key"] = self.bot.pause_key
         self.tools["skip_first_color"] = bool(self.bot.skip_first_color)
         self.tools["draw_mode"] = self._mode
+        self.tools["color_metric"] = self.bot.color_metric
         self.tools["theme"] = self._theme_mode
         if self._last_url:
             self.tools["last_image_url"] = self._last_url
+        self._drawing_by_target[self.profile.target] = self._drawing_snapshot()
+        self.tools["drawing_by_target"] = self._drawing_by_target
         self._environments[self.profile.target] = self.profile.snapshot_environment()
         self.tools["environments"] = self._environments
         payload = pyaint_config.build_payload(self.tools, self.profile)
@@ -779,6 +955,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_option_widgets(self) -> None:
         self._chk_ignore.setChecked(bool(self.draw_options & Bot.IGNORE_WHITE))
+        self._chk_transparent.setChecked(
+            bool(self.draw_options & Bot.IGNORE_TRANSPARENT)
+        )
         self._chk_skip.setChecked(bool(self.bot.skip_first_color))
 
     def _sync_env_ui(self) -> None:
@@ -888,12 +1067,20 @@ class MainWindow(QMainWindow):
         self._mode = self._mode_combo.currentData()
         self._save_config()
 
+    def _on_metric_changed(self, _index: int) -> None:
+        if self._initializing:
+            return
+        self.bot.color_metric = self._metric_combo.currentData() or DEFAULT_METRIC
+        self._save_config()
+
     def _on_options_changed(self) -> None:
         if self._initializing:
             return
         self.draw_options = 0
         if self._chk_ignore.isChecked():
             self.draw_options |= Bot.IGNORE_WHITE
+        if self._chk_transparent.isChecked():
+            self.draw_options |= Bot.IGNORE_TRANSPARENT
         self._store_drawing_options()
         self._save_config()
 
@@ -1046,7 +1233,8 @@ class MainWindow(QMainWindow):
         if os.path.exists(self._imname):
             self._set_image_path(self._imname)
         else:
-            self._preview.set_placeholder("Drop an image here or load one from the Image panel.")
+            self._preview.set_placeholder("Drag an image here, or use the field above.")
+            self._image_stack.setCurrentWidget(self._preview_page)
 
     def _on_url_changed(self, text: str) -> None:
         self._load_btn.setEnabled(bool(text.strip()))
@@ -1054,14 +1242,125 @@ class MainWindow(QMainWindow):
     def _on_load_clicked(self) -> None:
         text = self._url_edit.text().strip()
         if not text:
-            self._set_status("Enter an image URL or file path, or click the folder to browse.")
+            self._set_status(
+                "Enter a URL, file path, or search words — or click the folder to browse."
+            )
             return
         if text.lower().startswith(("http://", "https://")):
             self._start_task("Download image", lambda: self._download_and_show(text), interruptible=False)
         elif os.path.exists(text):
             self._load_local_path(text)
-        else:
+        elif _looks_like_path(text):
             self._set_status(f"File not found: {text}")
+        elif (
+            text == self._search_query
+            and self._image_stack.currentWidget() is self._gallery
+            and self._gallery.count()
+        ):
+            # Enter twice on the same query commits the first result.
+            first = self._gallery.first_candidate()
+            if first is not None:
+                self._on_candidate_selected(first)
+        else:
+            self._start_search(text)
+
+    # ------------------------------------------------------------------
+    # Image search gallery
+    # ------------------------------------------------------------------
+    def _start_search(self, query: str) -> None:
+        self._search_query = query
+        self._search_generation += 1
+        self._search_continue = None
+        self._search_loading = True
+        self._pending_source = None
+        self._gallery.clear()
+        self._image_message.setText(f'Searching for "{query}"…')
+        self._image_stack.setCurrentWidget(self._image_message)
+        self._back_btn.setVisible(False)
+        self._image_info.setText(f'Searching for "{query}"…')
+        self._request_search_page(None)
+
+    def _request_search_page(self, cont) -> None:
+        from pyaint.ui.search_tasks import SearchPageTask
+
+        task = SearchPageTask(self._search_query, cont, self._search_generation)
+        task.signals.ready.connect(self._on_search_page)
+        task.signals.failed.connect(self._on_search_failed)
+        QThreadPool.globalInstance().start(task)
+
+    def _on_search_page(self, generation: int, page) -> None:
+        if generation != self._search_generation:
+            return
+        self._search_loading = False
+        self._search_continue = page.next_continue
+        if page.candidates:
+            self._gallery.add_candidates(page.candidates)
+            self._image_stack.setCurrentWidget(self._gallery)
+            self._back_btn.setVisible(False)
+            self._image_info.setText(
+                f"{self._gallery.count()} results — press Enter to use the first, "
+                "or click one."
+            )
+            self._start_thumbnails(page.candidates)
+        elif self._gallery.count() == 0:
+            self._image_message.setText(f'No images found for "{self._search_query}".')
+            self._image_stack.setCurrentWidget(self._image_message)
+            self._image_info.setText(f'No images found for "{self._search_query}".')
+
+    def _on_search_failed(self, generation: int, message: str) -> None:
+        if generation != self._search_generation:
+            return
+        self._search_loading = False
+        self._image_message.setText(f"Image search failed: {message}")
+        self._image_stack.setCurrentWidget(self._image_message)
+        self._image_info.setText(f"Image search failed: {message}")
+
+    def _load_more_results(self) -> None:
+        if self._search_loading or not self._search_continue:
+            return
+        self._search_loading = True
+        self._request_search_page(self._search_continue)
+
+    def _start_thumbnails(self, candidates) -> None:
+        from pyaint.ui.search_tasks import ThumbnailTask
+
+        for candidate in candidates:
+            task = ThumbnailTask(candidate.thumb_url, self._search_generation)
+            task.signals.ready.connect(self._on_thumbnail_ready)
+            task.signals.failed.connect(self._on_thumbnail_failed)
+            QThreadPool.globalInstance().start(task)
+
+    def _on_thumbnail_ready(self, generation: int, url: str, image) -> None:
+        if generation != self._search_generation:
+            return
+        self._gallery.set_thumbnail(url, QPixmap.fromImage(image))
+
+    def _on_thumbnail_failed(self, generation: int, url: str) -> None:
+        # A thumbnail that won't decode just leaves an empty tile.
+        return
+
+    def _on_candidate_selected(self, candidate) -> None:
+        self._start_task(
+            "Download image",
+            lambda: self._commit_candidate(candidate),
+            interruptible=False,
+        )
+
+    def _commit_candidate(self, candidate) -> None:
+        """Worker: download the chosen result and hand it to the preview."""
+        data = image_search.fetch_bytes(candidate.url)
+        fd, path = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+            image.convert("RGBA").save(path, format="PNG")
+        self._pending_source = (candidate.title, candidate.source_url)
+        self.signals.image_ready.emit(path)
+
+    def _show_results(self) -> None:
+        if self._gallery.count():
+            self._image_stack.setCurrentWidget(self._gallery)
+            self._back_btn.setVisible(False)
 
     def _download_and_show(self, url: str) -> None:
         path = self._fetch_remote_image(url)
@@ -1126,7 +1425,14 @@ class MainWindow(QMainWindow):
             return
         self._imname = path
         self._preview.set_pixmap(pil_to_qpixmap(image))
-        self._image_info.setText(f"{os.path.basename(path)} — {image.width}×{image.height}px")
+        self._image_stack.setCurrentWidget(self._preview_page)
+        note = self._pending_source
+        self._pending_source = None
+        info = f"{os.path.basename(path)} — {image.width}×{image.height}px"
+        if note:
+            info += f" · {note[0]}"
+        self._image_info.setText(info)
+        self._back_btn.setVisible(self._gallery.count() > 0)
         canvas = getattr(self.bot, "_canvas", None)
         if canvas is not None:
             has_cache, _ = self.bot.get_cached_status(path, flags=self.draw_options, mode=self._mode)
@@ -1513,6 +1819,10 @@ class MainWindow(QMainWindow):
         self._overlay.hide_overlay()
         self._detection_overlay.hide_detection()
         self._countdown_banner.stop()
+        # Flush any pending settings. Most edits save eagerly, but a few (e.g.
+        # the loaded image path) can be pending, and a crash-free close is the
+        # last chance to persist them.
+        self._save_config()
         try:
             cache_dir = os.path.join(paths.PROJECT_ROOT, "cache")
             if os.path.exists(cache_dir):

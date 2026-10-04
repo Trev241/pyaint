@@ -9,6 +9,7 @@ Reference for the public surface of the `pyaint` package. Imports are absolute
 - [Profile](#profile)
 - [Bot](#bot)
 - [Palette](#palette)
+- [Image search](#image-search)
 - [ScreenPainter](#screenpainter)
 - [Targets](#targets)
 - [Locators](#locators)
@@ -56,13 +57,19 @@ Bot(profile=None)
 |------|-------|---------|
 | `DELAY`, `STEP`, `JUMP_DELAY` | `0..2` | Indices into `settings` |
 | `SLOTTED`, `LAYERED` | `"slotted"`, `"layered"` | Processing modes |
-| `IGNORE_WHITE` | `1` | Flag bit |
+| `IGNORE_WHITE` | `1` | Flag bit: skip pure-white runs |
+| `IGNORE_TRANSPARENT` | `2` | Flag bit: skip pixels with alpha < `ALPHA_CUTOFF` (128) |
 
 ### Attributes
 
 `settings = [delay, pixel_size, jump_delay]`, `terminate`, `paused`,
-`pause_key`, `drawing`, `skip_first_color`, `jump_threshold`, `profile`,
-`painter`, `draw_state`, `progress_callback`, `progress_overlay_enabled`.
+`pause_key`, `drawing`, `skip_first_color`, `jump_threshold`, `color_metric`,
+`profile`, `painter`, `draw_state`, `progress_callback`,
+`progress_overlay_enabled`.
+
+`color_metric` selects palette matching: `"ciede2000"` (perceptual, default)
+or `"rgb"` (legacy squared Euclidean). See
+`pyaint.palette.METRIC_CIEDE2000` / `METRIC_RGB` / `DEFAULT_METRIC`.
 
 Legacy views onto the profile: `new_layer`, `color_button`,
 `color_button_okay`, `mspaint_mode`, `_canvas`.
@@ -111,8 +118,30 @@ Palette(colors_pos=None, box=None, rows=None, columns=None)
 - `box`: `(x, y, w, h)` screenshot region sampled at the centre of each cell
   (using a small median neighbourhood for robustness).
 
-`nearest_color(rgb)` returns the closest swatch by **squared** Euclidean
-distance; `Palette.dist(a, b)` exposes the metric.
+`nearest_color(rgb, metric=DEFAULT_METRIC)` returns the closest swatch.
+`metric="ciede2000"` (default) compares perceptual CIELAB difference via
+CIEDE2000; `metric="rgb"` uses the legacy squared Euclidean distance.
+`Palette.dist(a, b)` exposes the legacy metric, and
+`pyaint.palette.rgb_to_lab` / `ciede2000` expose the perceptual one.
+
+## Image search
+
+`pyaint.image_search` — keyless, paged lookup used when the Image field holds
+search words instead of a URL or path. It queries Wikimedia Commons and returns
+results in the search engine's relevance order (no drawing/photo bias).
+
+| Function | Description |
+|----------|-------------|
+| `search_page(query, *, cont=None, limit=30, thumb_width=240)` | One page of results → `SearchPage` |
+| `fetch_bytes(url)` | Download an image (thumbnails and commits) |
+
+`SearchPage` has `candidates` (a list of `ImageCandidate`) and `next_continue`
+(the MediaWiki continuation token for the next page, or `None`).
+`ImageCandidate` carries `url` (full), `thumb_url`, `mime`, `title`,
+`source_url`, `width`, and `height`. SVG and formats PIL cannot open are
+filtered out. The gallery's async fetching lives in `pyaint/ui/search_tasks.py`
+(`SearchPageTask`, `ThumbnailTask`), which emit on the global `QThreadPool` so
+browsing never blocks the drawing worker.
 
 ## ScreenPainter
 

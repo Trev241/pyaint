@@ -29,8 +29,22 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 - **The detection review overlay is focusable**, so *Teach manually…* opens
   Setup correctly, and Setup normalizes a minimized/background window before it
   opens.
+- **Taught geometry survives restart, so auto-detect is no longer needed every
+  launch.** The palette was restored by re-screenshotting the saved palette box,
+  which usually failed (the target app was closed, moved, or covered) and came
+  back as a one-colour palette. Startup now rebuilds the palette offline from the
+  saved `Palette.color_coords`, falling back to sampling only when no
+  coordinates exist.
+- **Closing the window flushes pending settings** (`_save_config()` in
+  `closeEvent`), so the last edits are persisted even if no slot saved them
+  eagerly.
 
 ### Changed
+- **Image source controls and the preview now live together.** The single-tab
+  "Image" tab is gone (a leftover from the removed Detection tab). The preview
+  is a plain panel whose header owns the URL/path/search field, browse, and
+  Load, and the right-hand inspector keeps only the processing settings. The
+  image search opens a selectable results grid in the same panel.
 - **Detection review is now an on-screen overlay, not a tab.** Auto-detect keeps
   the window minimized and spotlights the detected canvas/palette on the live
   screen with palette cell-centre dots, plus a card offering **Use these
@@ -78,6 +92,34 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   inspector, leaving Start drawing as the single primary action.
 
 ### Added
+- **Drawing settings are per target.** Each target remembers its own timing,
+  detail, jump, and option flags under `drawing_by_target` in `config.json`, so
+  a fast MS Paint tune no longer leaks into skribbl (which drops fast synthetic
+  input). Switching targets saves the current values and restores that target's;
+  a target with none uses its recipe defaults. The skribbl recipe defaults were
+  set to the slower, safer timing (`delay` 0.05 s, `jump_delay` 0.5 s, matching
+  the tuned `config.json`).
+- **Search the web from the Image field.** When the field is neither a URL nor
+  a file path, it opens a Pinterest-style results gallery: a masonry grid of
+  thumbnails that pages in more results as you scroll. Click a tile (or press
+  Enter twice) to commit it to the preview; a **← Results** button returns to the
+  grid. Results come from Wikimedia Commons (no API key) in relevance order with
+  no drawing/photo bias, and the chosen image shows its title/source under the
+  preview. Path-shaped input still reports "file not found" instead of
+  searching.
+- **Transparent PNG backgrounds are no longer painted black.** The pipeline
+  converted images to RGBA but ignored alpha, so fully transparent pixels
+  (usually RGB `0,0,0`) matched the darkest swatch. A new `IGNORE_TRANSPARENT`
+  flag — **Options → Ignore transparent pixels**, on by default — skips pixels
+  whose alpha is below 128. In Layered mode a transparent run acts as an
+  absolute span breaker, so merged strokes can't bridge across a transparent
+  gap and paint it.
+- **Perceptual colour matching (CIEDE2000), on by default.** A new
+  **Options → Colour matching** choice maps each pixel to the visually closest
+  swatch using CIELAB ΔE00 instead of squared RGB distance, which fixes visibly
+  wrong picks for near-neutral colours. The legacy squared-RGB metric is still
+  selectable (`color_metric: "rgb"`), and the metric is part of the cache key so
+  the two methods never share cached stroke maps.
 - **Drag-and-drop onto the preview:** `ImagePreview` accepts image files dropped
   on it (highlighting its frame while a valid file is hovered) and emits
   `fileDropped`; the preview shows a persistent "drag an image here" hint and

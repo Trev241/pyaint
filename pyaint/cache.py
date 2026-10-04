@@ -27,7 +27,8 @@ class CacheMixin:
             image_data = f.read()
         image_hash = hashlib.md5(image_data).hexdigest()[:8]
 
-        settings_str = f"{self.settings}_{flags}_{mode}_{canvas_info}"
+        metric = getattr(self, "color_metric", "ciede2000")
+        settings_str = f"{self.settings}_{flags}_{mode}_{canvas_info}_{metric}"
         settings_hash = hashlib.md5(settings_str.encode()).hexdigest()[:8]
 
         # Create cache directory if it doesn't exist

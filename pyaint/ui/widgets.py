@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSlider,
     QSpinBox,
@@ -517,3 +518,151 @@ class ImagePreview(QLabel):
             self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         self.setPixmap(scaled)
+
+
+class GalleryTile(QFrame):
+    """One clickable thumbnail in the search gallery (a masonry cell)."""
+
+    clicked = Signal(object)
+
+    def __init__(self, candidate, parent=None):
+        super().__init__(parent)
+        self.candidate = candidate
+        self.setObjectName("GalleryTile")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(candidate.title)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._image = QLabel()
+        self._image.setObjectName("GalleryImage")
+        self._image.setAlignment(Qt.AlignCenter)
+        self._image.setMinimumHeight(60)
+        layout.addWidget(self._image)
+
+        self._pixmap: Optional[QPixmap] = None
+        self._column_width = 180
+        ratio = (candidate.height / candidate.width) if candidate.width else 0.75
+        self._ratio = max(0.25, min(4.0, ratio))
+
+    def set_thumbnail(self, pixmap: QPixmap) -> None:
+        self._pixmap = pixmap
+        self._refresh()
+
+    def set_column_width(self, width: int) -> None:
+        self._column_width = max(1, width)
+        self._refresh()
+
+    def preferred_height(self, width: int) -> int:
+        return max(60, int(width * self._ratio))
+
+    def _refresh(self) -> None:
+        if self._pixmap is None:
+            return
+        height = self.preferred_height(self._column_width)
+        self._image.setFixedHeight(height)
+        self._image.setPixmap(
+            self._pixmap.scaled(
+                self._column_width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+        )
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self.candidate)
+        super().mousePressEvent(event)
+
+
+class MasonryGallery(QScrollArea):
+    """A Pinterest-style, lazily-filled gallery of image thumbnails.
+
+    Tiles are sized from each image's aspect ratio and packed into the
+    currently-shortest column, reflowing when the panel is resized. Emits
+    ``nearBottom`` so the owner can page in more results while scrolling.
+    """
+
+    candidateSelected = Signal(object)
+    nearBottom = Signal()
+
+    TARGET_COLUMN = 190
+    SPACING = 8
+    MARGIN = 8
+    NEAR_BOTTOM_PX = 400
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Gallery")
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._container = QWidget()
+        self._container.setObjectName("GalleryContainer")
+        self.setWidget(self._container)
+        self._tiles: list = []
+        self._by_url: dict = {}
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll)
+
+    # -- population -----------------------------------------------------
+    def add_candidates(self, candidates) -> None:
+        for candidate in candidates:
+            tile = GalleryTile(candidate)
+            tile.clicked.connect(self.candidateSelected)
+            tile.setParent(self._container)
+            tile.show()
+            self._tiles.append(tile)
+            self._by_url[candidate.thumb_url] = tile
+        self._relayout()
+
+    def add_candidate(self, candidate) -> GalleryTile:
+        self.add_candidates([candidate])
+        return self._tiles[-1]
+
+    def clear(self) -> None:
+        for tile in self._tiles:
+            tile.setParent(None)
+            tile.deleteLater()
+        self._tiles = []
+        self._by_url = {}
+        self._container.setMinimumHeight(0)
+
+    def count(self) -> int:
+        return len(self._tiles)
+
+    def first_candidate(self):
+        return self._tiles[0].candidate if self._tiles else None
+
+    def set_thumbnail(self, url: str, pixmap: QPixmap) -> None:
+        tile = self._by_url.get(url)
+        if tile is not None:
+            tile.set_thumbnail(pixmap)
+
+    # -- layout ---------------------------------------------------------
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self._relayout()
+
+    def _columns(self):
+        width = max(1, self.viewport().width() - 2 * self.MARGIN)
+        columns = max(
+            1, (width + self.SPACING) // (self.TARGET_COLUMN + self.SPACING)
+        )
+        column_width = (width - (columns - 1) * self.SPACING) // columns
+        return columns, max(40, column_width)
+
+    def _relayout(self) -> None:
+        columns, column_width = self._columns()
+        heights = [self.MARGIN] * columns
+        for tile in self._tiles:
+            column = min(range(columns), key=lambda c: heights[c])
+            x = self.MARGIN + column * (column_width + self.SPACING)
+            y = heights[column]
+            height = tile.preferred_height(column_width)
+            tile.set_column_width(column_width)
+            tile.setGeometry(x, y, column_width, height)
+            heights[column] = y + height + self.SPACING
+        self._container.setMinimumHeight(max(heights) + self.MARGIN)
+
+    def _on_scroll(self, value: int) -> None:
+        bar = self.verticalScrollBar()
+        if bar.maximum() - value <= self.NEAR_BOTTOM_PX:
+            self.nearBottom.emit()

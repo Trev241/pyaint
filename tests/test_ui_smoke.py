@@ -25,6 +25,21 @@ def app():
     yield application
 
 
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path, monkeypatch):
+    """Point the window at a throwaway config.json for every test.
+
+    ``MainWindow.closeEvent`` flushes settings and clears the cache dir, so a
+    test that clears the profile would otherwise overwrite the developer's real
+    config (and delete the real cache) on close.
+    """
+    from pyaint import paths
+
+    monkeypatch.setattr(paths, "PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(paths, "CONFIG_PATH", str(tmp_path / "config.json"))
+    yield
+
+
 def test_main_window_builds(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bot = Bot()
@@ -169,8 +184,8 @@ def test_detection_uses_review_overlay(app, tmp_path, monkeypatch):
     bot = Bot()
     window = MainWindow(bot)
     try:
-        # Detection no longer opens a tab; it stays in the single image view.
-        assert window._tabs.count() == 1
+        # Detection is an overlay; the Image panel stays on the preview page.
+        assert window._image_stack.currentWidget() is window._preview_page
 
         image = Image.new("RGB", (80, 60), (10, 20, 30))
         window._present_detection(image, Detection(canvas=(5, 5, 50, 40)))
@@ -365,3 +380,295 @@ def test_image_preview_accepts_file_drops(app):
         assert preview.property("dragActive") == "false"
     finally:
         preview.close()
+
+
+def test_startup_restores_palette_from_saved_coords_without_screenshot(
+    app, tmp_path, monkeypatch
+):
+    """A saved palette must rebuild offline, not by re-screenshotting the box."""
+    import json
+
+    import pyaint.palette as palette_module
+    from pyaint import paths
+
+    config = {
+        "target": "mspaint",
+        "Canvas": {"status": True, "box": [10, 20, 210, 120]},
+        "Palette": {
+            "status": True,
+            "box": [10, 10, 210, 40],
+            "rows": 1,
+            "cols": 2,
+            "color_coords": {"(255, 0, 0)": [15, 15], "(0, 0, 255)": [115, 15]},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setattr(paths, "CONFIG_PATH", str(cfg))
+
+    def no_screenshot(*args, **kwargs):
+        raise AssertionError("startup must not screenshot the palette")
+
+    monkeypatch.setattr(palette_module.pyautogui, "screenshot", no_screenshot)
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        assert bot._canvas == (10, 20, 200, 100)
+        palette = bot._palette
+        assert palette is not None
+        assert len(palette.colors) == 2
+        assert (255, 0, 0) in palette.colors
+        assert palette.colors_pos[(255, 0, 0)] == (15, 15)
+        assert window._environment_ready()
+    finally:
+        window.close()
+
+
+def test_close_flushes_pending_settings(app, tmp_path, monkeypatch):
+    """Closing the window must persist settings that no slot saved eagerly."""
+    import json
+
+    from pyaint import paths
+
+    cfg = tmp_path / "config.json"
+    monkeypatch.setattr(paths, "CONFIG_PATH", str(cfg))
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        window.bot.pause_key = "q"
+        window.close()
+        assert json.loads(cfg.read_text(encoding="utf-8"))["pause_key"] == "q"
+    finally:
+        window.close()
+
+
+def test_color_metric_option_defaults_and_persists(app):
+    import json
+
+    from pyaint import paths
+    from pyaint.palette import DEFAULT_METRIC, METRIC_RGB
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        assert window._metric_combo.currentData() == DEFAULT_METRIC
+        assert bot.color_metric == DEFAULT_METRIC
+
+        legacy = window._metric_combo.findData(METRIC_RGB)
+        window._metric_combo.setCurrentIndex(legacy)
+        assert bot.color_metric == METRIC_RGB
+        with open(paths.CONFIG_PATH, encoding="utf-8") as handle:
+            assert json.load(handle)["color_metric"] == METRIC_RGB
+    finally:
+        window.close()
+
+
+def test_transparent_option_defaults_on_and_persists(app):
+    import json
+
+    from pyaint import paths
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        assert window._chk_transparent.isChecked()
+        assert window.draw_options & Bot.IGNORE_TRANSPARENT
+
+        window._chk_transparent.setChecked(False)
+        assert not (window.draw_options & Bot.IGNORE_TRANSPARENT)
+        with open(paths.CONFIG_PATH, encoding="utf-8") as handle:
+            options = json.load(handle)["drawing_options"]
+        assert options["ignore_transparent_pixels"] is False
+    finally:
+        window.close()
+
+
+def test_load_field_routes_url_path_and_search(app, monkeypatch):
+    from pyaint.ui.main_window import _looks_like_path
+
+    # Path detection uses shape, not existence, so typos don't search.
+    assert _looks_like_path(r"C:\pics\a.png")
+    assert _looks_like_path("./a.png")
+    assert _looks_like_path("/tmp/a.png")
+    assert not _looks_like_path("cartoon cat")
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        started = []
+        monkeypatch.setattr(
+            window, "_start_task", lambda name, work, **kwargs: started.append(name)
+        )
+        searched = []
+        monkeypatch.setattr(window, "_start_search", lambda query: searched.append(query))
+
+        window._url_edit.setText("https://example.com/a.png")
+        window._on_load_clicked()
+        assert started == ["Download image"]
+
+        # A missing but path-shaped value stays a "not found", not a search.
+        window._url_edit.setText(r"C:\definitely\missing\file.png")
+        window._on_load_clicked()
+        assert started == ["Download image"]
+        assert searched == []
+
+        window._url_edit.setText("cartoon cat")
+        window._on_load_clicked()
+        assert searched == ["cartoon cat"]
+    finally:
+        window.close()
+
+
+def _png_bytes(color=(255, 0, 0), size=(8, 8)):
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", size, color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_search_gallery_populates_selects_and_returns(app, monkeypatch):
+    import pyaint.image_search as image_search
+    from pyaint.image_search import ImageCandidate, SearchPage
+
+    candidates = [
+        ImageCandidate(
+            url="https://example/full1.png",
+            thumb_url="https://example/thumb1.png",
+            mime="image/png",
+            title="File:One.png",
+            source_url="https://commons.example/One",
+            width=100,
+            height=80,
+        ),
+        ImageCandidate(
+            url="https://example/full2.png",
+            thumb_url="https://example/thumb2.png",
+            mime="image/png",
+            title="File:Two.png",
+            source_url="https://commons.example/Two",
+            width=80,
+            height=120,
+        ),
+    ]
+
+    def fake_search_page(query, **kwargs):
+        return SearchPage(candidates=candidates, next_continue=None)
+
+    monkeypatch.setattr(image_search, "search_page", fake_search_page)
+    monkeypatch.setattr(image_search, "fetch_bytes", lambda url, timeout=30: _png_bytes())
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        # Run the page fetch synchronously instead of on the thread pool.
+        monkeypatch.setattr(
+            window,
+            "_request_search_page",
+            lambda cont: window._on_search_page(
+                window._search_generation,
+                fake_search_page(window._search_query, cont=cont),
+            ),
+        )
+        monkeypatch.setattr(window, "_start_thumbnails", lambda candidates: None)
+        # Commit synchronously instead of via the busy worker thread.
+        monkeypatch.setattr(window, "_start_task", lambda name, work, **kw: work())
+
+        window._start_search("cats")
+        assert window._gallery.count() == 2
+        assert window._image_stack.currentWidget() is window._gallery
+        assert window._gallery.first_candidate() == candidates[0]
+
+        window._on_candidate_selected(candidates[1])
+        assert window._image_stack.currentWidget() is window._preview_page
+        assert "File:Two.png" in window._image_info.text()
+        assert not window._back_btn.isHidden()
+
+        window._show_results()
+        assert window._image_stack.currentWidget() is window._gallery
+    finally:
+        window.close()
+
+
+def test_double_enter_selects_first_result(app, monkeypatch):
+    from pyaint.image_search import ImageCandidate
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        selected = []
+        monkeypatch.setattr(window, "_on_candidate_selected", selected.append)
+        monkeypatch.setattr(window, "_start_search", lambda query: None)
+        window._search_query = "cats"
+        window._gallery.add_candidate(
+            ImageCandidate(
+                url="u",
+                thumb_url="t",
+                mime="image/png",
+                title="File:Cats.png",
+                source_url="s",
+                width=10,
+                height=10,
+            )
+        )
+        window._image_stack.setCurrentWidget(window._gallery)
+        window._url_edit.setText("cats")
+        window._on_load_clicked()
+        assert len(selected) == 1
+    finally:
+        window.close()
+
+
+def test_search_page_task_reports_page(monkeypatch):
+    import pyaint.image_search as image_search
+    from pyaint.ui.search_tasks import SearchPageTask
+
+    monkeypatch.setattr(image_search, "search_page", lambda q, **kw: "PAGE")
+    task = SearchPageTask("q", None, 7)
+    got = []
+    task.signals.ready.connect(lambda generation, page: got.append((generation, page)))
+    task.run()
+    assert got == [(7, "PAGE")]
+
+
+def test_drawing_settings_are_per_target(app):
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        ids = [
+            window._target_combo.itemData(i)
+            for i in range(window._target_combo.count())
+        ]
+        assert "mspaint" in ids and "skribbl" in ids
+
+        # Tune MS Paint fast.
+        window._target_combo.setCurrentIndex(ids.index("mspaint"))
+        window.bot.settings[:] = [0.01, 4, 0.05]
+        window.bot.jump_threshold = 3
+        window._store_drawing_settings()
+        window._save_config()
+
+        # skribbl falls back to its slower recipe defaults.
+        window._target_combo.setCurrentIndex(ids.index("skribbl"))
+        assert window.bot.settings[0] == pytest.approx(0.05)
+        assert window.bot.settings[2] == pytest.approx(0.5)
+        assert window.bot.jump_threshold == 5
+
+        # Tune skribbl slower still; it must not leak into MS Paint.
+        window.bot.settings[:] = [0.2, 10, 1.0]
+        window._store_drawing_settings()
+        window._save_config()
+
+        window._target_combo.setCurrentIndex(ids.index("mspaint"))
+        assert window.bot.settings[0] == pytest.approx(0.01)
+        assert window.bot.settings[1] == pytest.approx(4)
+        assert window.bot.jump_threshold == 3
+
+        window._target_combo.setCurrentIndex(ids.index("skribbl"))
+        assert window.bot.settings[0] == pytest.approx(0.2)
+        assert window.bot.settings[1] == pytest.approx(10)
+    finally:
+        window.close()

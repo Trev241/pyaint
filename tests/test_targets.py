@@ -90,6 +90,18 @@ def test_merge_drawing_options_sets_and_clears_bits():
     assert merge_drawing_options(0, {}, ignore) == 0
 
 
+def test_merge_drawing_options_sets_and_clears_transparent_bit():
+    white, transparent = 1, 2
+    assert (
+        merge_drawing_options(0, {"ignore_transparent_pixels": True}, white, transparent)
+        == transparent
+    )
+    assert (
+        merge_drawing_options(transparent, {"ignore_transparent_pixels": False}, white, transparent)
+        == 0
+    )
+
+
 def test_apply_profile_defaults_disables_unused_tools():
     recipe = get_recipe("skribbl")
     assert set(disabled_tools(recipe)) == {
