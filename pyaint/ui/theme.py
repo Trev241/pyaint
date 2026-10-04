@@ -239,6 +239,53 @@ def stylesheet(tokens: dict | None = None) -> str:
         font-size: 11px;
     }}
 
+    /* --- Persistent notice banner -------------------------------------- */
+    #NoticeBanner {{
+        background: {t['bg_card']};
+        border-bottom: 1px solid {t['border']};
+        border-left: 3px solid {t['accent']};
+    }}
+    #NoticeBanner[severity="success"] {{ border-left: 3px solid {t['success']}; }}
+    #NoticeBanner[severity="warning"] {{ border-left: 3px solid {t['warning']}; }}
+    #NoticeBanner[severity="error"]   {{ border-left: 3px solid {t['danger']}; }}
+    #NoticeIcon {{ color: {t['fg']}; font-weight: 700; }}
+    #NoticeText {{ color: {t['fg']}; }}
+    #NoticeAction {{ padding: 3px 10px; }}
+    #NoticeClose {{
+        background: transparent;
+        border: none;
+        color: {t['fg_muted']};
+        padding: 2px 6px;
+    }}
+    #NoticeClose:hover {{ color: {t['fg']}; }}
+
+    /* --- Top bar / target switcher ------------------------------------- */
+    #TopBar {{
+        background: {t['bg_side']};
+        border-bottom: 1px solid {t['border']};
+    }}
+    #TopBarLabel {{ color: {t['fg_muted']}; font-size: 11px; }}
+    #EnvChip {{
+        color: {t['fg_dim']};
+        font-size: 11px;
+        padding: 2px 10px;
+        border: 1px solid {t['border_input']};
+        border-radius: 10px;
+    }}
+    #EnvChip[state="ready"] {{ color: {t['success']}; border-color: {t['success']}; }}
+    #EnvChip[state="partial"] {{ color: {t['warning']}; border-color: {t['warning']}; }}
+
+    /* --- Action bar ----------------------------------------------------- */
+    #ActionBar {{
+        background: {t['bg_side']};
+        border-top: 1px solid {t['border']};
+    }}
+    #ReadinessStripInline {{ background: transparent; border: none; }}
+    #FixButton {{ color: {t['warning']}; border-color: {t['warning']}; }}
+
+    /* --- Overlay severity ---------------------------------------------- */
+    #ProgressOverlay[severity="error"] {{ border: 1px solid {t['danger']}; }}
+
     /* --- Buttons -------------------------------------------------------- */
     QPushButton {{
         background: {t['bg_input']};

@@ -35,9 +35,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
-    QStackedWidget,
     QTabWidget,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -64,6 +62,7 @@ from pyaint.ui.overlay import ProgressOverlay
 from pyaint.ui.widgets import (
     CollapsibleSection,
     ImagePreview,
+    NoticeBanner,
     ReadinessStrip,
     Section,
     SliderField,
@@ -71,8 +70,6 @@ from pyaint.ui.widgets import (
     pil_to_qpixmap,
 )
 from pyaint.validation import validate_recipe
-
-_PANELS = (("Setup", "target"), ("Image", "image"), ("Draw", "sliders"))
 
 
 class UiSignals(QObject):
@@ -82,6 +79,7 @@ class UiSignals(QObject):
     status = Signal(str)
     finished = Signal(str)
     image_ready = Signal(str)
+    message = Signal(str)
 
 
 class MainWindow(QMainWindow):
@@ -111,6 +109,9 @@ class MainWindow(QMainWindow):
         self._detection_result = None
         self._detection_image = None
         self._detection_view = None
+        # Per-target environment snapshots, so switching targets is instant.
+        self._environments = {}
+        self._last_error = None
 
         self.signals = UiSignals()
         self.signals.progress.connect(self._on_progress)
@@ -134,6 +135,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._overlay = ProgressOverlay()
+        self.signals.message.connect(self._overlay.show_message)
         self._load_recipes()
         self.load_config()
         self._load_default_image()
@@ -150,53 +152,64 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
-        root = QHBoxLayout(central)
+        root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(self._build_activity_rail())
-        root.addWidget(self._build_sidebar())
-        root.addWidget(self._build_content(), 1)
+
+        # Always-visible target switcher, then the persistent notice banner.
+        root.addWidget(self._build_topbar())
+        self._notice = NoticeBanner()
+        root.addWidget(self._notice)
+
+        self._countdown_banner = CountdownBanner()
+        self._countdown_banner.captured.connect(self._begin_capture)
+        self._countdown_banner.cancelled.connect(self._cancel_auto_detect)
+        root.addWidget(self._countdown_banner)
+
+        # Hub: the preview is the hero, settings live in the inspector.
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        body.addWidget(self._build_content(), 1)
+        body.addWidget(self._build_inspector())
+        root.addLayout(body, 1)
+
+        root.addWidget(self._build_action_bar())
         self._build_statusbar()
 
-    def _build_activity_rail(self) -> QWidget:
-        rail = QFrame()
-        rail.setObjectName("ActivityRail")
-        rail.setFixedWidth(48)
-        layout = QVBoxLayout(rail)
-        layout.setContentsMargins(0, 6, 0, 6)
-        layout.setSpacing(0)
-        self._activity_buttons = []
-        for index, (name, icon_name) in enumerate(_PANELS):
-            button = QToolButton()
-            button.setCheckable(True)
-            button.setAutoExclusive(True)
-            button.setIcon(icon(icon_name, self.tokens["fg_muted"], 22))
-            button.setIconSize(QSize(22, 22))
-            button.setFixedSize(48, 44)
-            button.setToolTip(f"{name} panel")
-            button.setChecked(index == 0)
-            button.clicked.connect(lambda _=False, i=index: self._show_panel(i))
-            self._activity_buttons.append(button)
-            layout.addWidget(button)
-        layout.addStretch(1)
-        return rail
+    def _build_topbar(self) -> QWidget:
+        bar = QFrame()
+        bar.setObjectName("TopBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
 
-    def _build_sidebar(self) -> QWidget:
-        side = QFrame()
-        side.setObjectName("SideBar")
-        side.setFixedWidth(310)
-        layout = QVBoxLayout(side)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self._side_title = QLabel("SETUP")
-        self._side_title.setObjectName("SideBarTitle")
-        layout.addWidget(self._side_title)
-        self._panels = QStackedWidget()
-        self._panels.addWidget(self._build_setup_panel())
-        self._panels.addWidget(self._build_image_panel())
-        self._panels.addWidget(self._build_draw_panel())
-        layout.addWidget(self._panels, 1)
-        return side
+        label = QLabel("Drawing in")
+        label.setObjectName("TopBarLabel")
+        layout.addWidget(label)
+
+        self._target_combo = QComboBox()
+        self._target_combo.setMinimumWidth(200)
+        self._target_combo.setToolTip("Choose the app Pyaint draws in")
+        self._target_combo.currentIndexChanged.connect(self._on_target_changed)
+        layout.addWidget(self._target_combo)
+
+        self._auto_btn = QPushButton("Auto-detect")
+        self._auto_btn.setToolTip("Find the canvas and palette from a screenshot")
+        self._auto_btn.clicked.connect(self.auto_detect)
+        layout.addWidget(self._auto_btn)
+
+        self._teach_btn = QPushButton("Set up\u2026")
+        self._teach_btn.setToolTip("Teach Pyaint where the canvas and palette are")
+        self._teach_btn.clicked.connect(self.open_setup)
+        layout.addWidget(self._teach_btn)
+
+        layout.addStretch(1)
+        self._env_chip = QLabel("Not set up")
+        self._env_chip.setObjectName("EnvChip")
+        self._env_chip.setToolTip("Canvas and palette status")
+        layout.addWidget(self._env_chip)
+        return bar
 
     @staticmethod
     def _scroll_panel() -> tuple[QScrollArea, QVBoxLayout]:
@@ -210,40 +223,52 @@ class MainWindow(QMainWindow):
         scroll.setWidget(container)
         return scroll, layout
 
-    def _build_setup_panel(self) -> QWidget:
+    def _build_inspector(self) -> QWidget:
+        side = QFrame()
+        side.setObjectName("SideBar")
+        side.setFixedWidth(320)
+        side_layout = QVBoxLayout(side)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        side_layout.setSpacing(0)
+
+        title = QLabel("SETTINGS")
+        title.setObjectName("SideBarTitle")
+        side_layout.addWidget(title)
+
         scroll, layout = self._scroll_panel()
 
-        target = Section("Choose your app", "Pick the drawing app, then detect or teach its canvas and palette.")
-        self._target_combo = QComboBox()
-        self._target_combo.currentIndexChanged.connect(self._on_target_changed)
-        target.add(self._target_combo)
-        detect_row = QHBoxLayout()
-        self._auto_btn = QPushButton("Auto-detect")
-        self._auto_btn.setToolTip("Find the canvas and palette from a screenshot")
-        self._auto_btn.clicked.connect(self.auto_detect)
-        teach_btn = QPushButton("Teach manually…")
-        teach_btn.setToolTip("Point at the canvas and palette yourself")
-        teach_btn.clicked.connect(self.open_setup)
-        detect_row.addWidget(self._auto_btn)
-        detect_row.addWidget(teach_btn)
-        target.add_layout(detect_row)
+        env = Section("Environment", "Where Pyaint finds the canvas and palette. Switch targets above.")
+        self._detection_label = QLabel("No regions detected yet.")
+        self._detection_label.setObjectName("SectionHint")
+        self._detection_label.setWordWrap(True)
+        env.add(self._detection_label)
         needs = QLabel(
             "Auto-detect needs a blank canvas, the app maximized on the primary "
             "monitor, at 100% display scaling."
         )
         needs.setObjectName("SectionHint")
         needs.setWordWrap(True)
-        target.add(needs)
-        self._detection_label = QLabel("No regions detected yet.")
-        self._detection_label.setObjectName("SectionHint")
-        self._detection_label.setWordWrap(True)
-        target.add(self._detection_label)
-        layout.insertWidget(layout.count() - 1, target)
+        env.add(needs)
+        layout.insertWidget(layout.count() - 1, env)
 
-        return scroll
-
-    def _build_draw_panel(self) -> QWidget:
-        scroll, layout = self._scroll_panel()
+        load = Section("Image", "Paste a URL, choose a file, or drag an image onto the window.")
+        self._url_edit = QLineEdit()
+        self._url_edit.setPlaceholderText("https://… or C:\\path\\image.png")
+        self._url_edit.returnPressed.connect(self._on_load_clicked)
+        load.add(self._url_edit)
+        row = QHBoxLayout()
+        load_btn = QPushButton("Load")
+        load_btn.clicked.connect(self._on_load_clicked)
+        file_btn = QPushButton("Open file…")
+        file_btn.clicked.connect(self._open_file)
+        row.addWidget(load_btn)
+        row.addWidget(file_btn)
+        load.add_layout(row)
+        self._image_info = QLabel("No image loaded.")
+        self._image_info.setObjectName("SectionHint")
+        self._image_info.setWordWrap(True)
+        load.add(self._image_info)
+        layout.insertWidget(layout.count() - 1, load)
 
         mode = Section("Stroke mode", "How the image is turned into strokes.")
         self._mode_combo = QComboBox()
@@ -346,11 +371,44 @@ class MainWindow(QMainWindow):
         self._tools_section = tools
         layout.insertWidget(layout.count() - 1, tools)
 
+        diagnostics = CollapsibleSection("Diagnostics")
+        diag_note = QLabel("Calibration aids. For normal use, just press Start drawing.")
+        diag_note.setObjectName("SectionHint")
+        diag_note.setWordWrap(True)
+        diagnostics.add(diag_note)
+        self._btn_precompute = self._tool_button(
+            "Prepare & cache",
+            "download",
+            self._on_precompute,
+            "Save the stroke map so repeat runs skip processing (drawing time is unchanged)",
+        )
+        self._btn_test = self._tool_button("Test draw", "zap", self._on_test_draw, "Draw the first 20 strokes")
+        self._btn_simple = self._tool_button("Brush test", "play", self._on_simple_test, "Draw 5 lines to tune the brush size")
+        for button in (self._btn_precompute, self._btn_test, self._btn_simple):
+            diagnostics.add(button)
+
+        redraw = Section("Redraw region", "Draw only a rectangle you pick on screen.")
+        self._region_label = QLabel("No region selected.")
+        self._region_label.setObjectName("SectionHint")
+        self._region_label.setWordWrap(True)
+        redraw.add(self._region_label)
+        row2 = QHBoxLayout()
+        pick = QPushButton("Pick region")
+        pick.clicked.connect(self.pick_region)
+        draw = QPushButton("Draw region")
+        draw.clicked.connect(self._on_draw_region)
+        row2.addWidget(pick)
+        row2.addWidget(draw)
+        redraw.add_layout(row2)
+        diagnostics.add(redraw)
+        layout.insertWidget(layout.count() - 1, diagnostics)
+
         advanced = CollapsibleSection("Advanced")
         self._build_advanced_into(advanced)
         layout.insertWidget(layout.count() - 1, advanced)
 
-        return scroll
+        side_layout.addWidget(scroll, 1)
+        return side
 
     def _build_advanced_into(self, container) -> None:
         appearance = Section("Appearance", "Follow the system theme or choose one explicitly.")
@@ -382,62 +440,11 @@ class MainWindow(QMainWindow):
         files.add(reset)
         container.add(files)
 
-    def _build_image_panel(self) -> QWidget:
-        scroll, layout = self._scroll_panel()
-
-        load = Section("Load image", "Paste a URL or choose a file. You can also drag an image onto the window.")
-        self._url_edit = QLineEdit()
-        self._url_edit.setPlaceholderText("https://… or C:\\path\\image.png")
-        self._url_edit.returnPressed.connect(self._on_load_clicked)
-        load.add(self._url_edit)
-        row = QHBoxLayout()
-        load_btn = QPushButton("Load")
-        load_btn.clicked.connect(self._on_load_clicked)
-        file_btn = QPushButton("Open file…")
-        file_btn.clicked.connect(self._open_file)
-        row.addWidget(load_btn)
-        row.addWidget(file_btn)
-        load.add_layout(row)
-        layout.insertWidget(layout.count() - 1, load)
-
-        info = Section("Preview")
-        self._image_info = QLabel("No image loaded.")
-        self._image_info.setObjectName("SectionHint")
-        self._image_info.setWordWrap(True)
-        info.add(self._image_info)
-        layout.insertWidget(layout.count() - 1, info)
-
-        redraw = Section("Redraw region", "Draw only a rectangle you pick on screen.")
-        self._region_label = QLabel("No region selected.")
-        self._region_label.setObjectName("SectionHint")
-        self._region_label.setWordWrap(True)
-        redraw.add(self._region_label)
-        row2 = QHBoxLayout()
-        pick = QPushButton("Pick region")
-        pick.clicked.connect(self.pick_region)
-        draw = QPushButton("Draw region")
-        draw.clicked.connect(self._on_draw_region)
-        row2.addWidget(pick)
-        row2.addWidget(draw)
-        redraw.add_layout(row2)
-        layout.insertWidget(layout.count() - 1, redraw)
-
-        return scroll
-
     def _build_content(self) -> QWidget:
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self._readiness = ReadinessStrip()
-        layout.addWidget(self._readiness)
-        layout.addWidget(self._build_toolbar())
-
-        self._countdown_banner = CountdownBanner()
-        self._countdown_banner.captured.connect(self._begin_capture)
-        self._countdown_banner.cancelled.connect(self._cancel_auto_detect)
-        layout.addWidget(self._countdown_banner)
-
         self._detection_view = None
         self._tabs = QTabWidget()
         self._tabs.setDocumentMode(True)
@@ -502,26 +509,25 @@ class MainWindow(QMainWindow):
         button.clicked.connect(slot)
         return button
 
-    def _build_toolbar(self) -> QWidget:
+    def _build_action_bar(self) -> QWidget:
         bar = QFrame()
-        bar.setObjectName("EditorToolbar")
+        bar.setObjectName("ActionBar")
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
 
-        self._btn_precompute = self._tool_button(
-            "Prepare & cache",
-            "download",
-            self._on_precompute,
-            "Save the stroke map so repeat runs skip processing (drawing time is unchanged)",
-        )
-        self._btn_test = self._tool_button("Test draw", "zap", self._on_test_draw, "Draw the first 20 strokes")
-        self._btn_simple = self._tool_button("Brush test", "play", self._on_simple_test, "Draw 5 lines to tune the brush size")
-        for button in (self._btn_precompute, self._btn_test, self._btn_simple):
-            layout.addWidget(button)
-        layout.addStretch(1)
+        self._readiness = ReadinessStrip()
+        self._readiness.setObjectName("ReadinessStripInline")
+        layout.addWidget(self._readiness, 1)
 
-        self._btn_start = QPushButton("Start")
+        self._fix_btn = QPushButton("Fix")
+        self._fix_btn.setObjectName("FixButton")
+        self._fix_btn.setToolTip("Set up what is missing")
+        self._fix_btn.clicked.connect(self._on_fix)
+        self._fix_btn.setVisible(False)
+        layout.addWidget(self._fix_btn)
+
+        self._btn_start = QPushButton("Start drawing")
         self._btn_start.setObjectName("Primary")
         self._btn_start.setIcon(icon("play", self.tokens["accent_fg"], 16))
         self._btn_start.setIconSize(QSize(16, 16))
@@ -551,9 +557,11 @@ class MainWindow(QMainWindow):
     # Recipes / targets
     # ------------------------------------------------------------------
     def _load_recipes(self) -> None:
+        self._recipe_issues = []
         for recipe in load_user_recipes():
             issues = validate_recipe(recipe)
             if issues:
+                self._recipe_issues.append((recipe.id, issues))
                 log.info(f"[Recipes] '{recipe.id}' has issues: {issues}")
         self._recipes = list_recipes()
         self._recipes_by_name = {r.name: r for r in self._recipes}
@@ -562,19 +570,50 @@ class MainWindow(QMainWindow):
         for recipe in self._recipes:
             self._target_combo.addItem(recipe.name, recipe.id)
         self._target_combo.blockSignals(False)
+        if self._recipe_issues:
+            names = ", ".join(rid for rid, _ in self._recipe_issues)
+            self._notice.show_notice(
+                f"{len(self._recipe_issues)} recipe(s) could not be fully loaded: {names}",
+                "warning",
+            )
 
     def _on_target_changed(self, _index: int) -> None:
         if self._initializing:
             return
         recipe_id = self._target_combo.currentData()
         recipe = next((r for r in self._recipes if r.id == recipe_id), None)
-        if recipe:
-            self.profile.target = recipe.id
-            self._apply_recipe(recipe)
-            self._store_drawing_settings()
-            self._store_drawing_options()
-            self._save_config()
+        if recipe is None:
+            return
+        previous = self.profile.target
+        if previous == recipe.id:
+            return
+
+        # Remember the old target's geometry, then restore the new one's.
+        self._environments[previous] = self.profile.snapshot_environment()
+        self.profile.target = recipe.id
+        if recipe.id in self._environments:
+            self.profile.apply_environment(self._environments[recipe.id])
+        else:
+            self.profile.apply_environment(Profile().snapshot_environment())
+
+        self._apply_recipe(recipe)
+        self._restore_environment()
+        self._store_drawing_settings()
+        self._store_drawing_options()
+        self._save_config()
+        self._refresh_detection_status()
+        self._sync_env_ui()
+        if self._environment_ready():
+            self._notice.show_notice(f"Switched to {recipe.name}.", "success")
             self._set_status(f"Target set to {recipe.name}.")
+        else:
+            self._notice.show_notice(
+                f'"{recipe.name}" is not set up yet \u2014 find its canvas and palette.',
+                "warning",
+                "Auto-detect" if recipe.detection else "Set up",
+                self.auto_detect if recipe.detection else self.open_setup,
+            )
+            self._set_status(f"Target set to {recipe.name} \u2014 setup needed.")
 
     def _apply_recipe(self, recipe) -> None:
         apply_profile_defaults(self.profile, recipe)
@@ -606,6 +645,9 @@ class MainWindow(QMainWindow):
         self.bot.profile = self.profile
         self.tools = pyaint_config.split_preferences(config)
         self.tools.setdefault("pause_key", "p")
+        envs = self.tools.get("environments")
+        self._environments = dict(envs) if isinstance(envs, dict) else {}
+        self._environments.setdefault(self.profile.target, self.profile.snapshot_environment())
 
         try:
             recipe = get_recipe(self.profile.target)
@@ -655,6 +697,9 @@ class MainWindow(QMainWindow):
         self._apply_theme()
 
     def _restore_environment(self) -> None:
+        # Reset the live palette first so switching to an unconfigured target
+        # cannot silently keep the previous target's swatches.
+        self.bot._palette = None
         palette = self.profile["Palette"]
         try:
             if palette.get("box") and palette.get("rows") and palette.get("cols"):
@@ -697,9 +742,16 @@ class MainWindow(QMainWindow):
         self.tools["theme"] = self._theme_mode
         if self._last_url:
             self.tools["last_image_url"] = self._last_url
+        self._environments[self.profile.target] = self.profile.snapshot_environment()
+        self.tools["environments"] = self._environments
         payload = pyaint_config.build_payload(self.tools, self.profile)
         if not pyaint_config.save_config(self._config_path, payload):
             log.info(f"Failed to save config to {self._config_path}")
+            self._notice.show_notice(
+                f"Could not save settings to {os.path.basename(self._config_path)} "
+                "\u2014 changes will be lost on exit.",
+                "error",
+            )
 
     # ------------------------------------------------------------------
     # Widget <-> state sync
@@ -747,16 +799,46 @@ class MainWindow(QMainWindow):
         )
         self._refresh_readiness()
 
-    def _refresh_readiness(self) -> None:
-        recipe = get_recipe(self.profile.target)
-        environment_ready = (
+    def _environment_ready(self) -> bool:
+        return (
             getattr(self.bot, "_canvas", None) is not None
             and getattr(self.bot, "_palette", None) is not None
         )
+
+    def _refresh_readiness(self) -> None:
+        recipe = get_recipe(self.profile.target)
+        environment_ready = self._environment_ready()
         image_ready = self._has_image()
         self._readiness.update_steps(recipe.name, environment_ready, image_ready)
+        if hasattr(self, "_fix_btn"):
+            self._fix_btn.setVisible(not environment_ready)
+        self._update_env_chip()
         if not self._busy:
-            self._btn_start.setEnabled(environment_ready and image_ready)
+            # Keep Start clickable: clicking it explains what is missing rather
+            # than leaving a greyed-out button with no reason.
+            self._btn_start.setEnabled(True)
+            self._btn_start.setToolTip(
+                "Start drawing"
+                if (environment_ready and image_ready)
+                else "Not ready yet — click to see what is missing"
+            )
+
+    def _update_env_chip(self) -> None:
+        if not hasattr(self, "_env_chip"):
+            return
+        canvas = getattr(self.bot, "_canvas", None)
+        palette = getattr(self.bot, "_palette", None)
+        if canvas is not None and palette is not None and len(palette.colors) > 1:
+            state, text = "ready", f"Ready \u00b7 {len(palette.colors)} colours"
+        elif canvas is not None or palette is not None:
+            state, text = "partial", "Partly set up"
+        else:
+            state, text = "none", "Not set up"
+        self._env_chip.setText(text)
+        if self._env_chip.property("state") != state:
+            self._env_chip.setProperty("state", state)
+            self._env_chip.style().unpolish(self._env_chip)
+            self._env_chip.style().polish(self._env_chip)
 
     @staticmethod
     def _detection_checklist(detection) -> str:
@@ -861,10 +943,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_icons(self) -> None:
         fg = self.tokens["fg"]
-        muted = self.tokens["fg_muted"]
         accent_fg = self.tokens["accent_fg"]
-        for button, (_, icon_name) in zip(self._activity_buttons, _PANELS):
-            button.setIcon(icon(icon_name, muted, 22))
         self._btn_precompute.setIcon(icon("download", fg, 16))
         self._btn_test.setIcon(icon("zap", fg, 16))
         self._btn_simple.setIcon(icon("play", fg, 16))
@@ -905,6 +984,7 @@ class MainWindow(QMainWindow):
             except Exception as exc:  # noqa: BLE001 - surface any task failure
                 log.info(f"[{name}] error: {exc}")
                 traceback.print_exc()
+                self._last_error = (name, str(exc))
                 self.signals.status.emit(f"{name} failed: {exc}")
             finally:
                 self.signals.finished.emit(name)
@@ -919,6 +999,20 @@ class MainWindow(QMainWindow):
             self.showNormal()
             self.raise_()
             self.activateWindow()
+        # A failure must not vanish with the overlay: surface it as a banner.
+        error = self._last_error
+        self._last_error = None
+        if error:
+            name, message = error
+            self._notice.show_notice(f"{name} failed: {message}", "error")
+
+    def _ready_countdown(self, name=None, seconds: int = 3) -> None:
+        """Explain the pre-draw pause instead of sleeping silently."""
+        if name is None:
+            name = get_recipe(self.profile.target).name
+        for remaining in range(int(seconds), 0, -1):
+            self.signals.message.emit(f"Switch to {name} — drawing starts in {remaining}…")
+            time.sleep(1)
 
     def _set_running(self, running: bool, interruptible: bool = True) -> None:
         for button in (self._btn_precompute, self._btn_test, self._btn_simple, self._btn_start, self._auto_btn):
@@ -1045,9 +1139,11 @@ class MainWindow(QMainWindow):
             return
         recipe = get_recipe(self.profile.target)
         if not recipe.detection:
-            QMessageBox.information(
-                self, self.title,
-                f'No auto-detection configured for "{recipe.name}".\n\nUse "Teach manually" to set it up.',
+            self._notice.show_notice(
+                f'No auto-detection is configured for "{recipe.name}".',
+                "info",
+                "Set up",
+                self.open_setup,
             )
             return
         self._detecting = True
@@ -1127,16 +1223,19 @@ class MainWindow(QMainWindow):
         self._store_drawing_settings()
         self._store_drawing_options()
         self._save_config()
-        self._set_status(f"Auto-detect applied ({', '.join(applied) or 'nothing'}).")
+        self._refresh_readiness()
         palette = getattr(self.bot, "_palette", None)
         if palette is not None and len(palette.colors) <= 1:
-            QMessageBox.warning(
-                self,
-                self.title,
+            self._notice.show_notice(
                 "The palette sampled as a single colour — the target app may have "
-                "been covered when the region was captured. Re-run Auto-detect "
-                "with the target app in front, or teach the palette manually.",
+                "been covered. Re-run Auto-detect with the app in front, or teach it.",
+                "error",
+                "Retry",
+                self.auto_detect,
             )
+        else:
+            self._notice.show_notice("Canvas and palette detected.", "success")
+        self._set_status(f"Auto-detect applied ({', '.join(applied) or 'nothing'}).")
         self._show_image_tab()
 
     def _cancel_detection(self) -> None:
@@ -1151,7 +1250,7 @@ class MainWindow(QMainWindow):
 
     def _require_image(self) -> bool:
         if not self._has_image():
-            QMessageBox.warning(self, self.title, "Load an image first.")
+            self._notice.show_notice("Load an image first.", "warning", "Choose image", self._open_file)
             return False
         return True
 
@@ -1190,48 +1289,58 @@ class MainWindow(QMainWindow):
         self.bot.drawing = False
         self.bot.draw_state = {"color_idx": 0, "line_idx": 0, "segment_idx": 0, "current_color": None, "was_paused": False}
         self.signals.status.emit(f"Test drawing {min(20, total)} lines.")
-        time.sleep(1.0)
+        self._ready_countdown(seconds=2)
         result = self.bot.test_draw(cmap, max_lines=min(20, total))
         self.signals.status.emit("Test draw completed." if result == "success" else f"Test draw: {result}.")
 
     def _on_simple_test(self) -> None:
-        canvas = getattr(self.bot, "_canvas", None)
-        if canvas is None:
-            QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect, or teach it manually.")
-            return
-        self._start_task("Simple test draw", self.bot.simple_test_draw, minimize=True, interruptible=False)
-
-    def _on_start(self) -> None:
-        if not self._require_image():
-            return
         if getattr(self.bot, "_canvas", None) is None:
-            QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect, or teach it manually.")
+            self._notice.show_notice("Canvas not set yet.", "warning", "Auto-detect", self._on_fix)
             return
+        self._start_task("Brush test", self.bot.simple_test_draw, minimize=True, interruptible=False)
+
+    # ------------------------------------------------------------------
+    # Pre-flight
+    # ------------------------------------------------------------------
+    def _preflight_issues(self):
+        """Return ``(reason, action_text, action)`` for everything missing."""
+        issues = []
+        if not self._has_image():
+            issues.append(("no image loaded", "Choose image", self._open_file))
+        if getattr(self.bot, "_canvas", None) is None:
+            issues.append(("canvas not set", "Set up", self._on_fix))
         palette = getattr(self.bot, "_palette", None)
         if palette is None:
-            QMessageBox.warning(self, self.title, "Palette not configured. Run Auto-detect, or teach it manually.")
-            return
-        if len(palette.colors) <= 1:
-            QMessageBox.warning(
-                self,
-                self.title,
-                "The palette has only one distinct colour, so the whole image "
-                "would be drawn in that colour. Re-run Auto-detect with the "
-                "target app in front, or teach the palette manually.",
+            issues.append(("palette not set", "Set up", self._on_fix))
+        elif len(palette.colors) <= 1:
+            issues.append(("palette has only one colour", "Auto-detect", self.auto_detect))
+        return issues
+
+    def _on_fix(self) -> None:
+        recipe = get_recipe(self.profile.target)
+        if recipe.detection:
+            self.auto_detect()
+        else:
+            self.open_setup()
+
+    def _on_start(self) -> None:
+        issues = self._preflight_issues()
+        if issues:
+            summary = ", ".join(reason for reason, _, _ in issues)
+            _, action_text, action = issues[0]
+            self._notice.show_notice(
+                f"Not ready to draw — {summary}.", "warning", action_text, action
             )
             return
-        QMessageBox.information(
-            self, self.title,
-            f"Press ESC to stop.\nPress {self.bot.pause_key or 'p'} to pause/resume.",
-        )
+        self._notice.clear()
         self._start_task("Drawing", self._draw_work, minimize=True, overlay=True)
 
     def _draw_work(self) -> None:
         start = time.time()
         cmap = self._resolve_cmap()
         eta = self.bot.estimate_drawing_time(cmap)
-        self.signals.status.emit(f"Drawing — estimated {eta}. Switch to the target app now.")
-        time.sleep(3)
+        self._ready_countdown()
+        self.signals.status.emit(f"Drawing — estimated {eta}.")
         self.bot.terminate = False
         self.bot.paused = False
         self.bot.drawing = False
@@ -1254,7 +1363,7 @@ class MainWindow(QMainWindow):
         from pyaint.ui.capture import pick_points
 
         if getattr(self.bot, "_canvas", None) is None:
-            QMessageBox.warning(self, self.title, "Canvas not configured. Run Auto-detect, or teach it manually.")
+            self._notice.show_notice("Canvas not set yet.", "warning", "Auto-detect", self._on_fix)
             return
         try:
             result = pick_points(self, 2, "Click the UPPER-LEFT then LOWER-RIGHT corner of the region.")
@@ -1272,7 +1381,7 @@ class MainWindow(QMainWindow):
 
     def _on_draw_region(self) -> None:
         if self._redraw_region is None:
-            QMessageBox.warning(self, self.title, "Pick a region first.")
+            self._notice.show_notice("Pick a region first.", "warning", "Pick region", self.pick_region)
             return
         self._start_task("Region redraw", self._redraw_work, minimize=True, overlay=True)
 
@@ -1284,8 +1393,8 @@ class MainWindow(QMainWindow):
         if not cmap:
             self.signals.status.emit("No drawable content in the selected region.")
             return
-        self.signals.status.emit("Redrawing region — switch to the target app.")
-        time.sleep(3)
+        self._ready_countdown()
+        self.signals.status.emit("Redrawing region…")
         self.bot.terminate = False
         self.bot.paused = False
         self.bot.drawing = False
@@ -1355,10 +1464,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
-    def _show_panel(self, index: int) -> None:
-        self._panels.setCurrentIndex(index)
-        self._side_title.setText(_PANELS[index][0].upper())
-
     def closeEvent(self, event):  # noqa: N802
         self._overlay.hide_overlay()
         self._countdown_banner.stop()

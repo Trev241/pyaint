@@ -82,3 +82,34 @@ def test_from_config_does_not_alias_input():
     p = Profile.from_config(config)
     p["Palette"]["rows"] = 42
     assert config == original
+
+
+def test_snapshot_and_apply_environment_round_trip():
+    p = Profile(target="skribbl")
+    p["Palette"]["status"] = True
+    p["Palette"]["box"] = [1, 2, 3, 4]
+    p.mspaint_mode["enabled"] = True
+    snapshot = p.snapshot_environment()
+
+    p["Palette"]["box"] = None
+    p.mspaint_mode["enabled"] = False
+    p.apply_environment(snapshot)
+
+    assert p["Palette"]["box"] == [1, 2, 3, 4]
+    assert p["Palette"]["status"] is True
+    assert p.mspaint_mode["enabled"] is True
+    # The environment carries geometry only; target identity is preserved.
+    assert p.target == "skribbl"
+    # The snapshot must be isolated from later mutations.
+    snapshot["tools"]["Palette"]["box"] = [9, 9, 9, 9]
+    assert p["Palette"]["box"] == [1, 2, 3, 4]
+
+
+def test_apply_environment_resets_missing_tools():
+    p = Profile()
+    p["Canvas"]["box"] = [0, 0, 5, 5]
+    p["Palette"]["status"] = True
+    p.apply_environment({"tools": {"Canvas": {"box": [9, 9, 9, 9]}}})
+    assert p["Canvas"]["box"] == [9, 9, 9, 9]
+    # A tool absent from the snapshot falls back to defaults, not the old value.
+    assert p["Palette"]["status"] is False

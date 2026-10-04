@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QSlider,
     QSpinBox,
@@ -26,6 +27,80 @@ def pil_to_qpixmap(image) -> QPixmap:
     data = image.tobytes("raw", "RGBA")
     qimage = QImage(data, image.width, image.height, QImage.Format_RGBA8888)
     return QPixmap.fromImage(qimage.copy())
+
+
+class NoticeBanner(QFrame):
+    """A persistent, severity-aware message bar.
+
+    Used for the things a user must not miss: what is blocking a draw, what
+    failed, or the result of a switch. It stays visible until replaced or
+    dismissed, unlike a transient status-bar message.
+    """
+
+    _GLYPHS = {"info": "i", "success": "\u2713", "warning": "!", "error": "\u2715"}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("NoticeBanner")
+        self.setProperty("severity", "info")
+        self._on_action = None
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(10)
+
+        self._icon = QLabel()
+        self._icon.setObjectName("NoticeIcon")
+        self._icon.setFixedWidth(16)
+        layout.addWidget(self._icon)
+
+        self._text = QLabel()
+        self._text.setObjectName("NoticeText")
+        self._text.setWordWrap(True)
+        layout.addWidget(self._text, 1)
+
+        self._action = QPushButton()
+        self._action.setObjectName("NoticeAction")
+        self._action.clicked.connect(self._run_action)
+        self._action.hide()
+        layout.addWidget(self._action)
+
+        self._close = QToolButton()
+        self._close.setObjectName("NoticeClose")
+        self._close.setText("\u2715")
+        self._close.setToolTip("Dismiss")
+        self._close.clicked.connect(self.clear)
+        layout.addWidget(self._close)
+
+        self.hide()
+
+    def show_notice(self, text, severity="info", action_text=None, on_action=None):
+        """Show a message; ``on_action`` runs when the action button is used."""
+        severity = severity if severity in self._GLYPHS else "info"
+        self.setProperty("severity", severity)
+        self._icon.setText(self._GLYPHS[severity])
+        self._text.setText(text)
+        self._on_action = on_action
+        if action_text and on_action is not None:
+            self._action.setText(action_text)
+            self._action.show()
+        else:
+            self._action.hide()
+        self._restyle()
+        self.show()
+
+    def clear(self):
+        self._on_action = None
+        self.hide()
+
+    def _run_action(self):
+        callback = self._on_action
+        if callback is not None:
+            callback()
+
+    def _restyle(self):
+        self.style().unpolish(self)
+        self.style().polish(self)
 
 
 class ReadinessStrip(QFrame):

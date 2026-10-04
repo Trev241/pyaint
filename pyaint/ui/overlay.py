@@ -44,6 +44,7 @@ class ProgressOverlay(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         card = QFrame()
         card.setObjectName("ProgressOverlay")
+        self._card = card
         outer.addWidget(card)
 
         layout = QVBoxLayout(card)
@@ -70,6 +71,29 @@ class ProgressOverlay(QWidget):
         self._bar.setValue(0)
         self._label.setText(text)
         self._hint.setText(f"ESC stop · {pause_key.upper()} pause/resume")
+        self._reposition()
+        self.show()
+        self.raise_()
+
+    def show_message(self, text: str) -> None:
+        """Update the headline text without touching the progress bar.
+
+        Used for the visible "switch to the target app" countdown so the wait
+        is explained instead of looking frozen.
+        """
+        self._card.setProperty("severity", "info")
+        self._card.style().unpolish(self._card)
+        self._card.style().polish(self._card)
+        self._label.setText(text)
+
+    def show_error(self, text: str) -> None:
+        """Show a persistent error card that the user cannot miss."""
+        self._card.setProperty("severity", "error")
+        self._card.style().unpolish(self._card)
+        self._card.style().polish(self._card)
+        self._bar.setValue(0)
+        self._label.setText(text)
+        self._hint.setText("Reopening Pyaint")
         self._reposition()
         self.show()
         self.raise_()

@@ -154,6 +154,42 @@ class Profile(Mapping):
         return payload
 
     # ------------------------------------------------------------------
+    # Per-target environment snapshots
+    # ------------------------------------------------------------------
+    # A single ``Profile`` describes the *active* target. Because different
+    # apps have different canvas/palette geometry, the window keeps a
+    # snapshot per target so switching back and forth is instant.
+    def snapshot_environment(self) -> Dict[str, Any]:
+        """Return a deep copy of the taught geometry (no target/identity)."""
+        return {
+            "tools": copy.deepcopy(self.tools),
+            "mspaint_mode": copy.deepcopy(self.mspaint_mode),
+        }
+
+    def apply_environment(self, env: Optional[Mapping[str, Any]]) -> None:
+        """Replace the taught geometry in place, preserving ``target``.
+
+        Unknown keys from ``env`` are preserved (forward compatible), and
+        missing tool keys fall back to the defaults.
+        """
+        env = env if isinstance(env, Mapping) else {}
+        incoming_tools = env.get("tools")
+        incoming_tools = incoming_tools if isinstance(incoming_tools, Mapping) else {}
+
+        self.tools = {}
+        for key in TOOL_KEYS:
+            merged = copy.deepcopy(DEFAULT_TOOLS[key])
+            incoming = incoming_tools.get(key)
+            if isinstance(incoming, Mapping):
+                merged.update(copy.deepcopy(dict(incoming)))
+            self.tools[key] = merged
+
+        self.mspaint_mode = copy.deepcopy(DEFAULT_MSPAINT_MODE)
+        incoming_mode = env.get("mspaint_mode")
+        if isinstance(incoming_mode, Mapping):
+            self.mspaint_mode.update(copy.deepcopy(dict(incoming_mode)))
+
+    # ------------------------------------------------------------------
     # Convenience helpers
     # ------------------------------------------------------------------
     def canvas_rect(self) -> Optional[Tuple[int, int, int, int]]:

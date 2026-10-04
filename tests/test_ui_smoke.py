@@ -189,3 +189,77 @@ def test_progress_signal_updates_bar(app, tmp_path, monkeypatch):
         assert window._progress.value() == 50
     finally:
         window.close()
+
+
+def test_notice_banner_severity_and_action(app):
+    from pyaint.ui.widgets import NoticeBanner
+
+    banner = NoticeBanner()
+    fired = []
+    try:
+        banner.show_notice("Something missing", "warning", "Fix", lambda: fired.append(True))
+        assert banner.property("severity") == "warning"
+        assert not banner._action.isHidden()
+        banner._action.click()
+        assert fired == [True]
+
+        banner.show_notice("It broke", "error")
+        assert banner.property("severity") == "error"
+        assert banner._action.isHidden()
+
+        banner.clear()
+        assert banner.isHidden()
+    finally:
+        banner.close()
+
+
+def test_target_switcher_remembers_environment(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        # Deterministic environment: colour-position palette (no screenshot).
+        window._config_path = str(tmp_path / "config.json")
+        window.profile["Palette"]["box"] = None
+        window.profile["Palette"]["color_coords"] = {"(255, 0, 0)": [1, 1], "(0, 255, 0)": [2, 2]}
+        window.profile["Palette"]["status"] = True
+        window.profile["Canvas"]["box"] = [10, 10, 110, 110]
+        window._environments = {window.profile.target: window.profile.snapshot_environment()}
+        window._restore_environment()
+        first = window.profile.target
+
+        ids = [window._target_combo.itemData(i) for i in range(window._target_combo.count())]
+        other = next(i for i in ids if i != first)
+        window._target_combo.setCurrentIndex(ids.index(other))
+        assert window.profile.target == other
+        # The new target has no taught geometry of its own.
+        assert window.bot._palette is None
+        assert window.bot._canvas is None
+
+        window._target_combo.setCurrentIndex(ids.index(first))
+        assert window.profile.target == first
+        assert window.bot._canvas == (10, 10, 100, 100)
+        assert window.bot._palette is not None
+        assert len(window.bot._palette.colors) == 2
+    finally:
+        window.close()
+
+
+def test_preflight_reports_missing_pieces(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        # Clear any environment restored from the developer's config.
+        window.profile["Canvas"]["box"] = None
+        window.profile["Palette"]["box"] = None
+        window.profile["Palette"]["color_coords"] = None
+        window.bot._palette = None
+        window._refresh_readiness()
+
+        reasons = [reason for reason, _, _ in window._preflight_issues()]
+        assert "canvas not set" in reasons
+        assert "palette not set" in reasons
+        assert window._fix_btn.isVisibleTo(window)
+    finally:
+        window.close()

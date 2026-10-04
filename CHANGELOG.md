@@ -12,7 +12,38 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Main window is now a hub, not a toolbox:** the activity rail and the
+  Setup/Image/Draw sidebar are gone. The image preview is the hero, settings
+  live in a single right-hand inspector, and one always-visible top bar holds
+  the target switcher. This makes the common "same target, new image" loop
+  one-click instead of a march through panels.
+- **Visible, seamless target switching:** the top bar always shows the current
+  target; switching applies the recipe's defaults and **remembers each
+  target's canvas/palette** (`Profile.snapshot_environment` /
+  `apply_environment`, stored under `environments` in `config.json`). Switching
+  back restores the previously taught geometry instantly; an unconfigured
+  target offers Auto-detect / Set up in place.
+- **Persistent severity-aware banner** (`NoticeBanner`) for the things a user
+  must not miss: not-ready checklists, draw failures, and switch results.
+  Replaces the transient status-bar messages and most blocking `QMessageBox`
+  warnings.
+- **No more silent waits or silent failures:** the pre-draw `time.sleep(3)` (and
+  the test-draw/region-redraw equivalents) is now a visible countdown in the
+  floating overlay ("Switch to MS Paint — drawing starts in 3…"), and worker
+  errors are surfaced as a red banner when the window restores instead of
+  vanishing with the overlay.
+- **Start is always clickable** and runs a pre-flight check that names what is
+  missing (no image / canvas / palette / one-colour palette) with a fix action,
+  instead of a greyed-out button with no explanation.
+- **Calibration aids demoted:** Prepare & cache, Test draw, Brush test, and the
+  region redraw moved into a collapsible **Diagnostics** section in the
+  inspector, leaving Start drawing as the single primary action.
+
 ### Added
+- `NoticeBanner` widget (`pyaint/ui/widgets.py`) and per-target environment
+  snapshots in `Profile` (`pyaint/profile.py`). The floating overlay gained
+  `show_message` / `show_error`.
 - **Floating progress overlay** (`pyaint/ui/overlay.py`): a click-through,
   always-on-top card shown during drawing/region-redraw with the stroke count,
   ETA, a progress bar, and ESC/pause hints. `MainWindow` shows it around long
