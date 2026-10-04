@@ -13,6 +13,18 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Openverse searches no longer fail with HTTP 401.** Openverse rejects
+  anonymous requests above 20 results per page (`page_size may not exceed 20
+  for anonymous requests`). The gallery reused the Commons-oriented default of
+  30, so every Openverse search returned 401. The Openverse provider now caps
+  its page size at 20, and `_fetch_json` surfaces the API's own explanation
+  instead of a bare "HTTP Error 401: Unauthorized".
+- **Images dragged from a browser now load.** Drop handling only accepted
+  local files (`QUrl.isLocalFile()`), so a drag from a Google/Bing image result —
+  which arrives as an `http(s)` URL, an HTML `<img>`, or a `data:` URI — was
+  silently ignored. The window and preview now recognise remote URLs, `data:`
+  URIs, and raw image bytes, unwrap search-engine `imgurl` redirects, and route
+  them through the existing download path.
 - **Manual teaching no longer strands the app.** The point picker
   (`pyaint/ui/capture.py`) hid the parent dialog to grab a clean palette
   screenshot, but hiding a `QDialog` ends its `exec()` loop — Setup dropped out
@@ -40,6 +52,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   eagerly.
 
 ### Changed
+- **The Image panel header is now a single tidy card.** The title and search
+  source share one line (source right-aligned), the source field and Load
+  button share the next, and the resolution/source line sits quietly beneath.
+  New `#ImageHeader`, `#ImageTitle`, `#SourceLabel`, `#ImageMeta`,
+  `#SearchField`, and `#LoadButton` styles keep the spacing and alignment
+  consistent across the dark and light themes.
 - **Image source controls and the preview now live together.** The single-tab
   "Image" tab is gone (a leftover from the removed Detection tab). The preview
   is a plain panel whose header owns the URL/path/search field, browse, and
@@ -92,6 +110,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   inspector, leaving Start drawing as the single primary action.
 
 ### Added
+- **Openverse as a second image source, with a Source selector.** Online image
+  search now supports Openverse (`api.openverse.org`, no API key) alongside
+  Wikimedia Commons, and defaults to Openverse for its much broader coverage
+  (CC-licensed Flickr, museum, and stock images). A **Search source** dropdown
+  in the Image header switches providers, the choice persists as
+  `image_search_provider` in `config.json`, and changing it re-runs the current
+  query. The "no results" message now names the source and suggests switching.
 - **Drawing settings are per target.** Each target remembers its own timing,
   detail, jump, and option flags under `drawing_by_target` in `config.json`, so
   a fast MS Paint tune no longer leaks into skribbl (which drops fast synthetic
@@ -103,9 +128,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   a file path, it opens a Pinterest-style results gallery: a masonry grid of
   thumbnails that pages in more results as you scroll. Click a tile (or press
   Enter twice) to commit it to the preview; a **← Results** button returns to the
-  grid. Results come from Wikimedia Commons (no API key) in relevance order with
-  no drawing/photo bias, and the chosen image shows its title/source under the
-  preview. Path-shaped input still reports "file not found" instead of
+  grid. Results come from the selected source — Openverse (default) or
+  Wikimedia Commons, both keyless — in relevance order with no drawing/photo
+  bias, and the chosen image shows its title/source under the preview. Path-shaped input still reports "file not found" instead of
   searching.
 - **Transparent PNG backgrounds are no longer painted black.** The pipeline
   converted images to RGBA but ignored alpha, so fully transparent pixels

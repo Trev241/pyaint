@@ -382,6 +382,104 @@ def test_image_preview_accepts_file_drops(app):
         preview.close()
 
 
+def test_image_preview_accepts_remote_url_drops(app):
+    """Browser drags carry a URL, not a local file, so they must be accepted."""
+    from PySide6.QtCore import QByteArray, QMimeData, QPoint, Qt
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+
+    from pyaint.ui.widgets import ImagePreview
+
+    preview = ImagePreview()
+    seen = []
+    preview.remoteDropped.connect(seen.append)
+    try:
+        mime = QMimeData()
+        mime.setData("text/uri-list", QByteArray(b"https://example.com/cat.png"))
+        enter = QDragEnterEvent(
+            QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        preview.dragEnterEvent(enter)
+        assert preview.property("dragActive") == "true"
+
+        drop = QDropEvent(
+            QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        preview.dropEvent(drop)
+        assert seen == ["https://example.com/cat.png"]
+        assert preview.property("dragActive") == "false"
+    finally:
+        preview.close()
+
+
+def test_image_preview_accepts_data_uri_drops(app):
+    from PySide6.QtCore import QByteArray, QMimeData, QPoint, Qt
+    from PySide6.QtGui import QDropEvent
+
+    from pyaint.ui.widgets import ImagePreview
+
+    preview = ImagePreview()
+    seen = []
+    preview.remoteDropped.connect(seen.append)
+    uri = "data:image/png;base64,iVBORw0KGgo="
+    try:
+        mime = QMimeData()
+        mime.setData("text/plain", QByteArray(uri.encode()))
+        drop = QDropEvent(
+            QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        preview.dropEvent(drop)
+        assert seen == [uri]
+    finally:
+        preview.close()
+
+
+def test_remote_source_prefers_image_url_over_page_url():
+    from PySide6.QtCore import QByteArray, QMimeData
+
+    from pyaint.ui.widgets import remote_source_from_mime
+
+    mime = QMimeData()
+    mime.setData(
+        "text/html",
+        QByteArray(b'<a href="#"><img src="https://example.com/real.png"></a>'),
+    )
+    mime.setData("text/uri-list", QByteArray(b"https://www.google.com/search?q=cat"))
+    assert remote_source_from_mime(mime) == "https://example.com/real.png"
+
+
+def test_main_window_routes_remote_drops(app, tmp_path, monkeypatch):
+    from PySide6.QtCore import QByteArray, QMimeData
+
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    seen = []
+    monkeypatch.setattr(window, "_load_dropped_url", seen.append)
+    try:
+        mime = QMimeData()
+        mime.setData("text/uri-list", QByteArray(b"https://example.com/a.png"))
+        window._handle_image_drop(mime)
+        assert seen == ["https://example.com/a.png"]
+    finally:
+        window.close()
+
+
+def test_decode_data_uri_and_unwrap_redirect():
+    import base64
+
+    from pyaint.ui.main_window import _decode_data_uri, _unwrap_image_redirect
+
+    payload = base64.b64encode(b"hello").decode()
+    assert _decode_data_uri(f"data:image/png;base64,{payload}") == b"hello"
+
+    wrapped = (
+        "https://www.google.com/imgres?imgurl=https%3A%2F%2Fexample.com%2Fcat.png&tbnid=x"
+    )
+    assert _unwrap_image_redirect(wrapped) == "https://example.com/cat.png"
+    other = "https://example.com/page?url=https://evil.test/x.png"
+    assert _unwrap_image_redirect(other) == other
+
+
 def test_startup_restores_palette_from_saved_coords_without_screenshot(
     app, tmp_path, monkeypatch
 ):
@@ -632,6 +730,47 @@ def test_search_page_task_reports_page(monkeypatch):
     task.signals.ready.connect(lambda generation, page: got.append((generation, page)))
     task.run()
     assert got == [(7, "PAGE")]
+
+
+def test_image_source_selector_defaults_and_persists(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    import pyaint.image_search as image_search
+
+    window = MainWindow(Bot())
+    try:
+        assert window._provider == image_search.DEFAULT_PROVIDER == "openverse"
+        assert window._provider_combo.currentData() == "openverse"
+
+        window._provider_combo.setCurrentIndex(
+            window._provider_combo.findData("commons")
+        )
+        assert window._provider == "commons"
+        assert window.tools.get("image_search_provider") == "commons"
+    finally:
+        window.close()
+
+    restored = MainWindow(Bot())
+    try:
+        assert restored._provider == "commons"
+        assert restored._provider_combo.currentData() == "commons"
+    finally:
+        restored.close()
+
+
+def test_changing_source_reruns_active_search(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        seen = []
+        monkeypatch.setattr(window, "_start_search", seen.append)
+        window._search_query = "cats"
+        window._image_stack.setCurrentWidget(window._gallery)
+        window._provider_combo.setCurrentIndex(
+            window._provider_combo.findData("commons")
+        )
+        assert seen == ["cats"]
+    finally:
+        window.close()
 
 
 def test_drawing_settings_are_per_target(app):

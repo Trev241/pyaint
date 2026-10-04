@@ -8,6 +8,7 @@ callback that emits a Qt signal, so all UI updates happen on the main thread.
 
 from __future__ import annotations
 
+import base64
 import io
 import os
 import re
@@ -17,6 +18,7 @@ import threading
 import time
 import traceback
 import urllib.error as urllib_error
+import urllib.parse
 import urllib.request
 
 from typing import Optional
@@ -74,7 +76,11 @@ from pyaint.ui.widgets import (
     Section,
     SliderField,
     ToolControls,
+    accepts_image_drop,
+    local_path_from_mime,
     pil_to_qpixmap,
+    raw_image_from_mime,
+    remote_source_from_mime,
 )
 from pyaint.validation import validate_recipe
 
@@ -108,11 +114,37 @@ class WheelGuard(QObject):
 
 
 _PATH_LIKE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|\.{1,2}[\\/]|[\\/]|~)")
+#: Image-search hosts that wrap the real file in a redirect/page URL.
+_REDIRECT_HOSTS = ("google.", "bing.", "duckduckgo.", "yandex.", "search.brave.")
 
 
 def _looks_like_path(text: str) -> bool:
     """True when ``text`` looks like a filesystem path, not a search query."""
     return bool(_PATH_LIKE.match(text))
+
+
+def _decode_data_uri(uri: str) -> bytes:
+    """Decode an ``image/...`` data URI into raw bytes."""
+    header, separator, payload = uri.partition(",")
+    if not separator:
+        raise ValueError("malformed data URI")
+    if ";base64" in header.lower():
+        return base64.b64decode(payload)
+    return urllib.parse.unquote_to_bytes(payload)
+
+
+def _unwrap_image_redirect(url: str) -> str:
+    """Pull the real image URL out of a search-engine result/redirect URL."""
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.netloc.lower()
+    if not parsed.query or not any(marker in host for marker in _REDIRECT_HOSTS):
+        return url
+    params = urllib.parse.parse_qs(parsed.query)
+    for key in ("imgurl", "mediaurl", "image_url", "url"):
+        values = params.get(key)
+        if values and values[0].startswith(("http://", "https://")):
+            return values[0]
+    return url
 
 
 class MainWindow(QMainWindow):
@@ -139,6 +171,7 @@ class MainWindow(QMainWindow):
         self._search_continue = None
         self._search_generation = 0
         self._search_loading = False
+        self._provider = image_search.DEFAULT_PROVIDER
         self._redraw_region = None
         self._recipes = []
         self._recipes_by_name = {}
@@ -527,20 +560,42 @@ class MainWindow(QMainWindow):
         return panel
 
     def _build_image_header(self) -> QWidget:
-        header = QWidget()
+        header = QFrame()
+        header.setObjectName("ImageHeader")
         layout = QVBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(9)
 
+        # Title on the left, search source on the right: one balanced line.
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
         title = QLabel("Image")
-        title.setObjectName("SectionTitle")
-        layout.addWidget(title)
-
-        row = QHBoxLayout()
-        self._url_edit = QLineEdit()
-        self._url_edit.setPlaceholderText(
-            "https://…, C:\\path\\image.png, or search words"
+        title.setObjectName("ImageTitle")
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        source_label = QLabel("Source")
+        source_label.setObjectName("SourceLabel")
+        title_row.addWidget(source_label)
+        self._provider_combo = QComboBox()
+        self._provider_combo.setMinimumWidth(150)
+        for provider in image_search.PROVIDERS:
+            self._provider_combo.addItem(provider.name, provider.id)
+            self._provider_combo.setItemData(
+                self._provider_combo.count() - 1, provider.description, Qt.ToolTipRole
+            )
+        self._provider_combo.setToolTip(
+            "Where online image searches look. Openverse has the broadest coverage."
         )
+        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        title_row.addWidget(self._provider_combo)
+        layout.addLayout(title_row)
+
+        # The source field and its submit action share one row.
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._url_edit = QLineEdit()
+        self._url_edit.setObjectName("SearchField")
+        self._url_edit.setPlaceholderText("Paste a URL or path, or type words to search")
         self._url_edit.setToolTip(
             "Image URL or file path — or type words to search online"
         )
@@ -555,13 +610,16 @@ class MainWindow(QMainWindow):
         self._url_edit.textChanged.connect(self._on_url_changed)
         row.addWidget(self._url_edit, 1)
         self._load_btn = QPushButton("Load")
+        self._load_btn.setObjectName("LoadButton")
         self._load_btn.setToolTip("Load the URL or path, or search for the words above")
         self._load_btn.setEnabled(False)
         self._load_btn.clicked.connect(self._on_load_clicked)
         row.addWidget(self._load_btn)
         layout.addLayout(row)
 
+        # A quiet meta line: back-to-results (when relevant) and the source.
         info_row = QHBoxLayout()
+        info_row.setSpacing(8)
         self._back_btn = QPushButton("← Results")
         self._back_btn.setObjectName("ToolBarButton")
         self._back_btn.setToolTip("Back to the search results")
@@ -569,7 +627,7 @@ class MainWindow(QMainWindow):
         self._back_btn.setVisible(False)
         info_row.addWidget(self._back_btn)
         self._image_info = QLabel("No image loaded.")
-        self._image_info.setObjectName("SectionHint")
+        self._image_info.setObjectName("ImageMeta")
         self._image_info.setWordWrap(True)
         info_row.addWidget(self._image_info, 1)
         layout.addLayout(info_row)
@@ -583,11 +641,13 @@ class MainWindow(QMainWindow):
 
         self._preview = ImagePreview()
         self._preview.fileDropped.connect(self._load_local_path)
+        self._preview.remoteDropped.connect(self._load_dropped_url)
+        self._preview.rawDropped.connect(self._load_dropped_bytes)
         layout.addWidget(self._preview, 1)
 
         hint = QLabel(
-            "Tip: drag an image file onto this preview to load it, or use the "
-            "field above."
+            "Tip: drag an image from a browser or a file onto this preview to "
+            "load it, or use the field above."
         )
         hint.setObjectName("StageHint")
         hint.setWordWrap(True)
@@ -791,6 +851,17 @@ class MainWindow(QMainWindow):
             self._last_url = last_url
             self._url_edit.setText(last_url)
 
+        provider = str(
+            self.tools.get("image_search_provider", image_search.DEFAULT_PROVIDER)
+        )
+        if provider not in image_search.PROVIDER_IDS:
+            provider = image_search.DEFAULT_PROVIDER
+        self._provider = provider
+        provider_index = self._provider_combo.findData(provider)
+        self._provider_combo.blockSignals(True)
+        self._provider_combo.setCurrentIndex(provider_index if provider_index >= 0 else 0)
+        self._provider_combo.blockSignals(False)
+
         self._theme_mode = str(self.tools.get("theme", "auto"))
         if self._theme_mode not in theme.THEME_MODES:
             self._theme_mode = "auto"
@@ -926,6 +997,7 @@ class MainWindow(QMainWindow):
         self.tools["draw_mode"] = self._mode
         self.tools["color_metric"] = self.bot.color_metric
         self.tools["theme"] = self._theme_mode
+        self.tools["image_search_provider"] = self._provider
         if self._last_url:
             self.tools["last_image_url"] = self._last_url
         self._drawing_by_target[self.profile.target] = self._drawing_snapshot()
@@ -1274,16 +1346,31 @@ class MainWindow(QMainWindow):
         self._search_loading = True
         self._pending_source = None
         self._gallery.clear()
-        self._image_message.setText(f'Searching for "{query}"…')
+        provider_name = image_search.provider_name(self._provider)
+        self._image_message.setText(f'Searching {provider_name} for "{query}"…')
         self._image_stack.setCurrentWidget(self._image_message)
         self._back_btn.setVisible(False)
-        self._image_info.setText(f'Searching for "{query}"…')
+        self._image_info.setText(f'Searching {provider_name} for "{query}"…')
         self._request_search_page(None)
+
+    def _on_provider_changed(self, _index: int) -> None:
+        self._provider = (
+            self._provider_combo.currentData() or image_search.DEFAULT_PROVIDER
+        )
+        self._save_config()
+        # Re-run the last search so switching sources is immediately visible.
+        if self._search_query and self._image_stack.currentWidget() in (
+            self._gallery,
+            self._image_message,
+        ):
+            self._start_search(self._search_query)
 
     def _request_search_page(self, cont) -> None:
         from pyaint.ui.search_tasks import SearchPageTask
 
-        task = SearchPageTask(self._search_query, cont, self._search_generation)
+        task = SearchPageTask(
+            self._search_query, cont, self._search_generation, provider=self._provider
+        )
         task.signals.ready.connect(self._on_search_page)
         task.signals.failed.connect(self._on_search_failed)
         QThreadPool.globalInstance().start(task)
@@ -1303,9 +1390,15 @@ class MainWindow(QMainWindow):
             )
             self._start_thumbnails(page.candidates)
         elif self._gallery.count() == 0:
-            self._image_message.setText(f'No images found for "{self._search_query}".')
+            provider_name = image_search.provider_name(self._provider)
+            self._image_message.setText(
+                f'No images found for "{self._search_query}" on {provider_name}.\n'
+                "Try different words, or switch the search source above."
+            )
             self._image_stack.setCurrentWidget(self._image_message)
-            self._image_info.setText(f'No images found for "{self._search_query}".')
+            self._image_info.setText(
+                f'No images found for "{self._search_query}" on {provider_name}.'
+            )
 
     def _on_search_failed(self, generation: int, message: str) -> None:
         if generation != self._search_generation:
@@ -1443,13 +1536,56 @@ class MainWindow(QMainWindow):
 
     # Drag & drop
     def dragEnterEvent(self, event):  # noqa: N802
-        if event.mimeData().hasUrls() and event.mimeData().urls()[0].isLocalFile():
+        if accepts_image_drop(event.mimeData()):
             event.acceptProposedAction()
 
     def dropEvent(self, event):  # noqa: N802
-        urls = event.mimeData().urls()
-        if urls and urls[0].isLocalFile():
-            self._load_local_path(urls[0].toLocalFile())
+        self._handle_image_drop(event.mimeData())
+
+    def _handle_image_drop(self, mime) -> None:
+        """Load an image dropped from anywhere: a file, a browser, or another app."""
+        path = local_path_from_mime(mime)
+        if path:
+            self._load_local_path(path)
+            return
+        remote = remote_source_from_mime(mime)
+        if remote:
+            self._load_dropped_url(remote)
+            return
+        raw = raw_image_from_mime(mime)
+        if raw is not None:
+            self._load_dropped_bytes(raw)
+            return
+        self._set_status("That drop did not contain an image.")
+
+    def _load_dropped_url(self, url: str) -> None:
+        """Load an http(s) or ``data:`` image URL dropped onto the window."""
+        if url.startswith("data:image/"):
+            try:
+                data = _decode_data_uri(url)
+            except Exception as exc:  # noqa: BLE001 - surface it instead of crashing
+                self._set_status(f"Could not read dropped image: {exc}")
+                return
+            self._load_dropped_bytes(data)
+            return
+        url = _unwrap_image_redirect(url)
+        self._url_edit.setText(url)
+        self._start_task(
+            "Download image",
+            lambda: self._download_and_show(url),
+            interruptible=False,
+        )
+
+    def _load_dropped_bytes(self, data: bytes) -> None:
+        """Persist raw dropped image bytes and load them like a local file."""
+        fd, path = tempfile.mkstemp(suffix=".png")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+        except Exception as exc:  # noqa: BLE001 - surface it instead of crashing
+            self._set_status(f"Could not save dropped image: {exc}")
+            return
+        self._load_local_path(path)
 
     # ------------------------------------------------------------------
     # Auto-detection

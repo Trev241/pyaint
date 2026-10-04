@@ -12,6 +12,8 @@ in-flight thumbnails.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from PySide6.QtCore import QObject, QRunnable, Signal
 from PySide6.QtGui import QImage
 
@@ -32,18 +34,21 @@ class _PageSignals(QObject):
 
 
 class SearchPageTask(QRunnable):
-    """Fetch one page of search results."""
+    """Fetch one page of search results from a chosen provider."""
 
-    def __init__(self, query: str, cont, generation: int):
+    def __init__(self, query: str, cont, generation: int, provider: Optional[str] = None):
         super().__init__()
         self.query = query
         self.cont = cont
         self.generation = generation
+        self.provider = provider or image_search.DEFAULT_PROVIDER
         self.signals = _PageSignals()
 
     def run(self) -> None:  # noqa: D102
         try:
-            page = image_search.search_page(self.query, cont=self.cont)
+            page = image_search.search_page(
+                self.query, provider=self.provider, cont=self.cont
+            )
             _safe_emit(self.signals.ready, self.generation, page)
         except Exception as exc:  # noqa: BLE001 - surfaced in the panel
             _safe_emit(self.signals.failed, self.generation, str(exc))

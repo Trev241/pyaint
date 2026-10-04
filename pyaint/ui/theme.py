@@ -534,6 +534,41 @@ def stylesheet(tokens: dict | None = None) -> str:
     #ImagePanel {{
         background: {t['bg']};
     }}
+    #ImageHeader {{
+        background: {t['bg_card']};
+        border: 1px solid {t['border']};
+        border-radius: 6px;
+    }}
+    #ImageTitle {{
+        color: {t['fg']};
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+    }}
+    #SourceLabel {{
+        color: {t['fg_dim']};
+        font-size: 11px;
+    }}
+    #ImageMeta {{
+        color: {t['fg_muted']};
+        font-size: 11px;
+    }}
+    #SearchField {{
+        background: {t['bg_input']};
+        border: 1px solid {t['border_input']};
+        border-radius: 4px;
+        padding: 6px 8px;
+        min-height: 18px;
+    }}
+    #SearchField:focus {{
+        border: 1px solid {t['accent']};
+    }}
+    #LoadButton {{
+        padding: 6px 16px;
+        border-radius: 4px;
+        font-weight: 600;
+    }}
     #PreviewStage {{
         background: {t['bg']};
     }}

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import html
+import re
 from typing import Optional
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -441,6 +443,109 @@ class ToolControls(QFrame):
         self._loading = False
 
 
+# ---------------------------------------------------------------------------
+# Drag & drop helpers
+#
+# Browsers do not hand over image files on a drag: they publish an http(s) URL
+# (``text/uri-list``), an HTML fragment (``text/html``), a ``data:`` URI, or,
+# for some apps, raw image bytes. Only local files appear in ``urls()`` as
+# ``isLocalFile()``; everything else must be recognised from the other formats.
+# ---------------------------------------------------------------------------
+
+_RAW_IMAGE_FORMATS = (
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/gif",
+    "image/bmp",
+    "image/tiff",
+)
+_DATA_URI_RE = re.compile(
+    r"data:image/[A-Za-z0-9.+-]+(?:;base64)?,[A-Za-z0-9+/=%\-_.~]+"
+)
+_IMG_SRC_RE = re.compile(r"""<img[^>]+src\s*=\s*["']?([^"'\s>]+)""", re.IGNORECASE)
+_URL_IN_TEXT_RE = re.compile(r"(?:https?://|data:image/)[^\s\"'<>]+")
+
+
+def _mime_text(mime, fmt: str) -> str:
+    """Decode a textual MIME payload, tolerating malformed clipboard data."""
+    if not mime.hasFormat(fmt):
+        return ""
+    try:
+        return bytes(mime.data(fmt)).decode("utf-8", "ignore")
+    except Exception:  # noqa: BLE001 - a bad payload is not fatal
+        return ""
+
+
+def local_path_from_mime(mime) -> Optional[str]:
+    """The first dropped local file path, if any."""
+    if not mime.hasUrls():
+        return None
+    for url in mime.urls():
+        if url.isLocalFile():
+            return url.toLocalFile()
+    return None
+
+
+def remote_source_from_mime(mime) -> Optional[str]:
+    """The first droppable remote image source: an http(s) or ``data:`` URL.
+
+    A real image URL is preferred over an embedded ``data:`` thumbnail, so a
+    browser drag from an image grid loads the full-resolution file when one is
+    offered.
+    """
+    html_text = _mime_text(mime, "text/html")
+    html_match = _IMG_SRC_RE.search(html_text) if html_text else None
+    if html_match:
+        candidate = html.unescape(html_match.group(1)).strip()
+        if candidate.startswith(("http://", "https://")):
+            return candidate
+    if mime.hasUrls():
+        for url in mime.urls():
+            text = url.toString()
+            if text.startswith(("http://", "https://")):
+                return text
+    for fmt in ("text/html", "text/uri-list", "text/plain"):
+        text = _mime_text(mime, fmt)
+        if not text:
+            continue
+        data_match = _DATA_URI_RE.search(text)
+        if data_match:
+            return data_match.group(0)
+        url_match = _URL_IN_TEXT_RE.search(text)
+        if url_match:
+            return url_match.group(0)
+    return None
+
+
+def raw_image_from_mime(mime) -> Optional[bytes]:
+    """Raw image bytes carried directly in the drag payload."""
+    for fmt in _RAW_IMAGE_FORMATS:
+        if mime.hasFormat(fmt):
+            raw = bytes(mime.data(fmt))
+            if raw:
+                return raw
+    image_data = mime.imageData() if mime.hasImage() else None
+    if isinstance(image_data, QByteArray):
+        return bytes(image_data)
+    if isinstance(image_data, (QImage, QPixmap)):
+        buffer = QBuffer()
+        buffer.open(QIODevice.WriteOnly)
+        image_data.save(buffer, "PNG")
+        return bytes(buffer.data())
+    return None
+
+
+def accepts_image_drop(mime) -> bool:
+    """Whether a drag payload can become an image (local, remote, or raw)."""
+    return bool(
+        local_path_from_mime(mime)
+        or remote_source_from_mime(mime)
+        or raw_image_from_mime(mime) is not None
+    )
+
+
 class ImagePreview(QLabel):
     """A label that scales its pixmap to fit while preserving aspect ratio.
 
@@ -449,6 +554,8 @@ class ImagePreview(QLabel):
     """
 
     fileDropped = Signal(str)
+    remoteDropped = Signal(str)
+    rawDropped = Signal(bytes)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -472,23 +579,13 @@ class ImagePreview(QLabel):
         self._rescale()
 
     # -- drag & drop ----------------------------------------------------
-    @staticmethod
-    def _first_local_file(event) -> Optional[str]:
-        mime = event.mimeData()
-        if not mime.hasUrls():
-            return None
-        for url in mime.urls():
-            if url.isLocalFile():
-                return url.toLocalFile()
-        return None
-
     def dragEnterEvent(self, event):  # noqa: N802
-        if self._first_local_file(event):
+        if accepts_image_drop(event.mimeData()):
             self._set_drag_active(True)
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event):  # noqa: N802
-        if self._first_local_file(event):
+        if accepts_image_drop(event.mimeData()):
             event.acceptProposedAction()
 
     def dragLeaveEvent(self, event):  # noqa: N802
@@ -496,11 +593,20 @@ class ImagePreview(QLabel):
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event):  # noqa: N802
-        path = self._first_local_file(event)
+        mime = event.mimeData()
+        path = local_path_from_mime(mime)
+        remote = None if path else remote_source_from_mime(mime)
+        raw = None if (path or remote) else raw_image_from_mime(mime)
         self._set_drag_active(False)
         if path:
             event.acceptProposedAction()
             self.fileDropped.emit(path)
+        elif remote:
+            event.acceptProposedAction()
+            self.remoteDropped.emit(remote)
+        elif raw is not None:
+            event.acceptProposedAction()
+            self.rawDropped.emit(raw)
 
     def _set_drag_active(self, active: bool) -> None:
         if getattr(self, "_drag_active", False) == active:

@@ -127,19 +127,27 @@ CIEDE2000; `metric="rgb"` uses the legacy squared Euclidean distance.
 ## Image search
 
 `pyaint.image_search` — keyless, paged lookup used when the Image field holds
-search words instead of a URL or path. It queries Wikimedia Commons and returns
-results in the search engine's relevance order (no drawing/photo bias).
+search words instead of a URL or path. Two providers are supported and the UI
+has a **Search source** selector: **Openverse** (default; broad, CC-licensed
+coverage from Flickr, museums, and more) and **Wikimedia Commons**
+(encyclopedic — strong for diagrams). Results come back in the engine's
+relevance order (no drawing/photo bias). Openverse caps anonymous requests at
+20 results per page; `_search_openverse` clamps `limit` to that so paging never
+hits its HTTP 401 `page_size` error.
 
 | Function | Description |
 |----------|-------------|
-| `search_page(query, *, cont=None, limit=30, thumb_width=240)` | One page of results → `SearchPage` |
+| `search_page(query, *, provider="openverse", cont=None, limit=30, thumb_width=240)` | One page of results → `SearchPage` |
 | `fetch_bytes(url)` | Download an image (thumbnails and commits) |
+| `PROVIDERS` / `PROVIDER_IDS` / `provider_name(id)` | The selectable sources and their labels |
 
 `SearchPage` has `candidates` (a list of `ImageCandidate`) and `next_continue`
-(the MediaWiki continuation token for the next page, or `None`).
+(the provider's token for the next page — a MediaWiki continuation dict or an
+Openverse page number — or `None`).
 `ImageCandidate` carries `url` (full), `thumb_url`, `mime`, `title`,
 `source_url`, `width`, and `height`. SVG and formats PIL cannot open are
-filtered out. The gallery's async fetching lives in `pyaint/ui/search_tasks.py`
+filtered out. `provider` is persisted as `image_search_provider` in
+`config.json`. The gallery's async fetching lives in `pyaint/ui/search_tasks.py`
 (`SearchPageTask`, `ThumbnailTask`), which emit on the global `QThreadPool` so
 browsing never blocks the drawing worker.
 
