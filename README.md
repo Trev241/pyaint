@@ -78,11 +78,11 @@ python main.py
 
 ### 2. Draw
 
-1. Pick your app in the **Target App** dropdown (Setup panel).
+1. Pick your app in the **Drawing in** target switcher (top bar).
 2. Click **Auto-detect** — make sure the canvas is **blank**, the app is
-   maximized on the primary monitor at 100% scaling, then confirm the
-   **Detection** tab. Or click **Teach manually** and click the canvas and
-   palette corners.
+   maximized on the primary monitor at 100% scaling, then review and confirm
+   the on-screen detection overlay. Or click **Teach manually** and click the
+   canvas and palette corners.
 3. Load an image from a file, a URL, or drag one in (a file *or* straight from
    a browser) — or type words like *cartoon cat* to search online. Pick the
    **Search source** (Openverse by default, or Wikimedia Commons).
@@ -92,7 +92,7 @@ That's it. For skribbl.io the first draw should take about a minute.
 
 > **Honest note:** auto-detection is tuned against specific window layouts and
 > resolutions. If it can't find a region it falls back to manual teaching, so
-> always check the **Detection** preview before applying.
+> always review the on-screen detection overlay before applying.
 
 ## How it works
 
@@ -127,7 +127,7 @@ source checkout) and are written whenever you change something in the UI.
 Options include **Ignore White Pixels**, **New Layer**, **Skip First Color**,
 and **MSPaint Mode** (double-click swatches).
 
-For a full reference see [`Docs/configuration.md`](Docs/configuration.md).
+For a full reference see [`docs/configuration.md`](docs/configuration.md).
 
 ## Target recipes
 
@@ -156,7 +156,7 @@ detection is tuned for Windows apps.
 **Colors are wrong.**
 Re-run **Auto-detect** (or **Setup**) so the palette grid is sampled from the
 swatch centres, and lower **Detail** for more detail. See
-[`Docs/troubleshooting.md`](Docs/troubleshooting.md).
+[`docs/troubleshooting.md`](docs/troubleshooting.md).
 
 **Drawing is too slow / too fast.**
 Adjust **Time per stroke** and **Detail**. **Prepare & cache** skips processing
@@ -188,10 +188,11 @@ responsible for complying with the terms of service of any app you use it with.
 
 ## Documentation
 
-- [Configuration](Docs/configuration.md)
-- [Architecture](Docs/architecture.md)
-- [Troubleshooting](Docs/troubleshooting.md)
-- [API reference](Docs/api.md)
+- [Configuration](docs/configuration.md)
+- [Architecture](docs/architecture.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [API reference](docs/api.md)
+- [Releasing](docs/releasing.md)
 - [Changelog](CHANGELOG.md)
 
 ## Development
@@ -203,7 +204,7 @@ python main.py               # GUI (Windows)
 python scripts/build_exe.py  # build dist/pyaint.exe
 ```
 
-The test suite is fully headless (109 tests); the GUI and screen input are
+The test suite is fully headless (163 tests); the GUI and screen input are
 verified manually on Windows.
 
 ## License

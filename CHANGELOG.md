@@ -52,6 +52,14 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   eagerly.
 
 ### Changed
+- **Artifacts are removed at the source, not patched up in the planner.**
+  Image fitting used nearest-neighbour point sampling, so a single
+  compression/anti-aliasing pixel could become a stray cell and the LAYERED,
+  SLOTTED, and OUTLINE modes then painted/outlined it as a fragment. Fitting now
+  supersamples each output cell and takes the **modal palette colour**
+  (`planner.quantize_image`), which outvotes isolated noise and never invents
+  blend colours. It uses numpy (new dependency) for the vectorised CIEDE2000
+  matching and falls back to the old single-sample path if numpy is unavailable.
 - **The Image panel header is now a single tidy card.** The title and search
   source share one line (source right-aligned), the source field and Load
   button share the next, and the resolution/source line sits quietly beneath.
@@ -110,6 +118,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   inspector, leaving Start drawing as the single primary action.
 
 ### Added
+- **Outline mode now has an adjustable stroke distance.** When **Outline** is
+  selected, a **Stroke distance** slider appears in the Stroke mode section. It
+  controls how many traced boundary cells are batched into a single stroke
+  (`1` traces every cell separately; higher values join them into fewer, longer
+  strokes). The value is stored per target alongside the other drawing settings,
+  is included in the precompute cache key, and flows through
+  `Bot.stroke_distance` to `planner.plan_image` / `plan_region_image`.
 - **Openverse as a second image source, with a Source selector.** Online image
   search now supports Openverse (`api.openverse.org`, no API key) alongside
   Wikimedia Commons, and defaults to Openverse for its much broader coverage

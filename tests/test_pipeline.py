@@ -286,6 +286,34 @@ def test_cache_filename_depends_on_color_metric(tmp_path, monkeypatch):
     assert rgb_name != ciede_name
 
 
+def test_cache_filename_depends_on_stroke_distance(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = write_image(tmp_path, {(0, 0): RED}, (2, 1))
+    bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
+    bot.stroke_distance = 1
+    fine = bot.get_cache_filename(path)
+    bot.stroke_distance = 5
+    coarse = bot.get_cache_filename(path)
+    assert fine != coarse
+
+
+def test_process_outline_honours_stroke_distance(tmp_path):
+    pixels = {
+        (x, y): (RED if (x + y) % 2 == 0 else BLUE)
+        for x in range(6)
+        for y in range(6)
+    }
+    path = write_image(tmp_path, pixels, (6, 6))
+    bot = make_bot(step=1, canvas=(0, 0, 6, 6), positions=POSITIONS)
+    bot.stroke_distance = 1
+    fine = bot.process(path, mode=Bot.OUTLINE)
+    bot.stroke_distance = 5
+    coarse = bot.process(path, mode=Bot.OUTLINE)
+    fine_count = sum(len(lines) for lines in fine.values())
+    coarse_count = sum(len(lines) for lines in coarse.values())
+    assert coarse_count <= fine_count
+
+
 def test_precompute_then_load_round_trip(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     path = write_image(tmp_path, {(0, 0): RED, (1, 0): BLUE}, (2, 1))

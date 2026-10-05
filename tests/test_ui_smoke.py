@@ -64,6 +64,23 @@ def test_main_window_has_tool_controls(app, tmp_path, monkeypatch):
         window.close()
 
 
+def test_stroke_distance_only_shown_for_outline(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        layered = window._mode_combo.findData(Bot.LAYERED)
+        outline = window._mode_combo.findData(Bot.OUTLINE)
+        window._mode_combo.setCurrentIndex(layered)
+        assert window._stroke_distance.isHidden()
+        window._mode_combo.setCurrentIndex(outline)
+        assert not window._stroke_distance.isHidden()
+        window._stroke_distance.set_value(4, emit=True)
+        assert bot.stroke_distance == 4
+    finally:
+        window.close()
+
+
 def test_progress_overlay_updates(app):
     from PySide6.QtCore import Qt
 

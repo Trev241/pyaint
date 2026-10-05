@@ -55,7 +55,7 @@ def make_bot(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(time, "sleep", lambda *_: None)
     bot = Bot()
-    bot.progress_overlay_enabled = False  # avoid Tk
+    bot.progress_overlay_enabled = False  # avoid the progress overlay
     bot.init_canvas((0, 0, 100, 100))
     bot.init_palette(colors_pos=dict(POSITIONS))
     fake = FakePainter()

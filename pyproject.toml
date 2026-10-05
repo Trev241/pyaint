@@ -41,6 +41,7 @@ dependencies = [
     "pyscreeze",
     "PyAutoGUI",
     "pynput",
+    "numpy",
     "PySide6>=6.5",
 ]
 

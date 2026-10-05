@@ -12,8 +12,8 @@
 ## Colours are wrong
 
 - Re-run **Auto-detect** (or teach the palette) so the swatch centres are
-  sampled correctly. The **Detection** tab draws a dot at each cell centre —
-  check the dots sit inside the swatches.
+  sampled correctly. The on-screen detection overlay draws a dot at each cell
+  centre — check the dots sit inside the swatches.
 - Reduce **Detail** for more detail.
 - Make sure a palette colour isn't being sampled from a border/gap.
 
@@ -49,7 +49,7 @@ The UI is not blocking during a draw — the engine runs on a worker thread.
 
 ## Reset
 
-- **Settings → Files → Reset config** deletes `config.json` (taught positions
+- **Advanced → Files → Reset config** deletes `config.json` (taught positions
   and preferences). Restart to use defaults.
 - The `cache/` directory is removed on exit; delete it manually to force
   reprocessing.

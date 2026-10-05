@@ -26,7 +26,18 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # Pyaint only needs Pillow/PyAutoGUI/pynput/PySide6. Exclude heavy
+    # scientific stacks that PyInstaller would otherwise pull in from whatever
+    # happens to be installed in the build environment.
+    excludes=[
+        "numpy",
+        "cv2",
+        "scipy",
+        "matplotlib",
+        "pandas",
+        "IPython",
+        "pytest",
+    ],
     noarchive=False,
 )
 

@@ -52,20 +52,24 @@ launcher shim.
 ```
 pyaint/
 ├── __main__.py        entry point (python -m pyaint)
-├── bot.py             engine facade (Bot): process + draw
+├── bot.py             facade (Bot.process) + executor (Bot.draw)
+├── planner.py         pure planning: image → colour grid → cmap
 ├── painter.py         screen-input driver (ScreenPainter)
 ├── palette.py         swatch sampling + nearest colour
 ├── profile.py         Profile: single source of truth for the environment
 ├── config.py          config.json I/O + env/prefs split
 ├── targets.py         target recipes + registry
 ├── locators.py        canvas/palette auto-detection
-├── annotate.py        detection preview drawing (regions + swatch centres)
+├── annotate.py        palette/detection preview drawing (used by Setup + tests)
 ├── validation.py      recipe self-tests
 ├── cache.py           pre-computation cache (CacheMixin)
 ├── ui/                PySide6 (Qt) desktop UI
-│   ├── main_window.py  main window: panels, tabs, toolbar, status bar
+│   ├── main_window.py  hub: target bar, preview, inspector, action/status bars
 │   ├── setup_dialog.py setup wizard (manual tool teaching)
 │   ├── capture.py      full-screen click-capture overlay
+│   ├── overlay.py      detection-review overlay + progress overlay
+│   ├── countdown.py    pre-capture countdown banner
+│   ├── search_tasks.py threaded image-search/thumbnail tasks
 │   ├── theme.py        VS Code-style design tokens + stylesheet
 │   ├── icons.py        QPainter-drawn line icons
 │   └── widgets.py      reusable widgets
@@ -90,8 +94,10 @@ holds a reference to the same instance, so there is nothing to merge back.
 
 - **Environment** (owned by `Profile`): the tool entries, `MSPaint Mode`,
   `target`.
-- **Preferences** (owned by `Window`): `pause_key`, `drawing_settings`,
-  `drawing_options`, `skip_first_color`, `last_image_url`, `theme`, `draw_mode`.
+- **Preferences** (owned by `MainWindow`): `pause_key`, `drawing_settings`,
+  `drawing_options`, `drawing_by_target`, `environments`, `skip_first_color`,
+  `last_image_url`, `theme`, `draw_mode`, `color_metric`,
+  `image_search_provider`.
 
 Legacy environment keys from older versions (`Custom Colors`,
 `color_preview_spot`, `color_selection`) are dropped on load.
@@ -100,15 +106,21 @@ See [`configuration.md`](configuration.md).
 
 ### Processing
 
-`Bot.process()` opens the image, scales it to fit the canvas, downscales by the
-pixel step, then `_encode_rows()` maps each pixel to the nearest palette colour
-and closes a run whenever the colour changes or a row ends.
+The pure planner (`planner.py`) does the work; `Bot.process()` just gathers the
+environment and delegates. `fit_to_canvas()` fits and centres the image,
+`quantize_image()` supersamples each cell and majority-votes in palette space to
+produce the shared colour grid (removing isolated compression / anti-aliasing
+artifacts at the source), and `plan()` turns that grid into a stroke map.
 
 - **Layered** (default): builds per-row colour tables, then `_merge_layers()`
   sorts colours by frequency and repaints lower layers, yielding fewer strokes.
 - **Slotted**: a direct colour → list-of-runs map.
+- **Outline** (`plan_regions`): traces region boundaries into
+  `OUTLINE_COLOUR` strokes. Its `stroke_distance` option batches several
+  traced cells into one stroke (`1` = one stroke per traced cell).
 
-`process_region()` reuses the same encoder for partial redraws.
+`process_region()` reuses `fit_region()` + the same quantize/plan steps for
+partial redraws.
 
 ### Drawing
 
@@ -121,10 +133,11 @@ replays each run as a segmented drag. It supports pause/resume (state is kept in
 
 `locators.py` finds the canvas and palette from a screenshot using declarative
 specs from the active recipe: `white_rect`, `color_rect`, `center_rect`,
-`color_grid`, `color_signature`, and `window_relative`. `annotate.py` draws the
-detected regions and the palette swatch centres into the **Detection** tab so
-the result can be confirmed visually. Detection is pure over a PIL image
-(headlessly testable); failures fall back to manual teaching.
+`color_grid`, `color_signature`, and `window_relative`. Detection is pure over a
+PIL image (headlessly testable); failures fall back to manual teaching. Review
+happens on screen: `overlay.py` dims the desktop, spotlights the detected
+canvas/palette with palette cell-centre dots, and offers Use / Try again /
+Teach manually / Not now.
 
 ### Caching
 
@@ -150,6 +163,7 @@ not code. A recipe can be extended and overridden by dropping a JSON file in
 - [Troubleshooting](troubleshooting.md)
 - [API reference](api.md)
 - [Architecture details](architecture.md)
+- [Releasing](releasing.md)
 
 ## Development
 

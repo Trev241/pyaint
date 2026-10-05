@@ -21,6 +21,9 @@ UI.
   "color_metric": "ciede2000",
   "skip_first_color": false,
   "last_image_url": "",
+  "image_search_provider": "openverse",
+  "drawing_by_target": {},
+  "environments": {},
   "target": "generic",
 
   "Palette": { "status": true, "box": [x1, y1, x2, y2], "rows": 6, "cols": 8,
@@ -42,8 +45,9 @@ Two groups:
   `Color Button Okay`, `MSPaint Mode`, `target`) — owned by the shared
   `Profile`.
 - **Preferences** (`drawing_settings`, `drawing_options`, `drawing_by_target`,
-  `pause_key`, `theme`, `draw_mode`, `color_metric`, `skip_first_color`,
-  `last_image_url`) — owned by the window.
+  `environments`, `pause_key`, `theme`, `draw_mode`, `color_metric`,
+  `skip_first_color`, `last_image_url`, `image_search_provider`) — owned by the
+  window.
 
 Legacy keys from older versions (`Custom Colors`, `color_preview_spot`,
 `color_selection`) are ignored and dropped on the next save.
@@ -103,4 +107,4 @@ and `target` `generic`.
 
 ## Resetting
 
-Use **Settings → Files → Reset config**, or delete `config.json` and restart.
+Use **Advanced → Files → Reset config**, or delete `config.json` and restart.

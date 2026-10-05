@@ -28,7 +28,10 @@ class CacheMixin:
         image_hash = hashlib.md5(image_data).hexdigest()[:8]
 
         metric = getattr(self, "color_metric", "ciede2000")
-        settings_str = f"{self.settings}_{flags}_{mode}_{canvas_info}_{metric}"
+        stroke_distance = getattr(self, "stroke_distance", 1)
+        settings_str = (
+            f"{self.settings}_{flags}_{mode}_{canvas_info}_{metric}_{stroke_distance}"
+        )
         settings_hash = hashlib.md5(settings_str.encode()).hexdigest()[:8]
 
         # Create cache directory if it doesn't exist
@@ -57,6 +60,7 @@ class CacheMixin:
             'settings': self.settings.copy(),
             'flags': flags,
             'mode': mode,
+            'stroke_distance': getattr(self, "stroke_distance", 1),
             'canvas': self._canvas,
             'image_hash': hashlib.md5(open(image_path, 'rb').read()).hexdigest()[:8],
             'timestamp': time.time(),

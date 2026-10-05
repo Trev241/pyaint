@@ -5,21 +5,16 @@ quick start, see the [root README](../README.md).
 
 ## Bird's-eye view
 
-Pyaint is Windows-only screen-automation software. It has three conceptual
-layers:
+Pyaint is Windows-only screen-automation software. It has four conceptual
+layers, separated by a purity boundary (the planner has no screen access and no
+session state):
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ UI          pyaint/ui/window.py, pyaint/ui/setup.py     │
-│             (Tk widgets, threads, config persistence)   │
-├─────────────────────────────────────────────────────────┤
-│ Planner     pyaint/bot.py                               │
-│             image → cmap → ordered stroke execution     │
-├─────────────────────────────────────────────────────────┤
-│ Driver      pyaint/painter.py (ScreenPainter)           │
-│             screen capture + synthetic mouse/keyboard   │
-└─────────────────────────────────────────────────────────┘
-```
+| Layer | Module | Responsibility |
+|-------|--------|----------------|
+| UI | `pyaint/ui/` | PySide6 window, worker threads, config persistence |
+| Planner | `pyaint/planner.py` | **pure** — image → colour grid → `cmap` |
+| Executor | `pyaint/bot.py` | `Bot` facade + `Bot.draw`: pause/resume, progress, strokes |
+| Driver | `pyaint/painter.py` | `ScreenPainter`: screen capture + synthetic input |
 
 Supporting data and helpers: `profile.py` (taught environment), `targets.py`
 (recipes), `locators.py` (auto-detection), `annotate.py` (preview),
@@ -32,16 +27,16 @@ seam (code).
 ## The shared Profile
 
 Both the UI and the engine need the same environment geometry. Rather than
-keeping two copies, `Window` creates one `Profile` and hands a reference to
+keeping two copies, `MainWindow` creates one `Profile` and hands a reference to
 `Bot`:
 
 ```
-Window ─┐
-        ├── self.profile ──▶ Profile (tools, mspaint_mode, target)
-Bot ────┘
+MainWindow ─┐
+            ├── self.profile ──▶ Profile (tools, mspaint_mode, target)
+Bot ────────┘
 ```
 
-`SetupWindow` receives that same object and mutates it in place, so nothing has
+`SetupDialog` receives that same object and mutates it in place, so nothing has
 to be merged back after setup. `Bot` exposes read-only `@property` views
 (`new_layer`, `color_button`, `_canvas`, …) so the engine's historical
 attribute access keeps working.
@@ -54,8 +49,10 @@ attribute access keeps working.
 `config.json` mixes two concerns and is split on load:
 
 - **Environment** → `Profile`: the tool entries, `MSPaint Mode`, `target`.
-- **Preferences** → `Window.tools`: `pause_key`, `drawing_settings`,
-  `drawing_options`, `skip_first_color`, `last_image_url`, `theme`, `draw_mode`.
+- **Preferences** → `MainWindow.tools`: `pause_key`, `drawing_settings`,
+  `drawing_options`, `drawing_by_target`, `environments`, `skip_first_color`,
+  `last_image_url`, `theme`, `draw_mode`, `color_metric`,
+  `image_search_provider`.
 
 On save the two are merged: `{**preferences, **profile.to_config()}`. Legacy
 environment keys from older versions are dropped on load.
@@ -72,26 +69,29 @@ reversed corners).
 
 ## Processing pipeline
 
-`Bot.process(file, flags, mode)`:
+The pure half lives in `pyaint/planner.py`; `Bot.process()` is a thin facade
+that opens the image, reads the canvas, and hands the rest over:
 
-1. Open the image and convert to `RGBA`.
-2. Read the canvas rect (`NoCanvasError` if unset).
-3. Compute the fitted, centred size with `utils.adjusted_img_size()`.
-4. Downscale by the pixel step with `Image.Resampling.NEAREST`.
-5. Call `_encode_rows()`.
+1. `fit_to_canvas()` — fit/centre the image and report the output grid size
+   (`utils.adjusted_img_size`). It no longer downsamples.
+2. `quantize_image(image, (tw, th), palette, metric, flags)` — supersample each
+   output cell, map every sample to the nearest palette colour, and take the
+   **majority**. Voting in palette space removes isolated compression /
+   anti-aliasing artifacts without inventing blend colours, producing the
+   colour grid; transparent cells become `None` when `IGNORE_TRANSPARENT` is
+   set. This is the **shared boundary**: every planning mode consumes the same
+   grid. (`quantize()` remains the single-sample fallback.)
+3. `plan(grid, xo, yo, step, flags, mode)` — dispatch to the mode planner:
+   - **Slotted** / **Layered** (`plan_rows`): run-length encode the grid.
+     Slotted appends every run directly; Layered accumulates per-row tables and
+     then `_merge_layers()` sorts colours by frequency and merges lower-layer
+     runs into fewer strokes.
+   - **Outline** (`plan_regions`): traces region boundaries and emits them as
+     strokes. `stroke_distance` controls how many traced cells each stroke
+     batches (1 = one stroke per traced cell).
 
-`_encode_rows(pix, w, h, xo, y, step, flags, mode)` walks the downsampled grid,
-resolves each pixel's colour (memoised per RGB), and closes a run when the
-colour changes or the row ends. Each run goes to `_emit_run()`.
-
-- **Slotted**: `cmap.setdefault(color, []).append((start, end))`, honouring
-  `IGNORE_WHITE`.
-- **Layered**: accumulate per-row `(color, run)` tables and colour frequencies,
-  then `_merge_layers()` sorts colours by descending frequency and merges
-  lower-layer runs into fewer strokes.
-
-`process_region()` crops, scales, and reuses the same encoder for partial
-redraws.
+`process_region()` uses `fit_region()` + the same quantize/plan steps for
+partial redraws.
 
 ## Drawing execution
 
@@ -152,11 +152,15 @@ failure is silent so the UI can fall back to manual teaching.
 
 ## UI and threading
 
-The UI is built with **PySide6** (`pyaint/ui/`). `MainWindow` is a VS Code-style
-shell: an activity rail selects a sidebar panel (Draw / Image / Settings), the
-content area shows the image preview, and the status bar shows progress. Theme
-tokens live in `theme.py` (VS Code "Dark Modern"), and icons are drawn in
-`icons.py` so no image assets are shipped.
+The UI is built with **PySide6** (`pyaint/ui/`). `MainWindow` is a hub: a top
+bar switches the target app, the preview is the hero content, and a right-hand
+inspector holds the drawing/environment settings, with a readiness strip, an
+action bar, and a status bar. Image search opens a results gallery in the
+content area, and detection review is an on-screen overlay (`overlay.py`).
+Manual click-teaching lives in `setup_dialog.py`/`capture.py`, the auto-detect
+countdown in `countdown.py`, and the gallery's async fetch in `search_tasks.py`.
+Theme tokens live in `theme.py` (VS Code "Dark Modern"/"Light Modern"), and
+icons are drawn in `icons.py` so no image assets are shipped.
 
 Long-running work (precompute, test draw, draw, region redraw) runs
 on daemon `threading.Thread`s. `Bot` reports progress through

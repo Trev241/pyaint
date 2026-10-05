@@ -4,6 +4,11 @@ import math
 
 import pyautogui
 
+try:  # numpy is an optional accelerator for palette-aware downsampling
+    import numpy as _np
+except ImportError:  # pragma: no cover - only when numpy is not installed
+    _np = None
+
 # Colour-matching metrics. ``ciede2000`` is the perceptual default; ``rgb`` is
 # the legacy squared-Euclidean metric, kept selectable for comparison.
 METRIC_CIEDE2000 = "ciede2000"
@@ -100,6 +105,94 @@ def ciede2000(lab1, lab2):
     )
 
 
+# ---------------------------------------------------------------------------
+# Vectorised colour maths (optional; used by the palette-aware downsampler).
+# The scalar functions above remain the reference implementation.
+# ---------------------------------------------------------------------------
+_CIEDE_CHUNK_ELEMENTS = 500_000
+
+
+def _rgb_to_lab_array(rgb):
+    """Vectorised sRGB ``(..., 3)`` to CIELAB ``(..., 3)`` conversion."""
+    c = _np.asarray(rgb, dtype=_np.float64) / 255.0
+    c = _np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    r, g, b = c[..., 0], c[..., 1], c[..., 2]
+    x = 0.4124564 * r + 0.3575761 * g + 0.1804375 * b
+    y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b
+    z = 0.0193339 * r + 0.1191920 * g + 0.9503041 * b
+
+    def f(t):
+        return _np.where(t > _EPSILON, _np.cbrt(t), (_KAPPA * t + 16) / 116)
+
+    fx, fy, fz = f(x / _WHITE_X), f(y / _WHITE_Y), f(z / _WHITE_Z)
+    return _np.stack([116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)], axis=-1)
+
+
+def _ciede2000_array(lab1, lab2):
+    """Vectorised CIEDE2000; broadcasts ``lab1`` and ``lab2``."""
+    l1, a1, b1 = lab1[..., 0], lab1[..., 1], lab1[..., 2]
+    l2, a2, b2 = lab2[..., 0], lab2[..., 1], lab2[..., 2]
+
+    c1, c2 = _np.hypot(a1, b1), _np.hypot(a2, b2)
+    c_bar = 0.5 * (c1 + c2)
+    c_bar7 = c_bar ** 7
+    g = 0.5 * (1 - _np.sqrt(c_bar7 / (c_bar7 + 25 ** 7)))
+
+    a1p, a2p = (1 + g) * a1, (1 + g) * a2
+    c1p, c2p = _np.hypot(a1p, b1), _np.hypot(a2p, b2)
+
+    h1p = _np.degrees(_np.arctan2(b1, a1p)) % 360
+    h1p = _np.where(c1p == 0, 0.0, h1p)
+    h2p = _np.degrees(_np.arctan2(b2, a2p)) % 360
+    h2p = _np.where(c2p == 0, 0.0, h2p)
+
+    dlp = l2 - l1
+    dcp = c2p - c1p
+    dh = h2p - h1p
+    dh = _np.where(dh > 180, dh - 360, dh)
+    dh = _np.where(dh < -180, dh + 360, dh)
+    dhp_deg = _np.where(c1p * c2p == 0, 0.0, dh)
+    dhp = 2 * _np.sqrt(c1p * c2p) * _np.sin(_np.radians(dhp_deg) / 2)
+
+    l_bar_p = 0.5 * (l1 + l2)
+    c_bar_p = 0.5 * (c1p + c2p)
+    h_bar_p = _np.where(
+        c1p * c2p == 0,
+        h1p + h2p,
+        _np.where(
+            _np.abs(h1p - h2p) <= 180,
+            0.5 * (h1p + h2p),
+            _np.where(
+                h1p + h2p < 360,
+                0.5 * (h1p + h2p + 360),
+                0.5 * (h1p + h2p - 360),
+            ),
+        ),
+    )
+
+    t = (
+        1
+        - 0.17 * _np.cos(_np.radians(h_bar_p - 30))
+        + 0.24 * _np.cos(_np.radians(2 * h_bar_p))
+        + 0.32 * _np.cos(_np.radians(3 * h_bar_p + 6))
+        - 0.20 * _np.cos(_np.radians(4 * h_bar_p - 63))
+    )
+    delta_theta = 30 * _np.exp(-(((h_bar_p - 275) / 25) ** 2))
+    c_bar_p7 = c_bar_p ** 7
+    rc = 2 * _np.sqrt(c_bar_p7 / (c_bar_p7 + 25 ** 7))
+    sl = 1 + (0.015 * (l_bar_p - 50) ** 2) / _np.sqrt(20 + (l_bar_p - 50) ** 2)
+    sc = 1 + 0.045 * c_bar_p
+    sh = 1 + 0.015 * c_bar_p * t
+    rt = -_np.sin(_np.radians(2 * delta_theta)) * rc
+
+    return _np.sqrt(
+        (dlp / sl) ** 2
+        + (dcp / sc) ** 2
+        + (dhp / sh) ** 2
+        + rt * (dcp / sc) * (dhp / sh)
+    )
+
+
 def sample_median(pix, x, y, width, height, radius=1):
     """Return the median RGB of a small square neighbourhood around ``(x, y)``.
 
@@ -189,6 +282,69 @@ class Palette:
             self.colors,
             key=lambda color: ciede2000(self._lab(color), query_lab),
         )
+
+    @property
+    def color_list(self):
+        """Palette colours in a stable (sorted) order.
+
+        The vectorised matcher returns indices into this list, so the order is
+        part of the contract -- sorted keeps it deterministic across runs.
+        """
+        lst = getattr(self, "_color_list", None)
+        if lst is None:
+            lst = sorted(self.colors)
+            self._color_list = lst
+        return lst
+
+    def nearest_color_indices(self, queries, metric=DEFAULT_METRIC):
+        """Map an ``(N, 3)`` uint8 array to indices into :attr:`color_list`.
+
+        Numpy-accelerated equivalent of calling :meth:`nearest_color` per row;
+        duplicate colours are matched once. Used by the palette-aware
+        downsampler in :mod:`pyaint.planner`.
+        """
+        if _np is None:
+            raise RuntimeError("numpy is required for vectorised colour matching")
+        if metric not in METRICS:
+            metric = DEFAULT_METRIC
+
+        colors = _np.asarray(self.color_list, dtype=_np.uint8)
+        q = _np.asarray(queries, dtype=_np.uint8).reshape(-1, 3)
+        if q.size == 0:
+            return _np.empty(0, dtype=_np.intp)
+
+        # Deduplicate by packed RGB; flat artwork repeats colours heavily.
+        packed = (
+            (q[:, 0].astype(_np.int64) << 16)
+            | (q[:, 1].astype(_np.int64) << 8)
+            | q[:, 2]
+        )
+        uniq, inverse = _np.unique(packed, return_inverse=True)
+        uq = _np.stack(
+            [
+                ((uniq >> 16) & 255).astype(_np.uint8),
+                ((uniq >> 8) & 255).astype(_np.uint8),
+                (uniq & 255).astype(_np.uint8),
+            ],
+            axis=1,
+        )
+
+        if metric == METRIC_RGB:
+            diff = uq[:, None, :].astype(_np.int32) - colors[None, :, :].astype(_np.int32)
+            nearest = (diff ** 2).sum(axis=2).argmin(axis=1)
+        else:
+            uq_lab = _rgb_to_lab_array(uq)
+            colors_lab = _rgb_to_lab_array(colors)
+            nearest = _np.empty(len(uq), dtype=_np.intp)
+            chunk = max(1, _CIEDE_CHUNK_ELEMENTS // max(1, len(colors)))
+            for start in range(0, len(uq), chunk):
+                stop = start + chunk
+                d = _ciede2000_array(
+                    uq_lab[start:stop, None, :], colors_lab[None, :, :]
+                )
+                nearest[start:stop] = d.argmin(axis=1)
+
+        return nearest[inverse]
 
     def _lab(self, color):
         """Cached sRGB→CIELAB conversion for a palette/query colour."""
