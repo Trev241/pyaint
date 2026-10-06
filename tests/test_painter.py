@@ -155,6 +155,16 @@ def test_press_left_retries_until_button_is_confirmed(monkeypatch):
     assert names(fake).count("mouseDown") == 3
 
 
+def test_focus_target_uses_canvas_centre(monkeypatch):
+    painter, _ = make_painter(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        painter_mod, "_focus_window_at", lambda x, y: calls.append((x, y)) or True
+    )
+    assert painter.focus_target((10, 20, 100, 40)) is True
+    assert calls == [(60, 40)]
+
+
 def test_click_swatch_mspaint_double_clicks(monkeypatch):
     painter, fake = make_painter(monkeypatch)
     painter.bot.profile.mspaint_mode.update({"enabled": True, "delay": 0.2})

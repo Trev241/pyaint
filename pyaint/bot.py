@@ -47,6 +47,10 @@ class Bot(CacheMixin):
         # mouseDown lands within the double-click window of the swatch click and
         # some apps (MS Paint) swallow it as a focus/double-click.
         self.color_settle = 0.4
+        # Replay the very first stroke once. The first synthetic stroke after a
+        # UI interaction can be consumed by window activation; the second
+        # attempt behaves like the strokes that already work.
+        self.prime_first_stroke = True
         # Number of traced boundary cells per stroke in OUTLINE mode.
         self.stroke_distance = planner.STROKE_DISTANCE
         self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
@@ -248,6 +252,18 @@ class Bot(CacheMixin):
         self.terminate = False
         self.paused = False
         self.drawing = True  # Mark as actively drawing
+        # Bring the target window forward: on Windows the first click on an
+        # inactive window is consumed by activation, which silently drops the
+        # first stroke. Do this before any stroke, and tolerate painters/tests
+        # that do not implement focus_target.
+        canvas = getattr(self, "_canvas", None)
+        focus = getattr(self.painter, "focus_target", None)
+        if canvas is not None and focus is not None:
+            try:
+                focus(tuple(canvas))
+            except Exception:
+                pass
+        first_stroke = True
         last_stroke_end = None  # Track last stroke position for jump detection
         self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
         estimated_str = self._format_time(self.estimated_time_seconds)
@@ -382,14 +398,19 @@ class Bot(CacheMixin):
                 # continuous, paced drag; legacy mode replays a single run.
                 # Multi-point polylines can only be drawn as a path.
                 end_pos = line[-1]
-                if self.human_strokes or len(line) > 2:
-                    self.painter.execute_path(
-                        line, self.stroke_speed, self.frame_interval
-                    )
-                else:
-                    self.painter.execute_stroke(
-                        start_pos, end_pos, self.settings[Bot.DELAY]
-                    )
+                attempts = 2 if (first_stroke and self.prime_first_stroke) else 1
+                for _attempt in range(attempts):
+                    if self.terminate:
+                        break
+                    if self.human_strokes or len(line) > 2:
+                        self.painter.execute_path(
+                            line, self.stroke_speed, self.frame_interval
+                        )
+                    else:
+                        self.painter.execute_stroke(
+                            start_pos, end_pos, self.settings[Bot.DELAY]
+                        )
+                first_stroke = False
 
                 # Check for pause after completing the stroke
                 if self.paused or self.terminate:

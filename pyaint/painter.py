@@ -20,6 +20,80 @@ import pyautogui
 from pyaint.log import log
 
 
+def _focus_window_at(x: int, y: int) -> bool:
+    """Bring the top-level window at ``(x, y)`` to the foreground (Windows).
+
+    Clicking an inactive window only activates it on Windows; the click is
+    eaten. That silently drops the first stroke of a drawing, so the target is
+    focused explicitly before any synthetic input. Returns True if a focus
+    attempt was made.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+        user32.WindowFromPoint.restype = wintypes.HWND
+        user32.WindowFromPoint.argtypes = [POINT]
+        user32.GetAncestor.restype = wintypes.HWND
+        user32.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32.BringWindowToTop.argtypes = [wintypes.HWND]
+        user32.AttachThreadInput.argtypes = [
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.BOOL,
+        ]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user32.GetWindowThreadProcessId.argtypes = [
+            wintypes.HWND,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+
+        hwnd = user32.WindowFromPoint(POINT(int(x), int(y)))
+        if not hwnd:
+            return False
+        root = user32.GetAncestor(hwnd, 2)  # GA_ROOT
+        if root:
+            hwnd = root
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+
+        if user32.GetForegroundWindow() != hwnd:
+            # Foreground lock: briefly attach to the current foreground thread
+            # so SetForegroundWindow is permitted, then detach.
+            foreground = user32.GetForegroundWindow()
+            target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+            current_thread = kernel32.GetCurrentThreadId()
+            fg_thread = (
+                user32.GetWindowThreadProcessId(foreground, None)
+                if foreground
+                else 0
+            )
+            attached = []
+            for thread in (fg_thread, target_thread):
+                if thread and thread != current_thread:
+                    if user32.AttachThreadInput(current_thread, thread, True):
+                        attached.append(thread)
+            user32.SetForegroundWindow(hwnd)
+            for thread in attached:
+                user32.AttachThreadInput(current_thread, thread, False)
+        return True
+    except Exception:
+        return False
+
+
 class _PaletteStrategy:
     name = "palette"
 
@@ -73,6 +147,19 @@ class ScreenPainter:
     def __init__(self, bot: Any) -> None:
         self.bot = bot
         self.color_chain = ColorSelectionChain(self)
+
+    # -- window focus ----------------------------------------------------
+    def focus_target(self, canvas) -> bool:
+        """Bring the window under ``canvas`` to the foreground before drawing.
+
+        Without this the first click on an inactive window only activates it
+        and is consumed, so the first stroke draws nothing while every later
+        stroke works. Returns True if a focus attempt was made.
+        """
+        if not canvas:
+            return False
+        x, y, w, h = canvas
+        return _focus_window_at(x + w // 2, y + h // 2)
 
     # -- colour selection ------------------------------------------------
     def resolve_color_source(self, target: Tuple[int, int, int]) -> str:

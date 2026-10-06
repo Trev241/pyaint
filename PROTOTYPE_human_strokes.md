@@ -30,7 +30,7 @@ also routes its segment moves through `_drag_move` for the same reason.
 The first `mouseDown` followed the palette click within the OS double-click
 window, so MS Paint sometimes read it as the tail of a double-click / focus
 click and ignored it (the stroke drew nothing; later strokes were fine).
-Two mitigations:
+Three mitigations, all independent:
 
 - `Bot.color_settle` (default 0.4 s) pauses after selecting a colour before
 the first stroke, breaking the double-click window.
@@ -38,6 +38,12 @@ the first stroke, breaking the double-click window.
 `GetAsyncKeyState(VK_LBUTTON)` and re-sends until the OS confirms the button
 is held, so a dropped first press can't produce an empty stroke. Tests stub
 `_left_is_down` and never touch the real API.
+- `Bot` calls `ScreenPainter.focus_target(canvas)` before drawing, which uses
+`WindowFromPoint` + `SetForegroundWindow` (with an `AttachThreadInput`
+fallback) to make the target window foreground, since the first click on an
+inactive window is consumed by activation. `Bot.prime_first_stroke` (default
+True) additionally replays the very first stroke once so that even if it is
+swallowed, the replay lands exactly like the strokes that already work.
 
 ## What changed
 
@@ -71,6 +77,7 @@ is held, so a dropped first press can't produce an empty stroke. Tests stub
 | `frame_interval` | seconds between `moveTo` events | larger = safer/slower, smaller = higher event rate |
 | `travel_delay` | pause when jumping between strokes | replaces `jump_delay` for path strokes |
 | `color_settle` | pause after selecting a colour | avoid the first stroke being read as a double-click |
+| `prime_first_stroke` | replay the first stroke once | hide a swallowed activation click |
 | `human_strokes` | `False` reverts 2-point runs to `execute_stroke` | A/B comparison for slotted/layered |
 
 ## A/B comparison
