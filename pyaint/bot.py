@@ -26,6 +26,7 @@ class Bot(CacheMixin):
     IGNORE_TRANSPARENT = planner.IGNORE_TRANSPARENT
     ALPHA_CUTOFF = planner.ALPHA_CUTOFF
     STROKE_DISTANCE = planner.STROKE_DISTANCE
+    CANVAS_PADDING = planner.CANVAS_PADDING
 
     def __init__(self, profile=None):
         self.terminate = False
@@ -37,6 +38,20 @@ class Bot(CacheMixin):
         self.jump_threshold = (
             5  # Pixel distance threshold for jump detection (default 5)
         )
+        # Human-like continuous strokes (prototype): one drag per polyline,
+        # paced at ~display refresh instead of one stroke per edge.
+        self.human_strokes = True
+        self.stroke_speed = 1500.0  # px/s of cursor travel
+        self.frame_interval = 1.0 / 60.0  # seconds between moveTo events
+        self.travel_delay = 0.05  # pause when jumping between strokes
+        # Pause after selecting a colour before drawing. Without it the first
+        # mouseDown lands within the double-click window of the swatch click and
+        # some apps (MS Paint) swallow it as a focus/double-click.
+        self.color_settle = 0.4
+        # Prime the first stroke with throwaway clicks. The first synthetic
+        # interaction after a UI change can be consumed by window activation;
+        # this warms the target up without drawing the stroke twice.
+        self.prime_first_stroke = True
         # Number of traced boundary cells per stroke in OUTLINE mode.
         self.stroke_distance = planner.STROKE_DISTANCE
         self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
@@ -238,6 +253,20 @@ class Bot(CacheMixin):
         self.terminate = False
         self.paused = False
         self.drawing = True  # Mark as actively drawing
+        # Bring the target window forward: on Windows the first click on an
+        # inactive window is consumed by activation, which silently drops the
+        # first stroke. Do this before any stroke, and tolerate painters/tests
+        # that do not implement focus_target.
+        canvas = getattr(self, "_canvas", None)
+        focus = getattr(self.painter, "focus_target", None)
+        focused = False
+        if canvas is not None and focus is not None:
+            try:
+                focused = bool(focus(tuple(canvas)))
+            except Exception:
+                focused = False
+        log.info(f"[Focus] target window foreground: {focused}")
+        first_stroke = True
         last_stroke_end = None  # Track last stroke position for jump detection
         self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
         estimated_str = self._format_time(self.estimated_time_seconds)
@@ -278,6 +307,10 @@ class Bot(CacheMixin):
 
             # If Color Button Okay Mode is enabled, click "Set Okay" button after color selection
             self.painter.color_button_okay()
+
+            # Let the app finish the palette/dialog transition before the first
+            # stroke, otherwise it can be read as a double-click/focus click.
+            time.sleep(self.color_settle)
 
             for line_idx, line in enumerate(lines):
                 # Skip lines already drawn if resuming
@@ -332,10 +365,15 @@ class Bot(CacheMixin):
                         + (start_pos[1] - last_stroke_end[1]) ** 2
                     ) ** 0.5
                     if jump_distance > self.jump_threshold:
-                        log.info(
-                            f"Large jump detected ({jump_distance:.1f} pixels) - adding {self.settings[Bot.JUMP_DELAY]}s delay"
+                        jump_delay = (
+                            self.travel_delay
+                            if self.human_strokes or len(line) > 2
+                            else self.settings[Bot.JUMP_DELAY]
                         )
-                        time.sleep(self.settings[Bot.JUMP_DELAY])
+                        log.info(
+                            f"Large jump detected ({jump_distance:.1f} pixels) - adding {jump_delay}s delay"
+                        )
+                        time.sleep(jump_delay)
 
                 # Wait if paused - detect when we come out of pause for stroke replay
                 was_paused = False
@@ -359,11 +397,23 @@ class Bot(CacheMixin):
                     self.drawing = False  # Clear drawing flag on termination
                     return "terminated"
 
-                # Draw line with pause support (complete each stroke before checking pause)
-                end_pos = (line[1][0], line[1][1])
-                self.painter.execute_stroke(
-                    start_pos, end_pos, self.settings[Bot.DELAY]
-                )
+                # Draw the stroke. Human mode replays a whole polyline as one
+                # continuous, paced drag; legacy mode replays a single run.
+                # Multi-point polylines can only be drawn as a path.
+                end_pos = line[-1]
+                prime = first_stroke and self.prime_first_stroke
+                if self.human_strokes or len(line) > 2:
+                    self.painter.execute_path(
+                        line,
+                        self.stroke_speed,
+                        self.frame_interval,
+                        prime=prime,
+                    )
+                else:
+                    self.painter.execute_stroke(
+                        start_pos, end_pos, self.settings[Bot.DELAY]
+                    )
+                first_stroke = False
 
                 # Check for pause after completing the stroke
                 if self.paused or self.terminate:
@@ -498,6 +548,17 @@ class Bot(CacheMixin):
 
     def _estimate_drawing_time_seconds(self, cmap):
         """Estimate drawing time in seconds (internal helper method)."""
+        has_polylines = any(
+            len(stroke) > 2 for strokes in cmap.values() for stroke in strokes
+        )
+        if getattr(self, "human_strokes", False) or has_polylines:
+            return utils.estimate_path_seconds(
+                cmap,
+                self.stroke_speed,
+                self.frame_interval,
+                self.travel_delay,
+                self.jump_threshold,
+            )
         return utils.estimate_drawing_seconds(
             cmap,
             self.settings[Bot.DELAY],

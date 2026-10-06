@@ -10,7 +10,7 @@ import os
 import pytest
 from PIL import Image
 
-from pyaint import utils
+from pyaint import planner, utils
 from pyaint.bot import Bot, Palette
 from pyaint.errors import NoCanvasError
 from pyaint.palette import (
@@ -185,7 +185,7 @@ def test_layered_transparent_gap_is_not_bridged(tmp_path):
     bot = make_bot(step=1, canvas=(0, 0, 3, 1), positions=palette)
     cmap = bot.process(str(path), flags=Bot.IGNORE_TRANSPARENT, mode=Bot.LAYERED)
     # Two separate strokes; the transparent middle must not be painted over.
-    assert cmap[RED] == [((0, 0), (0, 0)), ((2, 0), (2, 0))]
+    assert cmap[RED] == [[(0, 0), (0, 0)], [(2, 0), (2, 0)]]
 
 
 def test_transparent_alpha_cutoff(tmp_path):
@@ -198,7 +198,7 @@ def test_transparent_alpha_cutoff(tmp_path):
 
     bot = make_bot(step=1, canvas=(0, 0, 2, 1), positions=palette)
     cmap = bot.process(str(path), flags=Bot.IGNORE_TRANSPARENT, mode=Bot.SLOTTED)
-    assert cmap[(0, 0, 0)] == [((1, 0), (1, 0))]
+    assert cmap[(0, 0, 0)] == [[(1, 0), (1, 0)]]
 
 
 def test_process_coordinates_within_canvas(tmp_path):
@@ -211,6 +211,20 @@ def test_process_coordinates_within_canvas(tmp_path):
             for x, y in (start, end):
                 assert cx <= x <= cx + cw
                 assert cy <= y <= cy + ch
+
+
+def test_process_strokes_stay_inside_padded_canvas(tmp_path):
+    path = write_image(tmp_path, {(0, 0): RED, (1, 0): BLUE}, (2, 1))
+    cx, cy, cw, ch = (10, 20, 40, 40)
+    bot = make_bot(step=2, canvas=(cx, cy, cx + cw, cy + ch), positions=POSITIONS)
+    cmap = bot.process(path)
+    pad = planner.CANVAS_PADDING
+    xs = [p[0] for lines in cmap.values() for line in lines for p in line]
+    ys = [p[1] for lines in cmap.values() for line in lines for p in line]
+    assert min(xs) >= cx + pad
+    assert min(ys) >= cy + pad
+    assert max(xs) < cx + cw - pad
+    assert max(ys) < cy + ch - pad
 
 
 def test_palette_samples_from_provided_image():

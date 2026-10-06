@@ -41,6 +41,13 @@ class FakePainter:
     def execute_stroke(self, start, end, delay):
         self._rec("execute_stroke", start, end, delay)
 
+    def execute_path(self, points, speed=1500.0, frame_interval=1.0 / 60.0, prime=False):
+        self._rec("execute_path", points, speed, frame_interval, prime)
+
+    def focus_target(self, canvas):
+        self._rec("focus_target", canvas)
+        return True
+
     def execute_test_stroke(self, start, end):
         self._rec("execute_test_stroke", start, end)
 
@@ -74,8 +81,42 @@ def test_draw_selects_each_colour_and_draws_each_stroke(monkeypatch, tmp_path):
     bot, fake = make_bot(monkeypatch, tmp_path)
     assert bot.draw(cmap()) == "success"
     assert fake.names().count("select_color") == 2
-    assert fake.names().count("execute_stroke") == 2
+    # one stroke per colour, each drawn exactly once
+    assert fake.names().count("execute_path") == 2
     assert bot.drawing is False
+
+
+def test_draw_legacy_mode_uses_execute_stroke(monkeypatch, tmp_path):
+    bot, fake = make_bot(monkeypatch, tmp_path)
+    bot.human_strokes = False
+    assert bot.draw(cmap()) == "success"
+    assert fake.names().count("execute_stroke") == 2
+    assert "execute_path" not in fake.names()
+
+
+def test_draw_focuses_target_window_before_strokes(monkeypatch, tmp_path):
+    bot, fake = make_bot(monkeypatch, tmp_path)
+    bot.draw(cmap())
+    assert fake.names().count("focus_target") == 1
+
+
+def test_draw_primes_the_first_stroke(monkeypatch, tmp_path):
+    bot, fake = make_bot(monkeypatch, tmp_path)
+    bot.draw(cmap())
+    paths = [c for c in fake.calls if c[0] == "execute_path"]
+    # two strokes, each drawn once; only the first is primed
+    assert len(paths) == 2
+    assert paths[0][1][3] is True
+    assert paths[1][1][3] is False
+
+
+def test_draw_prime_can_be_disabled(monkeypatch, tmp_path):
+    bot, fake = make_bot(monkeypatch, tmp_path)
+    bot.prime_first_stroke = False
+    bot.draw(cmap())
+    paths = [c for c in fake.calls if c[0] == "execute_path"]
+    assert len(paths) == 2
+    assert all(call[1][3] is False for call in paths)
 
 
 def test_draw_skip_first_color(monkeypatch, tmp_path):
@@ -115,8 +156,8 @@ class TerminatingPainter(FakePainter):
         super().__init__()
         self.bot = bot
 
-    def execute_stroke(self, start, end, delay):
-        super().execute_stroke(start, end, delay)
+    def execute_path(self, points, speed=1500.0, frame_interval=1.0 / 60.0, prime=False):
+        super().execute_path(points, speed, frame_interval, prime)
         self.bot.terminate = True
 
 

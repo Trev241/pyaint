@@ -13,6 +13,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Strokes no longer land on the canvas border.** The planner now insets the
+  taught canvas by `CANVAS_PADDING` (4px) before fitting, so edge strokes stay
+  inside the drawable area. Targets like skribbl can register a click a hair
+  outside the canvas as a miss, which dropped those strokes.
 - **Openverse searches no longer fail with HTTP 401.** Openverse rejects
   anonymous requests above 20 results per page (`page_size may not exceed 20
   for anonymous requests`). The gallery reused the Commons-oriented default of

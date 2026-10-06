@@ -78,7 +78,7 @@ def test_nearest_color_indices_match_scalar():
 
 def test_plan_slotted_returns_runs():
     cmap = planner.plan([[RED, RED]], 0, 0, 10, 0, planner.SLOTTED)
-    assert cmap == {RED: [((0, 0), (10, 0))]}
+    assert cmap == {RED: [[(0, 0), (10, 0)]]}
 
 
 def test_plan_slotted_ignores_white_when_flagged():
@@ -86,7 +86,7 @@ def test_plan_slotted_ignores_white_when_flagged():
         [[WHITE, RED]], 0, 0, 10, planner.IGNORE_WHITE, planner.SLOTTED
     )
     assert WHITE not in cmap
-    assert cmap[RED] == [((10, 0), (10, 0))]
+    assert cmap[RED] == [[(10, 0), (10, 0)]]
 
 
 def _checkerboard(size=6):
@@ -101,10 +101,39 @@ def test_plan_outline_returns_strokes():
     assert cmap.get(planner.OUTLINE_COLOUR)
 
 
-def test_outline_stroke_distance_batches_traced_cells():
+def test_outline_emits_one_closed_polyline_per_contour():
+    cmap = planner.plan(_checkerboard(), 0, 0, 10, 0, planner.OUTLINE)
+    strokes = cmap[planner.OUTLINE_COLOUR]
+    assert strokes
+    for points in strokes:
+        assert isinstance(points, list)
+        assert len(points) >= 3  # at least two vertices plus the closing point
+        assert points[0] == points[-1]
+
+
+def test_outline_stroke_distance_no_longer_changes_the_plan():
     grid = _checkerboard()
     fine = planner.plan(grid, 0, 0, 10, 0, planner.OUTLINE, stroke_distance=1)
     coarse = planner.plan(grid, 0, 0, 10, 0, planner.OUTLINE, stroke_distance=5)
-    assert len(coarse[planner.OUTLINE_COLOUR]) <= len(
-        fine[planner.OUTLINE_COLOUR]
-    )
+    assert fine == coarse
+
+
+# ---------------------------------------------------------------------------
+# canvas padding
+# ---------------------------------------------------------------------------
+def test_inset_canvas_shrinks_every_edge():
+    assert planner._inset_canvas((10, 20, 100, 50)) == (14, 24, 92, 42)
+
+
+def test_inset_canvas_never_eats_tiny_canvases():
+    # The inset clamps to leave at least one pixel of width/height.
+    assert planner._inset_canvas((0, 0, 1, 1)) == (0, 0, 1, 1)
+    assert planner._inset_canvas((0, 0, 2, 1)) == (0, 0, 2, 1)
+
+
+def test_fit_to_canvas_keeps_origin_inside_padded_border():
+    image = Image.new("RGB", (100, 100))
+    x, y, w, h = (1000, 2000, 400, 200)
+    _, _, xo, yo = planner.fit_to_canvas(image, (x, y, w, h), 10)
+    assert xo >= x + planner.CANVAS_PADDING
+    assert yo >= y + planner.CANVAS_PADDING
