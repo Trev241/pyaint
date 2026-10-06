@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import pyautogui
-from PySide6.QtCore import QRect, Qt, QTimer
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QVBoxLayout
 
@@ -62,19 +62,15 @@ class _PickOverlay(QDialog):
             point = event.globalPosition().toPoint()
             self.points.append((point.x(), point.y()))
             if len(self.points) >= self._count:
-                # Hide now, then finish on the next event-loop turn. Doing the
-                # screenshot and accept() inside the mouse event (after
-                # processEvents) can re-enter the modal loop and leave a hidden
-                # modal dialog blocking the app.
-                self.hide()
-                # Give the window manager a moment to actually remove the veil
-                # before grabbing the screen.
-                QTimer.singleShot(50, self._finish)
+                # Accept straight away. The clean screenshot is taken before
+                # the overlay appears, so there is nothing left to do here.
+                # Hiding a modal QDialog exits its exec() loop immediately with
+                # ``Rejected``, so the old ``hide()`` + deferred ``accept()``
+                # made ``pick_points`` return ``None`` and silently discarded
+                # every taught point.
+                self.accept()
             else:
                 self._update()
-
-    def _finish(self) -> None:
-        self.accept()
 
     def keyPressEvent(self, event):  # noqa: N802
         if event.key() == Qt.Key_Escape:

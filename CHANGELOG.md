@@ -13,6 +13,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Manually teaching a palette (or canvas) now actually saves the clicks.**
+  The point picker hid its modal overlay before calling `accept()`; hiding a
+  modal `QDialog` exits its `exec()` loop immediately with `Rejected`, so
+  `pick_points` returned `None` and Setup silently discarded the two taught
+  corners — the status stayed "Not set" and the preview stayed blank. The
+  overlay now accepts on the final click (the clean screenshot is already
+  taken before it appears).
 - **Manually teaching the palette now samples the right pixels.** The point
   picker grabbed its screenshot *after* hiding its translucent black veil, so
   the veil could still be composited into the shot — the palette preview came

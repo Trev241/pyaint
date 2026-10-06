@@ -417,6 +417,48 @@ def test_pick_points_minimizes_and_captures_before_overlay(app, monkeypatch):
         parent.close()
 
 
+def test_pick_points_real_overlay_accepts_on_final_click(app, monkeypatch):
+    """Regression: the real overlay must return its points, not vanish.
+
+    Hiding a modal QDialog exits its ``exec()`` loop with ``Rejected``, so the
+    old ``hide()`` + deferred ``accept()`` made ``pick_points`` return ``None``
+    and silently dropped every taught point (preview blank, status unset).
+    """
+    from PIL import Image
+    from PySide6.QtCore import QPointF, QEvent, QTimer, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    import pyaint.ui.capture as capture
+
+    sentinel = Image.new("RGB", (10, 10), (1, 2, 3))
+    monkeypatch.setattr(capture.pyautogui, "screenshot", lambda *a, **k: sentinel)
+
+    real_overlay = capture._PickOverlay
+
+    class ClickingOverlay(real_overlay):
+        def showEvent(self, event):  # noqa: N802
+            super().showEvent(event)
+            QTimer.singleShot(0, self._click_corners)
+
+        def _click_corners(self):
+            for _ in range(2):
+                click = QMouseEvent(
+                    QEvent.MouseButtonPress,
+                    QPointF(4, 5),
+                    QPointF(4, 5),
+                    Qt.LeftButton,
+                    Qt.LeftButton,
+                    Qt.NoModifier,
+                )
+                self.mousePressEvent(click)
+
+    monkeypatch.setattr(capture, "_PickOverlay", ClickingOverlay)
+    result = capture.pick_points(None, 2, "prompt")
+    assert result is not None
+    assert len(result.points) == 2
+    assert result.image is sentinel
+
+
 def test_setup_teach_palette_samples_and_previews(app, tmp_path, monkeypatch):
     """Two taught corners must set the palette status and fill the preview."""
     monkeypatch.chdir(tmp_path)
