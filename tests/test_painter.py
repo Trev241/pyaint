@@ -34,9 +34,10 @@ def make_painter(monkeypatch):
     monkeypatch.setattr(painter_mod.time, "sleep", lambda *_: None)
     painter = Bot().painter
     # Record drag moves through the same recorder and keep tests off the real
-    # Windows mouse_event() / GetAsyncKeyState() paths.
+    # Windows SendInput / mouse_event / GetAsyncKeyState paths.
     monkeypatch.setattr(painter, "_drag_move", fake.moveTo)
     monkeypatch.setattr(painter, "_left_is_down", lambda: True)
+    monkeypatch.setattr(painter_mod, "_send_input_mouse", lambda *a, **k: False)
     return painter, fake
 
 

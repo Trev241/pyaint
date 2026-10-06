@@ -36,8 +36,10 @@ Three mitigations, all independent:
 the first stroke, breaking the double-click window.
 - `ScreenPainter.press_left()` sends the press, then on Windows checks
 `GetAsyncKeyState(VK_LBUTTON)` and re-sends until the OS confirms the button
-is held, so a dropped first press can't produce an empty stroke. Tests stub
-`_left_is_down` and never touch the real API.
+is held. Button transitions use `SendInput` (the modern API) with pyautogui's
+legacy `mouse_event` as a fallback; `_drag_move` does the same. The first
+stroke also holds the button for `max(settle, 0.12)` s before moving. Tests
+stub `_left_is_down` / `_send_input_mouse` and never touch the real API.
 - `Bot` calls `ScreenPainter.focus_target(canvas)` before drawing, which uses
 `WindowFromPoint` + `SetForegroundWindow` (with an `AttachThreadInput`
 fallback) to make the target window foreground, since the first click on an

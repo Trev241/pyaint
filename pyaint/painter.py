@@ -19,6 +19,48 @@ import pyautogui
 
 from pyaint.log import log
 
+_MOUSEEVENTF_MOVE = 0x0001
+_MOUSEEVENTF_LEFTDOWN = 0x0002
+_MOUSEEVENTF_LEFTUP = 0x0004
+_MOUSEEVENTF_ABSOLUTE = 0x8000
+
+
+def _send_input_mouse(flags: int, x: int = 0, y: int = 0) -> bool:
+    """Inject one mouse event via ``SendInput``. Returns True if accepted.
+
+    ``mouse_event`` (what pyautogui uses) is the legacy path; ``SendInput`` is
+    the modern one and is accepted by more applications for button
+    transitions. When ``flags`` includes ``MOUSEEVENTF_ABSOLUTE``, ``x, y``
+    must already be normalised to 0..65535.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [
+                ("dx", wintypes.LONG),
+                ("dy", wintypes.LONG),
+                ("mouseData", wintypes.DWORD),
+                ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.c_void_p),
+            ]
+
+        class _INPUT(ctypes.Structure):
+            _fields_ = [("type", wintypes.DWORD), ("mi", MOUSEINPUT)]
+
+        INPUT_MOUSE = 0
+        payload = _INPUT(type=INPUT_MOUSE, mi=MOUSEINPUT(x, y, 0, flags, 0, None))
+        sent = ctypes.windll.user32.SendInput(
+            1, ctypes.byref(payload), ctypes.sizeof(payload)
+        )
+        return sent == 1
+    except Exception:
+        return False
+
 
 def _focus_window_at(x: int, y: int) -> bool:
     """Bring the top-level window at ``(x, y)`` to the foreground (Windows).
@@ -294,22 +336,25 @@ class ScreenPainter:
 
         The first synthetic press after a UI interaction (palette click, dialog
         OK) can be swallowed by the target app, producing a stroke that draws
-        nothing. Re-sending until the OS reports the button held makes that
-        failure mode impossible.
+        nothing. SendInput is preferred over pyautogui's legacy mouse_event,
+        and the press is re-sent until the OS reports the button held.
         """
-        pyautogui.mouseDown(button="left")
+        if not _send_input_mouse(_MOUSEEVENTF_LEFTDOWN):
+            pyautogui.mouseDown(button="left")
         if self._left_is_down():
             return
         for _ in range(max(1, attempts) - 1):
             time.sleep(0.02)
-            pyautogui.mouseDown(button="left")
+            if not _send_input_mouse(_MOUSEEVENTF_LEFTDOWN):
+                pyautogui.mouseDown(button="left")
             if self._left_is_down():
                 return
         log.warning("[Press] left button not confirmed down after retries")
 
     def release_left(self) -> None:
         """Release the left button."""
-        pyautogui.mouseUp()
+        if not _send_input_mouse(_MOUSEEVENTF_LEFTUP):
+            pyautogui.mouseUp()
 
     def _drag_move(self, x: int, y: int) -> None:
         """Move the cursor while a button is held so apps register a drag.
@@ -329,10 +374,12 @@ class ScreenPainter:
                 width = user32.GetSystemMetrics(0)
                 height = user32.GetSystemMetrics(1)
                 if width and height:
-                    move = 0x0001
                     absolute = 0x8000
+                    move = 0x0001
                     cx = 65536 * int(x) // width + 1
                     cy = 65536 * int(y) // height + 1
+                    if _send_input_mouse(move | absolute, cx, cy):
+                        return
                     user32.mouse_event(
                         move | absolute,
                         ctypes.c_long(cx),
@@ -419,7 +466,7 @@ class ScreenPainter:
             pyautogui.moveTo(*pts[0])
             time.sleep(min(settle, 0.05))
         self.press_left()
-        time.sleep(settle)
+        time.sleep(max(settle, 0.12) if prime else settle)
 
         last = time.perf_counter()
         for distance in sorted(distances):
