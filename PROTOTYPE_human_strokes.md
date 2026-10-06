@@ -10,6 +10,21 @@ built for the input shape a human produces: **one button-down, a continuous
 stream of moves at roughly display refresh, one button-up**. This prototype
 emits that shape instead.
 
+## Fix: MS Paint only drew a dot
+
+`pyautogui.moveTo` uses `SetCursorPos` on Windows. MS Paint (and other GDI
+apps) do **not** treat those moves as a drag: they see the button-down and
+button-up but not the motion between them. The old per-edge code appeared to
+work because each stroke started and ended at different points, so Paint drew
+the chord. `execute_path` closes each contour, so the final `mouseUp` landed on
+the `mouseDown` point, and Paint rendered a single dot.
+
+`ScreenPainter._drag_move()` now sends a real
+`mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, ...)` while the button is
+held, so the app receives `WM_MOUSEMOVE` with the button bit set and follows
+the path. It falls back to `pyautogui.moveTo` off Windows. `execute_stroke`
+also routes its segment moves through `_drag_move` for the same reason.
+
 ## What changed
 
 - `pyaint/planner.py`

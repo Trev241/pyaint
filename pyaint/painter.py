@@ -11,6 +11,7 @@ The ``Painter`` talks to the bot through a duck-typed reference (no import of
 
 from __future__ import annotations
 
+import sys
 import time
 from typing import Any, Dict, Sequence, Tuple
 
@@ -189,6 +190,40 @@ class ScreenPainter:
             self._release_all_modifiers()
 
     # -- stroke execution ------------------------------------------------
+    def _drag_move(self, x: int, y: int) -> None:
+        """Move the cursor while a button is held so apps register a drag.
+
+        ``pyautogui.moveTo`` uses ``SetCursorPos`` on Windows, which GDI apps
+        such as MS Paint do *not* treat as a drag: they receive button-down and
+        button-up but not the connecting motion, so only a dot is painted.
+        Sending an explicit ``MOUSEEVENTF_MOVE`` makes the app receive
+        ``WM_MOUSEMOVE`` with the button bit set, which actually paints.
+        Falls back to ``pyautogui.moveTo`` off Windows or if the call fails.
+        """
+        if sys.platform == "win32":
+            try:
+                import ctypes
+
+                user32 = ctypes.windll.user32
+                width = user32.GetSystemMetrics(0)
+                height = user32.GetSystemMetrics(1)
+                if width and height:
+                    move = 0x0001
+                    absolute = 0x8000
+                    cx = 65536 * int(x) // width + 1
+                    cy = 65536 * int(y) // height + 1
+                    user32.mouse_event(
+                        move | absolute,
+                        ctypes.c_long(cx),
+                        ctypes.c_long(cy),
+                        0,
+                        0,
+                    )
+                    return
+            except Exception:
+                pass
+        pyautogui.moveTo(x, y)
+
     def execute_path(
         self,
         points: Sequence[Tuple[int, int]],
@@ -252,8 +287,8 @@ class ScreenPainter:
 
         last = time.perf_counter()
         for distance in sorted(distances):
-            pyautogui.moveTo(*point_at(distance))
-            # Hold the cadence even if a moveTo ran long; never sleep a
+            self._drag_move(*point_at(distance))
+            # Hold the cadence even if the move ran long; never sleep a
             # negative amount.
             wait = interval - (time.perf_counter() - last)
             if wait > 0:
@@ -291,7 +326,7 @@ class ScreenPainter:
 
         for i in range(1, segments + 1):
             t = i / segments
-            pyautogui.moveTo(start_pos[0] + dx * t, start_pos[1] + dy * t)
+            self._drag_move(start_pos[0] + dx * t, start_pos[1] + dy * t)
             time.sleep(segment_delay)
 
         pyautogui.mouseUp()

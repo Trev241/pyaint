@@ -32,7 +32,11 @@ def make_painter(monkeypatch):
     fake = FakePyAutoGUI()
     monkeypatch.setattr(painter_mod, "pyautogui", fake)
     monkeypatch.setattr(painter_mod.time, "sleep", lambda *_: None)
-    return Bot().painter, fake
+    painter = Bot().painter
+    # Record drag moves through the same recorder and keep tests off the real
+    # Windows mouse_event() path.
+    monkeypatch.setattr(painter, "_drag_move", fake.moveTo)
+    return painter, fake
 
 
 def names(fake):
@@ -130,6 +134,16 @@ def test_execute_path_single_point_taps_in_place(monkeypatch):
     assert events.count("mouseDown") == 1
     assert events.count("mouseUp") == 1
     assert events.count("moveTo") == 1
+
+
+def test_execute_path_uses_drag_moves_while_button_held(monkeypatch):
+    painter, fake = make_painter(monkeypatch)
+    drags = []
+    monkeypatch.setattr(painter, "_drag_move", lambda x, y: drags.append((x, y)))
+    painter.execute_path([(0, 0), (100, 0)], speed=1000.0, frame_interval=1 / 60)
+    assert (100, 0) in drags  # the drag went through _drag_move
+    # plain moveTo is used only once, to park the cursor before mouseDown
+    assert names(fake).count("moveTo") == 1
 
 
 def test_click_swatch_mspaint_double_clicks(monkeypatch):
