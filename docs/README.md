@@ -114,12 +114,12 @@ environment and delegates. `fit_to_canvas()` insets the canvas by
 produce the shared colour grid (removing isolated compression / anti-aliasing
 artifacts at the source), and `plan()` turns that grid into a stroke map.
 
-- **Layered** (default): builds per-row colour tables, then `_merge_layers()`
+- **Layered**: builds per-row colour tables, then `_merge_layers()`
   sorts colours by frequency and repaints lower layers, yielding fewer strokes.
 - **Slotted**: a direct colour → list-of-runs map.
-- **Outline** (`plan_regions`): traces region boundaries into one closed
-  polyline per contour in `OUTLINE_COLOUR`. `stroke_distance` is retained for
-  compatibility and no longer changes the plan.
+- **Outline** (default, `plan_regions`): traces region boundaries into one
+  closed polyline per contour in `OUTLINE_COLOUR`. `stroke_distance` is
+  retained for compatibility and no longer changes the plan.
 
 `process_region()` reuses `fit_region()` + the same quantize/plan steps for
 partial redraws.

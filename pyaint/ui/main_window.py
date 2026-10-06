@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
         self.bot.profile = self.profile
         self.tools = {}
         self.draw_options = 0
-        self._mode = Bot.LAYERED
+        self._mode = Bot.OUTLINE
         self._busy = False
         self._last_url = ""
         self._pending_source = None
@@ -340,7 +340,7 @@ class MainWindow(QMainWindow):
         self._mode_combo.setItemData(
             0,
             "Merges a colour's runs where later colours paint over them: fewer "
-            "strokes, faster drawing, smoother joins (default).",
+            "strokes, faster drawing, smoother joins.",
             Qt.ToolTipRole,
         )
         self._mode_combo.setItemData(
@@ -350,7 +350,7 @@ class MainWindow(QMainWindow):
         )
         self._mode_combo.setItemData(
             2,
-            "Experimental: traces region outlines as continuous strokes. "
+            "Default: traces region outlines as continuous strokes. "
             "Results vary by target and the pacing controls are still being tuned.",
             Qt.ToolTipRole,
         )
@@ -940,9 +940,9 @@ class MainWindow(QMainWindow):
             self.draw_options |= Bot.IGNORE_TRANSPARENT
 
         self.bot.skip_first_color = bool(self.tools.get("skip_first_color", False))
-        mode = self.tools.get("draw_mode", Bot.LAYERED)
+        mode = self.tools.get("draw_mode", Bot.OUTLINE)
         self._mode = (
-            mode if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE) else Bot.LAYERED
+            mode if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE) else Bot.OUTLINE
         )
         self.bot.stroke_speed = float(settings.get("stroke_speed", 1500.0))
         self.bot.frame_interval = max(
@@ -1095,9 +1095,9 @@ class MainWindow(QMainWindow):
             self.draw_options |= Bot.IGNORE_WHITE
         if options.get("ignore_transparent_pixels", True):
             self.draw_options |= Bot.IGNORE_TRANSPARENT
-        mode = data.get("draw_mode", Bot.LAYERED)
+        mode = data.get("draw_mode", Bot.OUTLINE)
         self._mode = (
-            mode if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE) else Bot.LAYERED
+            mode if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE) else Bot.OUTLINE
         )
         self.bot.skip_first_color = bool(data.get("skip_first_color", False))
         self._jump_threshold.setValue(self.bot.jump_threshold)

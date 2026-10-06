@@ -112,6 +112,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   eagerly.
 
 ### Changed
+- **Outline is now the default stroke mode.** New installs (and configs with no
+  saved `draw_mode`) start in Outline instead of Layered. Existing configs keep
+  whichever mode they had saved.
 - **The bottom status bar is gone.** Its progress bar was unreadable while a
   draw is running (the window is minimized), and the floating click-through
   overlay already shows the same `strokes done / total` figure with an ETA.

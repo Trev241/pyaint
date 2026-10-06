@@ -103,10 +103,12 @@ image  →  fit + downscale to the canvas (nearest-neighbour)
        →  replay strokes with pyautogui, selecting colours as it goes
 ```
 
-Two processing modes:
+Three processing modes:
 
-- **Layered** (default) — merges a colour's runs where later colours paint over
-  them: fewer strokes, faster drawing, smoother joins.
+- **Outline** (default) — traces region outlines as continuous, human-shaped
+  strokes. Pacing is tuned with the stroke-speed and event-interval controls.
+- **Layered** — merges a colour's runs where later colours paint over them:
+  fewer strokes, faster drawing, smoother joins.
 - **Slotted** — draws every run exactly as-is: no overdraw, but more strokes.
 
 Processing can be **cached** into `cache/`, so repeat runs skip the processing

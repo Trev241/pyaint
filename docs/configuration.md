@@ -20,7 +20,7 @@ UI.
   "drawing_options": { "ignore_white_pixels": true, "ignore_transparent_pixels": true },
   "pause_key": "p",
   "theme": "auto",
-  "draw_mode": "layered",
+  "draw_mode": "outline",
   "color_metric": "ciede2000",
   "skip_first_color": false,
   "last_image_url": "",
@@ -79,7 +79,7 @@ emits one polyline per contour regardless of its value.
 | `ignore_white_pixels` | true | Skip pure-white runs |
 | `ignore_transparent_pixels` | true | Skip pixels with alpha below the cutoff (128), so transparent PNG areas aren't painted black |
 | `skip_first_color` | false | Don't draw the first colour in the map |
-| `draw_mode` | `layered` | `layered` (fewer strokes), `slotted` (exact runs), or `outline` (experimental, continuous outline tracing) |
+| `draw_mode` | `outline` | `outline` (default, continuous outline tracing), `layered` (fewer strokes), or `slotted` (exact runs) |
 | `color_metric` | `ciede2000` | `ciede2000` (perceptual) or `rgb` (legacy squared Euclidean) |
 
 ### Per-target drawing settings
