@@ -29,6 +29,9 @@ from PIL import Image
 
 from pyaint import utils
 
+# import numpy as np
+import cv2
+
 try:  # numpy powers palette-aware downsampling; fall back if unavailable
     import numpy as _np
 except ImportError:  # pragma: no cover - only when numpy is not installed
@@ -188,25 +191,19 @@ def quantize_image(image: Image.Image, size, palette, metric, flags: int) -> Col
         categories = _np.where(alpha < ALPHA_CUTOFF, none_category, nearest)
     else:
         categories = nearest
-    categories = _np.asarray(categories, dtype=_np.int64).reshape(
-        th, scale, tw, scale
-    )
+    categories = _np.asarray(categories, dtype=_np.int64).reshape(th, scale, tw, scale)
 
     cell = (
-        _np.arange(th)[:, None, None, None] * tw
-        + _np.arange(tw)[None, None, :, None]
+        _np.arange(th)[:, None, None, None] * tw + _np.arange(tw)[None, None, :, None]
     )
     combined = (cell * (none_category + 1) + categories).ravel()
-    counts = _np.bincount(
-        combined, minlength=th * tw * (none_category + 1)
-    ).reshape(th, tw, none_category + 1)
+    counts = _np.bincount(combined, minlength=th * tw * (none_category + 1)).reshape(
+        th, tw, none_category + 1
+    )
     mode = counts.argmax(axis=2)
 
     return [
-        [
-            None if mode[i, j] == none_category else colors[mode[i, j]]
-            for j in range(tw)
-        ]
+        [None if mode[i, j] == none_category else colors[mode[i, j]] for j in range(tw)]
         for i in range(th)
     ]
 
@@ -334,6 +331,7 @@ def plan_regions(
     flags: int,
     mode: str = OUTLINE,
     stroke_distance: int = STROKE_DISTANCE,
+    palette=None,
 ) -> Cmap:
     """Plan an outline-and-fill stroke map from the quantised colour grid.
 
@@ -349,6 +347,9 @@ def plan_regions(
         stroke_distance: Number of traced boundary cells emitted per stroke.
             ``1`` (the default) emits a stroke for every traced cell; higher
             values batch up to that many cells into one stroke.
+        palette: optional :class:`~pyaint.palette.Palette`. The planner is given
+            the grid's colours already, but this exposes the swatch set, order
+            and screen positions to region logic.
 
     Returns:
         A :data:`Cmap` in the same shape :func:`plan_rows` returns —
@@ -357,7 +358,7 @@ def plan_regions(
         added later, this is also the seam to widen (the executor in
         ``pyaint/bot.py`` would grow a second consumer).
     """
-    return _outline(grid, xo, yo, step, stroke_distance)
+    return _outline(grid, xo, yo, step, stroke_distance, palette)
 
 
 def _outline(
@@ -366,25 +367,90 @@ def _outline(
     yo: int,
     step: int,
     stroke_distance: int = STROKE_DISTANCE,
+    palette=None,
 ):
     """Outlines the boundary of regions containing the given color"""
     stroke_distance = max(1, int(stroke_distance))
 
     segments: set = set()
     incident: Dict = {}
+    boundary = _np.zeros((len(grid), len(grid[0])), dtype=_np.uint8)
 
     for i in range(len(grid) - 1):
         for j in range(len(grid[i]) - 1):
             if grid[i][j] != grid[i][j + 1]:
                 a, b = (i, j + 1), (i + 1, j + 1)
                 segments.add((a, b))
+                boundary[i : i + 2, j + 1] = 255
             if grid[i][j] != grid[i + 1][j]:
                 a, b = (i + 1, j), (i + 1, j + 1)
                 segments.add((a, b))
+                boundary[i + 1, j : j + 2] = 255
 
     for seg in segments:
         incident.setdefault(seg[0], []).append(seg)
         incident.setdefault(seg[1], []).append(seg)
+
+    colors = (
+        list(palette.color_list)
+        if palette is not None
+        else sorted({c for row in grid for c in row if c is not None})
+    )
+
+    cmap: Cmap = {}
+
+    for color in colors:
+        mask = _np.array(
+            [[1 if cell == color else 0 for cell in row] for row in grid],
+            dtype=_np.uint8,
+        )
+
+        contours, hierarchy = cv2.findContours(
+            mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE
+        )
+
+        # contours.sort(key=cv2.contourArea, reverse=True)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+        simplified_contours = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < 10:
+                continue
+
+            simplified = cv2.approxPolyDP(contour, epsilon=1.0, closed=True)
+            points = [tuple(point[0]) for point in simplified]
+            simplified_contours.append(points)
+
+            # Convert each contour to screen coordinates (one polyline per contour).
+            # strokes = []
+            # for points in simplified_contours:
+            #     if len(points) < 2:
+            #         continue
+            #     strokes.append(
+            #         [(xo + point[0] * step, yo + point[1] * step) for point in points]
+            #     )
+            screen_points = [
+                (xo + point[0] * step, yo + point[1] * step) for point in points
+            ]
+            segments = [
+                (screen_points[i], screen_points[(i + 1) % len(screen_points)])
+                for i in range(len(screen_points))
+            ]
+            cmap.setdefault(OUTLINE_COLOUR, []).extend(segments)
+
+    # np_grid = _np.array(grid, dtype=_np.uint8)
+    # binary = np_grid * 255
+
+    # binary = _np.array(boundary, dtype=_np.uint8) * 255
+
+    # contours, hierarchy = cv2.findContours(
+    #     boundary,
+    #     cv2.RETR_EXTERNAL,
+    #     cv2.CHAIN_APPROX_NONE,
+    # )
+
+    # cmap: Cmap = {OUTLINE_COLOUR: strokes} if strokes else {}
 
     # import json
 
@@ -392,45 +458,45 @@ def _outline(
     #     vals = [f"{k}: {v}" for k, v in incident.items()]
     #     json.dump(vals, fp, indent=2)
 
-    curr_seg = None
-    next_seg = None
-    distance = 0
-    now = None
-    draw_start = None
-    draw_end = None
-    cmap: Cmap = {}
+    # curr_seg = None
+    # next_seg = None
+    # distance = 0
+    # now = None
+    # draw_start = None
+    # draw_end = None
+    # cmap: Cmap = {}
 
-    while len(segments) > 0:
-        if distance >= stroke_distance or (curr_seg is None and draw_start is not None):
-            draw_end = now
+    # while len(segments) > 0:
+    #     if distance >= stroke_distance or (curr_seg is None and draw_start is not None):
+    #         draw_end = now
 
-            start = xo + (draw_start[1] * step), yo + (draw_start[0] * step)
-            end = xo + (draw_end[1] * step), yo + (draw_end[0] * step)
-            cmap.setdefault(OUTLINE_COLOUR, []).append((start, end))
+    #         start = xo + (draw_start[1] * step), yo + (draw_start[0] * step)
+    #         end = xo + (draw_end[1] * step), yo + (draw_end[0] * step)
+    #         cmap.setdefault(OUTLINE_COLOUR, []).append((start, end))
 
-            draw_start = now
-            distance = 1
+    #         draw_start = now
+    #         distance = 1
 
-        if curr_seg is None:
-            curr_seg = segments.pop()
-            draw_start = curr_seg[0]
-            distance = 1
+    #     if curr_seg is None:
+    #         curr_seg = segments.pop()
+    #         draw_start = curr_seg[0]
+    #         distance = 1
 
-        now = curr_seg[1] if curr_seg[1] != now else curr_seg[0]
+    #     now = curr_seg[1] if curr_seg[1] != now else curr_seg[0]
 
-        # next_seg = None
-        # while (next_seg is None or next_seg not in segments) and len(incident[now]) > 0:
-        #     next_seg = incident[now].pop()
-        #     if next_seg in segments:
-        #         segments.remove(next_seg)
-        #         break
+    #     # next_seg = None
+    #     # while (next_seg is None or next_seg not in segments) and len(incident[now]) > 0:
+    #     #     next_seg = incident[now].pop()
+    #     #     if next_seg in segments:
+    #     #         segments.remove(next_seg)
+    #     #         break
 
-        next_seg = _choose_next(now, incident[now], segments)
-        if next_seg in segments:
-            segments.remove(next_seg)
+    #     next_seg = _choose_next(now, incident[now], segments)
+    #     if next_seg in segments:
+    #         segments.remove(next_seg)
 
-        curr_seg = next_seg
-        distance += 1
+    #     curr_seg = next_seg
+    #     distance += 1
 
     return cmap
 
@@ -462,13 +528,15 @@ def plan(
     flags: int,
     mode: str,
     stroke_distance: int = STROKE_DISTANCE,
+    palette=None,
 ) -> Cmap:
     """Plan ``grid`` into a stroke map using the requested ``mode``.
 
     ``stroke_distance`` only affects :data:`OUTLINE`; other modes ignore it.
+    ``palette`` is forwarded to :func:`plan_regions` for region logic.
     """
     if mode == OUTLINE:
-        return plan_regions(grid, xo, yo, step, flags, mode, stroke_distance)
+        return plan_regions(grid, xo, yo, step, flags, mode, stroke_distance, palette)
     return plan_rows(grid, xo, yo, step, flags, mode)
 
 
@@ -488,7 +556,7 @@ def plan_image(
     """Fit + quantise + plan a full image. Returns a stroke map (``cmap``)."""
     source, (tw, th), xo, yo = fit_to_canvas(image, canvas, step)
     grid = quantize_image(source, (tw, th), palette, metric, flags)
-    return plan(grid, xo, yo, step, flags, mode, stroke_distance)
+    return plan(grid, xo, yo, step, flags, mode, stroke_distance, palette)
 
 
 def plan_region_image(
@@ -506,4 +574,4 @@ def plan_region_image(
     """Fit + quantise + plan a sub-region. Returns a stroke map (``cmap``)."""
     source, (tw, th), xo, yo = fit_region(image, region, canvas, step, canvas_target)
     grid = quantize_image(source, (tw, th), palette, metric, flags)
-    return plan(grid, xo, yo, step, flags, mode, stroke_distance)
+    return plan(grid, xo, yo, step, flags, mode, stroke_distance, palette)
