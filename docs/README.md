@@ -187,5 +187,6 @@ explicit colour map, and screen actions are replaced with fakes.
 ### Dependencies
 
 `PyAutoGUI` (input/screenshots), `Pillow` (images), `pynput` (global hotkeys),
-`pyscreeze`, and **PySide6** (Qt) for the desktop UI. There is no NumPy
-dependency.
+`pyscreeze`, **PySide6** (Qt) for the desktop UI, and **NumPy + OpenCV
+(`cv2`)** — the Outline planner uses `cv2.findContours`/`approxPolyDP` to trace
+region contours.

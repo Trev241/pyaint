@@ -13,6 +13,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **The standalone `.exe` no longer crashes on launch.** The Outline planner
+  needs OpenCV (`cv2`), but the PyInstaller spec excluded it and it was never a
+  declared dependency — so the frozen build died with `ModuleNotFoundError: No
+  module named 'cv2'` before the window opened (now that Outline is the
+  default). OpenCV is now listed in `requirements.txt`/`pyproject.toml` and
+  bundled by `pyaint.spec` (numpy comes with it).
 - **Manually teaching a palette (or canvas) now actually saves the clicks.**
   The point picker hid its modal overlay before calling `accept()`; hiding a
   modal `QDialog` exits its `exec()` loop immediately with `Rejected`, so

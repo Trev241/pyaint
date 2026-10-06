@@ -26,12 +26,11 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # Pyaint only needs Pillow/PyAutoGUI/pynput/PySide6. Exclude heavy
-    # scientific stacks that PyInstaller would otherwise pull in from whatever
-    # happens to be installed in the build environment.
+    # numpy + OpenCV (cv2) are real runtime dependencies: the Outline planner
+    # uses cv2.findContours/approxPolyDP to trace region contours. Exclude the
+    # other heavy scientific stacks that PyInstaller might otherwise pull in
+    # from whatever happens to be installed in the build environment.
     excludes=[
-        "numpy",
-        "cv2",
         "scipy",
         "matplotlib",
         "pandas",

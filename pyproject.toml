@@ -42,6 +42,7 @@ dependencies = [
     "PyAutoGUI",
     "pynput",
     "numpy",
+    "opencv-python",
     "PySide6>=6.5",
 ]
 
