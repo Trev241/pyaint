@@ -42,6 +42,16 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   logging it. The picker also makes its own windows fully transparent before
   grabbing the teaching screenshot, so the Windows minimize animation can't
   leak pyaint into the shot.
+- **The captured region preview now persists and gives clear feedback.** The
+  annotated canvas/palette crop was only kept in memory, so it went blank as
+  soon as Setup was closed and reopened. Previews are now rendered and saved
+  under `previews/`, restored on reopen, and shown with a caption and a
+  colour-count/grid summary ("✓ 20 colours sampled (2 × 10).").
+- **Reset config now resets immediately.** The old button only deleted
+  `config.json` and told the user to restart. It now also clears the cache and
+  preview folders and rebuilds the live profile, drawing settings, target list,
+  and preferences in place, so the app is back to defaults the moment the
+  dialog is dismissed.
 - **Strokes no longer land on the canvas border.** The planner now insets the
   taught canvas by `CANVAS_PADDING` (4px) before fitting, so edge strokes stay
   inside the drawable area. Targets like skribbl can register a click a hair
@@ -169,6 +179,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   inspector, leaving Start drawing as the single primary action.
 
 ### Added
+- **A Clear button in the Setup window.** Each tool's row now has a Clear
+  action that forgets the taught position (and its saved preview) without
+  closing the dialog, so a wrong capture can be undone and retaught in place.
 - **Openverse as a second image source, with a Source selector.** Online image
   search now supports Openverse (`api.openverse.org`, no API key) alongside
   Wikimedia Commons, and defaults to Openverse for its much broader coverage

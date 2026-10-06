@@ -2283,16 +2283,46 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(
             self,
             self.title,
-            "Reset to defaults? This deletes config.json and all taught positions.",
+            "Reset everything to defaults?\n\nThis deletes config.json and all "
+            "taught canvas/palette/tool positions, clears the cached stroke "
+            "maps, and resets every preference. This cannot be undone.",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
+        # Wipe the persisted files first...
         try:
             if os.path.exists(self._config_path):
                 os.remove(self._config_path)
-            self._set_status("Config removed. Restart Pyaint to use defaults.")
+            for name in ("cache", "previews"):
+                folder = os.path.join(paths.PROJECT_ROOT, name)
+                if os.path.exists(folder):
+                    shutil.rmtree(folder)
         except Exception as exc:  # noqa: BLE001
-            self._set_status(f"Could not remove config: {exc}")
+            self._set_status(f"Could not reset config: {exc}")
+            return
+        # ...then rebuild the live state from the now-absent config so the
+        # reset takes effect immediately instead of requiring a restart.
+        self._initializing = True
+        try:
+            self._environments = {}
+            self._drawing_by_target = {}
+            self.tools = {}
+            self._last_url = ""
+            self._url_edit.clear()
+            self._imname = os.path.join(paths.PROJECT_ROOT, "assets", "sample.png")
+            self.load_config()
+            self._load_default_image()
+        except Exception as exc:  # noqa: BLE001
+            log.info(f"[Reset] reload failed: {exc}")
+        finally:
+            self._initializing = False
+        self._save_config()
+        self._refresh_readiness()
+        self._refresh_detection_status()
+        self._notice.show_notice(
+            "Everything was reset to defaults.", "success"
+        )
+        self._set_status("Settings reset to defaults.")
 
     # ------------------------------------------------------------------
     # Lifecycle

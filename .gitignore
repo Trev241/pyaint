@@ -130,6 +130,7 @@ dmypy.json
 # Project specific
 /pyaint-env
 /cache
+/previews
 
 # Python bytecode caches (any level, incl. pyaint/ and pyaint/ui/)
 __pycache__/

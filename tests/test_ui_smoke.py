@@ -296,6 +296,46 @@ def test_apply_detection_keeps_taught_palette_and_warns(app, tmp_path, monkeypat
         window.close()
 
 
+def test_reset_config_wipes_everything_immediately(app, tmp_path, monkeypatch):
+    """Reset must reinitialize live state, not just delete the file."""
+    import os
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from pyaint import paths
+    from pyaint.locators import Detection
+
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        # Seed a taught environment and a non-default preference.
+        window.profile.target = "mspaint"
+        window.profile["Palette"].update(
+            {"status": True, "box": [10, 10, 90, 50], "rows": 2, "cols": 4}
+        )
+        window.profile["Canvas"].update({"status": True, "box": [0, 0, 200, 200]})
+        bot._palette = object()
+        window._save_config()
+        assert os.path.exists(paths.CONFIG_PATH)
+
+        monkeypatch.setattr(
+            QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes)
+        )
+        window._on_reset_config()
+
+        # Live state is back to defaults, without a restart.
+        assert window.profile.target == "generic"
+        assert window.profile["Palette"]["status"] is False
+        assert window.profile["Palette"]["box"] is None
+        assert window.profile["Canvas"]["status"] is False
+        assert bot._palette is None
+        # The fresh defaults are written back out.
+        assert os.path.exists(paths.CONFIG_PATH)
+    finally:
+        window.close()
+
+
 def test_pick_points_minimizes_and_captures_before_overlay(app, monkeypatch):
     """Hiding a dialog ends its exec() loop, which broke manual teaching; and
     the clean screenshot must be taken before the translucent veil appears."""
@@ -400,6 +440,95 @@ def test_setup_teach_palette_failure_keeps_status_unset(app, tmp_path, monkeypat
         dialog._teach()
         assert profile["Palette"]["status"] is False
         assert dialog._palette_preview._original is None
+    finally:
+        dialog.close()
+
+
+def _teachable_palette_image():
+    """A 2x4 swatch grid inside (100, 50)-(260, 130)."""
+    from PIL import Image
+
+    image = Image.new("RGB", (400, 300), (240, 240, 240))
+    colors = [
+        (255, 0, 0), (0, 200, 0), (0, 0, 255), (255, 255, 0),
+        (255, 0, 255), (0, 255, 255), (128, 0, 128), (255, 128, 0),
+    ]
+    for index, color in enumerate(colors):
+        row, col = divmod(index, 4)
+        for y in range(50 + row * 40, 50 + (row + 1) * 40):
+            for x in range(100 + col * 40, 100 + (col + 1) * 40):
+                image.putpixel((x, y), color)
+    return image
+
+
+def test_setup_palette_preview_persists_across_reopen(app, tmp_path, monkeypatch):
+    """The captured palette preview must survive closing and reopening Setup."""
+    monkeypatch.chdir(tmp_path)
+    import pyaint.ui.setup_dialog as setup_module
+    from pyaint.profile import Profile
+    from pyaint.ui.capture import PickResult
+    from pyaint.ui.setup_dialog import SetupDialog
+
+    image = _teachable_palette_image()
+    profile = Profile()
+    profile["Palette"]["rows"] = 2
+    profile["Palette"]["cols"] = 4
+    dialog = SetupDialog(None, Bot(), profile, required_tools=("Palette", "Canvas"))
+    try:
+        monkeypatch.setattr(
+            setup_module,
+            "pick_points",
+            lambda parent, count, prompt: PickResult([(100, 50), (260, 130)], image),
+        )
+        dialog._teach()
+        assert profile["Palette"]["preview"]
+    finally:
+        dialog.close()
+
+    reopened = SetupDialog(None, Bot(), profile, required_tools=("Palette", "Canvas"))
+    try:
+        assert reopened._current == "Palette"
+        assert reopened._palette_preview._original is not None
+        assert "colours sampled" in reopened._palette_feedback.text()
+    finally:
+        reopened.close()
+
+
+def test_setup_clear_tool_forgets_palette(app, tmp_path, monkeypatch):
+    """The Clear button must unset the tool and remove its preview."""
+    import os
+
+    monkeypatch.chdir(tmp_path)
+    import pyaint.ui.setup_dialog as setup_module
+    from pyaint import paths
+    from pyaint.profile import Profile
+    from pyaint.ui.capture import PickResult
+    from pyaint.ui.setup_dialog import SetupDialog
+
+    image = _teachable_palette_image()
+    profile = Profile()
+    profile["Palette"]["rows"] = 2
+    profile["Palette"]["cols"] = 4
+    bot = Bot()
+    dialog = SetupDialog(None, bot, profile, required_tools=("Palette", "Canvas"))
+    try:
+        monkeypatch.setattr(
+            setup_module,
+            "pick_points",
+            lambda parent, count, prompt: PickResult([(100, 50), (260, 130)], image),
+        )
+        dialog._teach()
+        assert profile["Palette"]["status"] is True
+        preview_file = os.path.join(paths.PROJECT_ROOT, profile["Palette"]["preview"])
+        assert os.path.exists(preview_file)
+
+        dialog._clear_tool("Palette")
+        assert profile["Palette"]["status"] is False
+        assert profile["Palette"]["box"] is None
+        assert profile["Palette"]["color_coords"] is None
+        assert profile["Palette"]["preview"] is None
+        assert bot._palette is None
+        assert not os.path.exists(preview_file)
     finally:
         dialog.close()
 
