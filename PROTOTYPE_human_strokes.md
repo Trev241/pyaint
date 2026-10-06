@@ -104,7 +104,9 @@ legacy = bot._estimate_drawing_time_seconds(cmap)
 - **No pause mid-stroke.** Pause/terminate is still checked between strokes, so
   granularity is coarser now. `draw_state["segment_idx"]` is the intended place
   to record a distance-along-path offset for resumable strokes.
-- **No UI controls** for `stroke_speed` / `frame_interval` yet.
+- **UI controls** for `stroke_speed` / `frame_interval` / `travel_delay` now
+  live in the inspector's Drawing section and are shown only while Outline is
+  selected.
 - **Not calibrated against skribbl.** Defaults are theoretical; a calibration
   pass (draw a line/circle/zigzag at increasing speed, screenshot, detect gaps)
   should set the real defaults.

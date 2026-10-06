@@ -325,8 +325,8 @@ class MainWindow(QMainWindow):
         self._detection_label.setWordWrap(True)
         env.add(self._detection_label)
         needs = QLabel(
-            "Auto-detect needs a blank canvas, the app maximized on the primary "
-            "monitor, at 100% display scaling."
+            "Auto-detect needs a blank canvas and the target app visible on the "
+            "primary monitor at 100% display scaling."
         )
         needs.setObjectName("SectionHint")
         needs.setWordWrap(True)
@@ -337,7 +337,7 @@ class MainWindow(QMainWindow):
         self._mode_combo = QComboBox()
         self._mode_combo.addItem("Layered (fewer strokes)", Bot.LAYERED)
         self._mode_combo.addItem("Slotted (exact runs)", Bot.SLOTTED)
-        self._mode_combo.addItem("Outline (outline and fill)", Bot.OUTLINE)
+        self._mode_combo.addItem("Outline (experimental)", Bot.OUTLINE)
         self._mode_combo.setItemData(
             0,
             "Merges a colour's runs where later colours paint over them: fewer "
@@ -351,38 +351,83 @@ class MainWindow(QMainWindow):
         )
         self._mode_combo.setItemData(
             2,
-            "Outlines regions to be filled in later, fastest",
+            "Experimental: traces region outlines as continuous strokes. "
+            "Results vary by target and the pacing controls are still being tuned.",
             Qt.ToolTipRole,
         )
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         mode.add(self._mode_combo)
-        self._stroke_distance = SliderField("Stroke distance", 1, 50, 1, 1)
-        self._stroke_distance.setToolTip(
-            "Outline only: how many traced boundary cells each stroke covers. "
-            "1 draws every traced cell separately; higher values join them into "
-            "longer, fewer strokes."
-        )
-        self._stroke_distance.changed.connect(self._on_stroke_distance_changed)
-        mode.add(self._stroke_distance)
+
+        self._mode_hint = QLabel()
+        self._mode_hint.setObjectName("ModeHint")
+        self._mode_hint.setWordWrap(True)
+        mode.add(self._mode_hint)
         layout.insertWidget(layout.count() - 1, mode)
 
         drawing = Section("Drawing", "How slowly and how finely Pyaint paints.")
-        self._setters = [
-            SliderField("Time per stroke", 0.0, 1.0, 0.1, 0.01),
-            SliderField("Detail (lower = finer)", 1, 50, 12, 1),
-            SliderField("Pause after big moves", 0.0, 2.0, 0.5, 0.05),
-        ]
-        tooltips = (
-            "How long each stroke takes (higher = slower, smoother).",
-            "Pixel step between sampled points. Lower = finer detail, more strokes.",
-            "Pause inserted when the cursor jumps a long way between strokes.",
+
+        # Kept in this order: index matches ``Bot.settings`` (delay, step, jump).
+        delay = SliderField("Time per stroke", 0.0, 1.0, 0.1, 0.01)
+        delay.setToolTip("How long each run takes (higher = slower, smoother).")
+        detail = SliderField("Detail (lower = finer)", 1, 50, 12, 1)
+        detail.setToolTip(
+            "Pixel step between sampled points. Lower = finer detail, more strokes."
         )
+        jump = SliderField("Pause after big moves", 0.0, 2.0, 0.5, 0.05)
+        jump.setToolTip(
+            "Pause inserted when the cursor jumps a long way between runs."
+        )
+        self._setters = [delay, detail, jump]
         for index, field in enumerate(self._setters):
-            field.setToolTip(tooltips[index])
             field.changed.connect(
                 lambda value, i=index: self._on_setting_changed(i, value)
             )
-            drawing.add(field)
+        # Detail shapes the quantised grid, so it applies to every mode.
+        drawing.add(detail)
+
+        # Outline pacing: the prototype's continuous-stroke knobs, surfaced
+        # only while Outline is selected.
+        self._stroke_speed = SliderField("Stroke speed (px/s)", 200, 5000, 1500, 50)
+        self._stroke_speed.setToolTip(
+            "How fast the cursor travels while tracing an outline (higher = faster)."
+        )
+        self._event_interval = SliderField("Event interval (ms)", 2, 50, 17, 1)
+        self._event_interval.setToolTip(
+            "Time between cursor move events. Lower = smoother, but a heavier "
+            "input load on the target."
+        )
+        self._travel_delay = SliderField("Pause between strokes", 0.0, 1.0, 0.05, 0.01)
+        self._travel_delay.setToolTip(
+            "Pause inserted when moving between separate outline strokes."
+        )
+        for field in (self._stroke_speed, self._event_interval, self._travel_delay):
+            field.changed.connect(self._on_outline_settings_changed)
+
+        # Two plain containers toggled by visibility: a hidden widget takes no
+        # layout space, so each mode shows only its own controls.
+        self._runs_controls = QWidget()
+        runs_layout = QVBoxLayout(self._runs_controls)
+        runs_layout.setContentsMargins(0, 0, 0, 0)
+        runs_layout.setSpacing(4)
+        runs_layout.addWidget(delay)
+        runs_layout.addWidget(jump)
+        drawing.add(self._runs_controls)
+
+        self._outline_controls = QWidget()
+        outline_layout = QVBoxLayout(self._outline_controls)
+        outline_layout.setContentsMargins(0, 0, 0, 0)
+        outline_layout.setSpacing(4)
+        self._outline_notice = NoticeBanner()
+        self._outline_notice.show_notice(
+            "Experimental: outline tracing is still being calibrated per target. "
+            "Start with the defaults and adjust the pacing below.",
+            "warning",
+        )
+        outline_layout.addWidget(self._outline_notice)
+        outline_layout.addWidget(self._stroke_speed)
+        outline_layout.addWidget(self._event_interval)
+        outline_layout.addWidget(self._travel_delay)
+        drawing.add(self._outline_controls)
 
         trigger_row = QHBoxLayout()
         trigger_label = QLabel("Trigger distance (px)")
@@ -679,11 +724,32 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
+        # A bordered card mirrors the source header above, with the image on a
+        # recessed stage so light/transparent images stay visually contained.
+        stage = QFrame()
+        stage.setObjectName("PreviewStage")
+        stage_layout = QVBoxLayout(stage)
+        stage_layout.setContentsMargins(10, 8, 10, 10)
+        stage_layout.setSpacing(8)
+
+        stage_header = QHBoxLayout()
+        stage_header.setContentsMargins(2, 0, 2, 0)
+        stage_header.setSpacing(8)
+        stage_title = QLabel("Preview")
+        stage_title.setObjectName("StageHeader")
+        stage_header.addWidget(stage_title)
+        stage_header.addStretch(1)
+        self._preview_meta = QLabel("No image")
+        self._preview_meta.setObjectName("StageMeta")
+        stage_header.addWidget(self._preview_meta)
+        stage_layout.addLayout(stage_header)
+
         self._preview = ImagePreview()
         self._preview.fileDropped.connect(self._load_local_path)
         self._preview.remoteDropped.connect(self._load_dropped_url)
         self._preview.rawDropped.connect(self._load_dropped_bytes)
-        layout.addWidget(self._preview, 1)
+        stage_layout.addWidget(self._preview, 1)
+        layout.addWidget(stage, 1)
 
         hint = QLabel(
             "Tip: drag an image from a browser or a file onto this preview to "
@@ -823,6 +889,11 @@ class MainWindow(QMainWindow):
         if "jump_threshold" in (recipe.drawing_settings or {}):
             self.bot.jump_threshold = int(recipe.drawing_settings["jump_threshold"])
             self._jump_threshold.setValue(self.bot.jump_threshold)
+        # Outline pacing has no recipe defaults; reset it to the built-in values
+        # so one target's tune never leaks into another's.
+        self.bot.stroke_speed = 1500.0
+        self.bot.frame_interval = 1.0 / 60.0
+        self.bot.travel_delay = 0.05
         self.draw_options = merge_drawing_options(
             self.draw_options,
             recipe.drawing_options or {},
@@ -886,9 +957,11 @@ class MainWindow(QMainWindow):
         self._mode = (
             mode if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE) else Bot.LAYERED
         )
-        self.bot.stroke_distance = max(
-            1, int(settings.get("stroke_distance", Bot.STROKE_DISTANCE))
+        self.bot.stroke_speed = float(settings.get("stroke_speed", 1500.0))
+        self.bot.frame_interval = max(
+            0.001, float(settings.get("frame_interval", 1.0 / 60.0))
         )
+        self.bot.travel_delay = max(0.0, float(settings.get("travel_delay", 0.05)))
 
         metric = self.tools.get("color_metric", DEFAULT_METRIC)
         if metric not in METRICS:
@@ -997,7 +1070,9 @@ class MainWindow(QMainWindow):
         return {
             "settings": [float(v) for v in self.bot.settings],
             "jump_threshold": int(self.bot.jump_threshold),
-            "stroke_distance": int(self.bot.stroke_distance),
+            "stroke_speed": float(self.bot.stroke_speed),
+            "frame_interval": float(self.bot.frame_interval),
+            "travel_delay": float(self.bot.travel_delay),
             "drawing_options": {
                 "ignore_white_pixels": bool(self.draw_options & Bot.IGNORE_WHITE),
                 "ignore_transparent_pixels": bool(
@@ -1021,8 +1096,12 @@ class MainWindow(QMainWindow):
             ]
         if "jump_threshold" in data:
             self.bot.jump_threshold = int(data["jump_threshold"])
-        if "stroke_distance" in data:
-            self.bot.stroke_distance = max(1, int(data["stroke_distance"]))
+        if "stroke_speed" in data:
+            self.bot.stroke_speed = max(50.0, float(data["stroke_speed"]))
+        if "frame_interval" in data:
+            self.bot.frame_interval = max(0.001, float(data["frame_interval"]))
+        if "travel_delay" in data:
+            self.bot.travel_delay = max(0.0, float(data["travel_delay"]))
         options = data.get("drawing_options") or {}
         self.draw_options = 0
         if options.get("ignore_white_pixels", True):
@@ -1044,7 +1123,9 @@ class MainWindow(QMainWindow):
         settings["pixel_size"] = self.bot.settings[1]
         settings["jump_delay"] = self.bot.settings[2]
         settings["jump_threshold"] = self.bot.jump_threshold
-        settings["stroke_distance"] = int(self.bot.stroke_distance)
+        settings["stroke_speed"] = float(self.bot.stroke_speed)
+        settings["frame_interval"] = float(self.bot.frame_interval)
+        settings["travel_delay"] = float(self.bot.travel_delay)
 
     def _store_drawing_options(self) -> None:
         options = self.tools.setdefault("drawing_options", {})
@@ -1080,20 +1161,43 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Widget <-> state sync
     # ------------------------------------------------------------------
+    #: One-line explainer shown under the stroke-mode picker.
+    _MODE_HINTS = {
+        Bot.LAYERED: (
+            "Merges a colour's runs where later colours paint over them \u2014 "
+            "fewer strokes, smoother joins."
+        ),
+        Bot.SLOTTED: (
+            "Draws every run exactly as-is \u2014 no overdraw, but more strokes."
+        ),
+        Bot.OUTLINE: (
+            "Experimental \u2014 traces region outlines as continuous, "
+            "human-shaped strokes."
+        ),
+    }
+
     def _refresh_drawing_widgets(self) -> None:
         for field, value in zip(self._setters, self.bot.settings):
             field.set_value(value)
-        self._stroke_distance.set_value(int(self.bot.stroke_distance))
+        self._stroke_speed.set_value(float(self.bot.stroke_speed))
+        self._event_interval.set_value(round(self.bot.frame_interval * 1000))
+        self._travel_delay.set_value(float(self.bot.travel_delay))
         mode_index = self._mode_combo.findData(self._mode)
         if mode_index >= 0:
             self._mode_combo.blockSignals(True)
             self._mode_combo.setCurrentIndex(mode_index)
             self._mode_combo.blockSignals(False)
-        self._update_stroke_distance_visibility()
+        self._update_mode_controls()
 
-    def _update_stroke_distance_visibility(self) -> None:
-        """Only OUTLINE mode uses a configurable stroke distance."""
-        self._stroke_distance.setVisible(self._mode == Bot.OUTLINE)
+    def _update_mode_controls(self) -> None:
+        """Show only the pacing controls that apply to the chosen mode."""
+        outline = self._mode == Bot.OUTLINE
+        self._runs_controls.setVisible(not outline)
+        self._outline_controls.setVisible(outline)
+        self._mode_hint.setText(self._MODE_HINTS.get(self._mode, ""))
+        self._mode_hint.setProperty("experimental", "true" if outline else "false")
+        self._mode_hint.style().unpolish(self._mode_hint)
+        self._mode_hint.style().polish(self._mode_hint)
 
     def _refresh_option_widgets(self) -> None:
         self._chk_ignore.setChecked(bool(self.draw_options & Bot.IGNORE_WHITE))
@@ -1211,13 +1315,17 @@ class MainWindow(QMainWindow):
         if self._initializing:
             return
         self._mode = self._mode_combo.currentData()
-        self._update_stroke_distance_visibility()
+        self._update_mode_controls()
         self._save_config()
 
-    def _on_stroke_distance_changed(self, value: float) -> None:
+    def _on_outline_settings_changed(self, _value: float = 0.0) -> None:
         if self._initializing:
             return
-        self.bot.stroke_distance = max(1, int(round(value)))
+        self.bot.stroke_speed = max(50.0, float(self._stroke_speed.value()))
+        self.bot.frame_interval = max(
+            0.001, float(self._event_interval.value()) / 1000.0
+        )
+        self.bot.travel_delay = max(0.0, float(self._travel_delay.value()))
         self._store_drawing_settings()
         self._save_config()
 
@@ -1401,6 +1509,7 @@ class MainWindow(QMainWindow):
             self._set_image_path(self._imname)
         else:
             self._preview.set_placeholder("Drag an image here, or use the field above.")
+            self._preview_meta.setText("No image")
             self._image_stack.setCurrentWidget(self._preview_page)
 
     def _on_url_changed(self, text: str) -> None:
@@ -1621,6 +1730,7 @@ class MainWindow(QMainWindow):
             return
         self._imname = path
         self._preview.set_pixmap(pil_to_qpixmap(image))
+        self._preview_meta.setText(f"{image.width} \u00d7 {image.height} px")
         self._image_stack.setCurrentWidget(self._preview_page)
         note = self._pending_source
         self._pending_source = None
@@ -1798,7 +1908,14 @@ class MainWindow(QMainWindow):
         self._save_config()
         self._refresh_readiness()
         palette = getattr(self.bot, "_palette", None)
-        if palette is not None and len(palette.colors) <= 1:
+        canvas_found = "canvas" in applied
+        palette_found = "palette" in applied
+        canvas_expected = bool(getattr(self._detection_result, "canvas_expected", False))
+        palette_expected = bool(
+            getattr(self._detection_result, "palette_expected", False)
+        )
+
+        if palette_found and palette is not None and len(palette.colors) <= 1:
             self._notice.show_notice(
                 "The palette sampled as a single colour — the target app may have "
                 "been covered. Re-run Auto-detect with the app in front, or teach it.",
@@ -1806,8 +1923,65 @@ class MainWindow(QMainWindow):
                 "Re-detect",
                 self.auto_detect,
             )
-        else:
+        elif palette_expected and not palette_found:
+            # Auto-detect is non-destructive: a manually taught palette is
+            # kept rather than wiped. Say so plainly so the result is not
+            # mistaken for a silent success or a lost setup.
+            if palette is not None:
+                message = (
+                    "Canvas detected, but the palette couldn't be found — keeping "
+                    "the palette you taught. Re-run with the app in front, or "
+                    "teach it again to update it."
+                    if canvas_found
+                    else "Auto-detect couldn't find the palette — keeping the "
+                    "palette you taught. Re-run with the target app in front, or "
+                    "teach it again to update it."
+                )
+                self._notice.show_notice(
+                    message, "warning", "Re-detect", self.auto_detect
+                )
+            else:
+                message = (
+                    "Canvas detected, but the palette couldn't be found. Re-run "
+                    "Auto-detect with the target app in front, or teach it."
+                    if canvas_found
+                    else "Auto-detect didn't find a canvas or palette. Re-run with "
+                    "the target app maximized and in front, or teach it."
+                )
+                self._notice.show_notice(
+                    message, "error", "Re-detect", self.auto_detect
+                )
+        elif canvas_expected and not canvas_found:
+            if self.profile.canvas_rect() is not None:
+                self._notice.show_notice(
+                    "Palette detected, but the canvas couldn't be found — keeping "
+                    "the canvas you taught. Re-run with a blank canvas in front, "
+                    "or teach it again to update it.",
+                    "warning",
+                    "Re-detect",
+                    self.auto_detect,
+                )
+            else:
+                self._notice.show_notice(
+                    "Palette detected, but the canvas couldn't be found. Re-run "
+                    "Auto-detect with a blank canvas in front, or teach it.",
+                    "error",
+                    "Re-detect",
+                    self.auto_detect,
+                )
+        elif palette_found and canvas_found:
             self._notice.show_notice("Canvas and palette detected.", "success")
+        elif palette_found:
+            self._notice.show_notice("Palette detected.", "success")
+        elif canvas_found:
+            self._notice.show_notice("Canvas detected.", "success")
+        else:
+            self._notice.show_notice(
+                "Auto-detect didn't find a canvas or palette.",
+                "error",
+                "Re-detect",
+                self.auto_detect,
+            )
         self._set_status(f"Auto-detect applied ({', '.join(applied) or 'nothing'}).")
 
     def _retry_detection(self) -> None:

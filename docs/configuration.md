@@ -12,7 +12,10 @@ UI.
     "delay": 0.1,
     "pixel_size": 12,
     "jump_delay": 0.5,
-    "jump_threshold": 5
+    "jump_threshold": 5,
+    "stroke_speed": 1500.0,
+    "frame_interval": 0.0166667,
+    "travel_delay": 0.05
   },
   "drawing_options": { "ignore_white_pixels": true, "ignore_transparent_pixels": true },
   "pause_key": "p",
@@ -56,10 +59,18 @@ Legacy keys from older versions (`Custom Colors`, `color_preview_spot`,
 
 | Setting | Range | Default | Meaning |
 |---------|-------|---------|---------|
-| `delay` | 0.0–1.0 s | 0.1 | How long each stroke takes |
+| `delay` | 0.0–1.0 s | 0.1 | How long each run takes (Slotted / Layered) |
 | `pixel_size` | 1–50 px | 12 | Detail level (lower = more detail, slower) |
-| `jump_delay` | 0.0–2.0 s | 0.5 | Pause after a large cursor jump |
-| `jump_threshold` | 1–200 px | 5 | Jump distance that triggers `jump_delay` |
+| `jump_delay` | 0.0–2.0 s | 0.5 | Pause after a large cursor jump (Slotted / Layered) |
+| `jump_threshold` | 1–200 px | 5 | Jump distance that triggers the pause |
+| `stroke_speed` | 200–5000 px/s | 1500 | Cursor travel speed while tracing an outline |
+| `frame_interval` | 0.002–0.05 s | 0.0167 | Seconds between cursor move events while tracing |
+| `travel_delay` | 0.0–1.0 s | 0.05 | Pause when moving between separate outline strokes |
+
+The outline-only keys (`stroke_speed`, `frame_interval`, `travel_delay`) are
+shown in the inspector only while **Outline (experimental)** is selected. The
+legacy `stroke_distance` key is no longer written or read; the outline planner
+emits one polyline per contour regardless of its value.
 
 ## Drawing options
 
@@ -68,7 +79,7 @@ Legacy keys from older versions (`Custom Colors`, `color_preview_spot`,
 | `ignore_white_pixels` | true | Skip pure-white runs |
 | `ignore_transparent_pixels` | true | Skip pixels with alpha below the cutoff (128), so transparent PNG areas aren't painted black |
 | `skip_first_color` | false | Don't draw the first colour in the map |
-| `draw_mode` | `layered` | `layered` (fewer strokes) or `slotted` (exact runs) |
+| `draw_mode` | `layered` | `layered` (fewer strokes), `slotted` (exact runs), or `outline` (experimental, continuous outline tracing) |
 | `color_metric` | `ciede2000` | `ciede2000` (perceptual) or `rgb` (legacy squared Euclidean) |
 
 ### Per-target drawing settings
@@ -101,9 +112,9 @@ position).
 ## Defaults
 
 A fresh profile has an unconfigured `Palette`/`Canvas`, `delay` 0.1,
-`pixel_size` 12, `jump_delay` 0.5, `jump_threshold` 5,
-`ignore_white_pixels` true, `ignore_transparent_pixels` true, `theme` `auto`,
-and `target` `generic`.
+`pixel_size` 12, `jump_delay` 0.5, `jump_threshold` 5, `stroke_speed` 1500,
+`frame_interval` 1/60 s, `travel_delay` 0.05, `ignore_white_pixels` true,
+`ignore_transparent_pixels` true, `theme` `auto`, and `target` `generic`.
 
 ## Resetting
 

@@ -150,8 +150,15 @@ registry of locator types:
 | `window_relative` | a sub-rectangle of an OS window |
 
 A spec may be a single locator or an ordered chain (first success wins), and
-every locator accepts a `region` crop. `detect_target()` returns a `Detection`;
-failure is silent so the UI can fall back to manual teaching.
+every locator accepts a `region` crop. Adding `region_window` makes that crop
+relative to a target window's *visible* frame, so it tracks the window across
+monitor sizes and layouts instead of assuming one screen arrangement. A
+window-relative crop is authored at 96 DPI and scaled by the window's display
+factor, so it also works at 125%/150% scaling. `detect_target()` returns a
+`Detection`; failure is silent so the UI can fall back to manual teaching.
+Applying a detection is non-destructive: regions it did not find are left
+alone, so a failed auto-detect cannot wipe a manually taught palette or canvas
+(pass `clear_missing=True` to opt into the old clearing behaviour).
 
 ## UI and threading
 

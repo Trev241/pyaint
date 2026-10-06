@@ -52,7 +52,9 @@ class Bot(CacheMixin):
         # interaction after a UI change can be consumed by window activation;
         # this warms the target up without drawing the stroke twice.
         self.prime_first_stroke = True
-        # Number of traced boundary cells per stroke in OUTLINE mode.
+        # Legacy outline knob, retained only for API/cache compatibility. The
+        # outline planner emits one polyline per contour and ignores the value,
+        # so it is no longer exposed in the UI.
         self.stroke_distance = planner.STROKE_DISTANCE
         self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
 
@@ -169,13 +171,19 @@ class Bot(CacheMixin):
             recipe = get_recipe(self.profile.target)
         return detect_target(recipe, self.capture_screen())
 
-    def apply_detection(self, detection, image=None):
+    def apply_detection(self, detection, image=None, clear_missing=False):
         """Apply a Detection to the live profile/palette; return what was used.
 
         ``image`` is the screenshot the detection was computed on. When given,
         the palette is sampled from it rather than a fresh screenshot, so the
         sampled colours come from the target app even if pyaint is now in
         front.
+
+        A region the recipe never attempts is left untouched. By default a
+        region the recipe *did* attempt but did not find is also left alone, so
+        a failed auto-detect can never wipe a palette/canvas the user taught by
+        hand. Callers that explicitly want the old "authoritative" behaviour
+        (clear an expected-but-missing region) can pass ``clear_missing=True``.
         """
         applied = []
         if detection.canvas:
@@ -183,6 +191,8 @@ class Bot(CacheMixin):
             self.init_canvas((x, y, x + w, y + h))
             self.profile["Canvas"]["status"] = True
             applied.append("canvas")
+        elif detection.canvas_expected and clear_missing:
+            self._clear_canvas()
         if detection.palette and detection.palette_rows and detection.palette_cols:
             x, y, w, h = detection.palette
             palette = self.init_palette(
@@ -198,7 +208,25 @@ class Bot(CacheMixin):
             entry["color_coords"] = {str(k): v for k, v in palette.colors_pos.items()}
             entry["status"] = True
             applied.append("palette")
+        elif detection.palette_expected and clear_missing:
+            self._clear_palette()
         return applied
+
+    def _clear_canvas(self) -> None:
+        """Forget the taught canvas (used when a re-detect misses it)."""
+        entry = self.profile["Canvas"]
+        entry["status"] = False
+        entry["box"] = None
+        entry["preview"] = None
+
+    def _clear_palette(self) -> None:
+        """Forget the taught palette (used when a re-detect misses it)."""
+        self._palette = None
+        entry = self.profile["Palette"]
+        entry["status"] = False
+        entry["box"] = None
+        entry["color_coords"] = None
+        entry["preview"] = None
 
     # def test(self):
     #     box = self._canvas

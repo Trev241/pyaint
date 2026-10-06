@@ -285,6 +285,85 @@ def test_region_offsets_locator_result():
     assert detection.canvas == (150, 100, 100, 80)
 
 
+def test_region_window_offsets_region_to_window():
+    """A region_window crop follows the window instead of screen (0, 0)."""
+    img = Image.new("RGB", (500, 400), (0, 0, 0))
+    for y in range(160, 240):
+        for x in range(300, 400):
+            img.putpixel((x, y), (255, 255, 255))
+    recipe = Recipe(
+        id="rw",
+        name="rw",
+        detection={
+            "canvas": {
+                "type": "center_rect",
+                "region_window": "Paint",
+                "region": [140, 60, 220, 180],
+                "tolerance": 5,
+            }
+        },
+    )
+    detection = detect_target(
+        recipe, img, window_provider=lambda title: (100, 50, 1919, 1079)
+    )
+    # Crop is (240, 110)-(460, 290), so the block is found at (300, 160).
+    assert detection.canvas == (300, 160, 100, 80)
+
+
+def test_region_window_missing_window_falls_back_to_absolute():
+    """An unknown window must not make the whole locator useless."""
+    recipe = Recipe(
+        id="rw2",
+        name="rw2",
+        detection={
+            "canvas": {
+                "type": "center_rect",
+                "region_window": "Paint",
+                "region": [0, 0, 100, 100],
+            }
+        },
+    )
+    detection = detect_target(
+        recipe, Image.new("RGB", (200, 200), (255, 255, 255)),
+        window_provider=lambda title: None,
+    )
+    # Treated as absolute (0, 0)-(100, 100).
+    assert detection.canvas == (0, 0, 100, 100)
+
+
+def test_region_window_scales_region_with_display():
+    """A 96-DPI region must be scaled onto a high-DPI screenshot."""
+    img = Image.new("RGB", (600, 400), (0, 0, 0))
+    # White block centred on the *scaled* crop centre: (350, 207).
+    for y in range(190, 230):
+        for x in range(330, 370):
+            img.putpixel((x, y), (255, 255, 255))
+    recipe = Recipe(
+        id="dpi",
+        name="dpi",
+        detection={
+            "canvas": {
+                "type": "center_rect",
+                "region_window": "Paint",
+                "region": [100, 50, 200, 150],
+                "tolerance": 5,
+            }
+        },
+    )
+    detection = detect_target(
+        recipe,
+        img,
+        window_provider=lambda title: (50, 20, 600, 400),
+        dpi_scale_provider=lambda title: 1.5,
+    )
+    assert detection.canvas is not None
+    x, y, w, h = detection.canvas
+    # The white block is the only non-black region, so the centre locator must
+    # land on it rather than on the black crop background.
+    assert 330 <= x and x + w <= 371
+    assert 190 <= y and y + h <= 231
+
+
 def test_register_locator_adds_detection_type():
     from pyaint import locators
 
@@ -340,3 +419,136 @@ def test_bot_apply_detection_updates_profile(monkeypatch):
     assert bot.profile["Palette"]["rows"] == 2
     assert bot.profile["Palette"]["cols"] == 4
     assert bot._palette is not None
+
+
+def test_apply_detection_keeps_taught_palette_when_missing(monkeypatch):
+    """A failed auto-detect must never wipe a manually taught palette."""
+    monkeypatch.chdir(".")
+    screen = make_screen()
+
+    def fake_screenshot(region=None):
+        if region:
+            x, y, w, h = region
+            return screen.crop((x, y, x + w, y + h))
+        return screen
+
+    monkeypatch.setattr(bot_module.pyautogui, "screenshot", fake_screenshot)
+
+    bot = Bot()
+    bot.apply_detection(
+        Detection(
+            canvas=(30, 20, 180, 110),
+            palette=(40, 150, 74, 34),
+            palette_rows=2,
+            palette_cols=4,
+        )
+    )
+    assert bot._palette is not None
+
+    applied = bot.apply_detection(
+        Detection(canvas=(30, 20, 180, 110), palette_expected=True)
+    )
+    assert applied == ["canvas"]
+    assert bot._palette is not None
+    assert bot.profile["Palette"]["status"] is True
+    assert bot.profile["Palette"]["box"] is not None
+    assert bot.profile["Palette"]["color_coords"] is not None
+    assert bot.profile["Canvas"]["status"] is True
+
+
+def test_apply_detection_keeps_taught_canvas_when_missing(monkeypatch):
+    monkeypatch.chdir(".")
+    screen = make_screen()
+
+    def fake_screenshot(region=None):
+        if region:
+            x, y, w, h = region
+            return screen.crop((x, y, x + w, y + h))
+        return screen
+
+    monkeypatch.setattr(bot_module.pyautogui, "screenshot", fake_screenshot)
+
+    bot = Bot()
+    bot.apply_detection(
+        Detection(
+            canvas=(30, 20, 180, 110),
+            palette=(40, 150, 74, 34),
+            palette_rows=2,
+            palette_cols=4,
+        )
+    )
+    applied = bot.apply_detection(
+        Detection(
+            palette=(40, 150, 74, 34),
+            palette_rows=2,
+            palette_cols=4,
+            canvas_expected=True,
+        )
+    )
+    assert applied == ["palette"]
+    assert bot.profile["Canvas"]["status"] is True
+    assert bot.profile["Canvas"]["box"] is not None
+    assert bot._palette is not None
+
+
+def test_apply_detection_clear_missing_opt_in(monkeypatch):
+    """Callers can explicitly request the destructive behaviour."""
+    monkeypatch.chdir(".")
+    screen = make_screen()
+
+    def fake_screenshot(region=None):
+        if region:
+            x, y, w, h = region
+            return screen.crop((x, y, x + w, y + h))
+        return screen
+
+    monkeypatch.setattr(bot_module.pyautogui, "screenshot", fake_screenshot)
+
+    bot = Bot()
+    bot.apply_detection(
+        Detection(
+            canvas=(30, 20, 180, 110),
+            palette=(40, 150, 74, 34),
+            palette_rows=2,
+            palette_cols=4,
+        )
+    )
+    applied = bot.apply_detection(
+        Detection(canvas=(30, 20, 180, 110), palette_expected=True),
+        clear_missing=True,
+    )
+    assert applied == ["canvas"]
+    assert bot._palette is None
+    assert bot.profile["Palette"]["status"] is False
+
+
+def test_apply_detection_keeps_untargeted_region(monkeypatch):
+    """A recipe that never detects a palette must not wipe a taught one."""
+    monkeypatch.chdir(".")
+    screen = make_screen()
+
+    def fake_screenshot(region=None):
+        if region:
+            x, y, w, h = region
+            return screen.crop((x, y, x + w, y + h))
+        return screen
+
+    monkeypatch.setattr(bot_module.pyautogui, "screenshot", fake_screenshot)
+
+    bot = Bot()
+    bot.apply_detection(
+        Detection(
+            canvas=(30, 20, 180, 110),
+            palette=(40, 150, 74, 34),
+            palette_rows=2,
+            palette_cols=4,
+        )
+    )
+    assert bot._palette is not None
+
+    # canvas_expected / palette_expected default False: an untargeted region
+    # is left alone even though the detection object does not carry it.
+    applied = bot.apply_detection(Detection(canvas=(30, 20, 180, 110)))
+    assert applied == ["canvas"]
+    assert bot._palette is not None
+    assert bot.profile["Palette"]["status"] is True

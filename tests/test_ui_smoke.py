@@ -64,21 +64,55 @@ def test_main_window_has_tool_controls(app, tmp_path, monkeypatch):
         window.close()
 
 
-def test_stroke_distance_only_shown_for_outline(app, tmp_path, monkeypatch):
+def test_mode_specific_controls_switch_with_stroke_mode(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bot = Bot()
     window = MainWindow(bot)
     try:
         layered = window._mode_combo.findData(Bot.LAYERED)
         outline = window._mode_combo.findData(Bot.OUTLINE)
+
         window._mode_combo.setCurrentIndex(layered)
-        assert window._stroke_distance.isHidden()
+        assert window._runs_controls.isVisibleTo(window)
+        assert not window._outline_controls.isVisibleTo(window)
+        assert window._mode_hint.property("experimental") != "true"
+
         window._mode_combo.setCurrentIndex(outline)
-        assert not window._stroke_distance.isHidden()
-        window._stroke_distance.set_value(4, emit=True)
-        assert bot.stroke_distance == 4
+        assert window._outline_controls.isVisibleTo(window)
+        assert not window._runs_controls.isVisibleTo(window)
+        assert window._mode_hint.property("experimental") == "true"
+        assert "Experimental" in window._mode_hint.text()
+
+        window._stroke_speed.set_value(2000, emit=True)
+        assert bot.stroke_speed == pytest.approx(2000)
+        window._event_interval.set_value(20, emit=True)
+        assert bot.frame_interval == pytest.approx(0.02)
+        window._travel_delay.set_value(0.2, emit=True)
+        assert bot.travel_delay == pytest.approx(0.2)
     finally:
         window.close()
+
+
+def test_outline_settings_persist(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._mode_combo.setCurrentIndex(window._mode_combo.findData(Bot.OUTLINE))
+        window._stroke_speed.set_value(2000, emit=True)
+        window._event_interval.set_value(25, emit=True)
+        window._travel_delay.set_value(0.2, emit=True)
+        window._save_config()
+    finally:
+        window.close()
+
+    restored = MainWindow(Bot())
+    try:
+        assert restored.bot.stroke_speed == pytest.approx(2000)
+        assert restored.bot.frame_interval == pytest.approx(0.025)
+        assert restored.bot.travel_delay == pytest.approx(0.2)
+        assert restored._mode == Bot.OUTLINE
+    finally:
+        restored.close()
 
 
 def test_progress_overlay_updates(app):
@@ -222,33 +256,176 @@ def test_detection_uses_review_overlay(app, tmp_path, monkeypatch):
         window.close()
 
 
-def test_pick_points_minimizes_instead_of_hiding_parent(app, monkeypatch):
-    """Hiding a dialog ends its exec() loop, which broke manual teaching."""
+def test_apply_detection_keeps_taught_palette_and_warns(app, tmp_path, monkeypatch):
+    """A canvas-only re-detect must keep the taught palette and say so."""
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    from pyaint.locators import Detection
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        white = Image.new("RGB", (300, 200), (255, 255, 255))
+        # Seed a previously taught canvas and palette.
+        bot.apply_detection(
+            Detection(
+                canvas=(30, 20, 180, 110),
+                palette=(40, 150, 74, 34),
+                palette_rows=2,
+                palette_cols=4,
+            ),
+            image=white,
+        )
+        assert bot._palette is not None
+        assert window._environment_ready()
+
+        # Re-detect finds only the canvas: the taught palette is kept.
+        window._detection_result = Detection(
+            canvas=(30, 20, 180, 110), palette_expected=True
+        )
+        window._detection_image = white
+        window._apply_detection()
+
+        assert bot._palette is not None
+        assert bot.profile["Palette"]["status"] is True
+        assert window._environment_ready()
+        notice = window._notice._text.text().lower()
+        assert "palette" in notice and "keeping" in notice
+    finally:
+        window.close()
+
+
+def test_pick_points_minimizes_and_captures_before_overlay(app, monkeypatch):
+    """Hiding a dialog ends its exec() loop, which broke manual teaching; and
+    the clean screenshot must be taken before the translucent veil appears."""
+    from PIL import Image
     from PySide6.QtWidgets import QDialog, QWidget
 
     import pyaint.ui.capture as capture
 
     parent = QWidget()
     parent.show()
-    seen = {}
+    events = []
+    sentinel = Image.new("RGB", (10, 10), (1, 2, 3))
 
     class FakeOverlay:
         def __init__(self, count, prompt):
             self.points = [(1, 1), (2, 2)]
-            self.image = None
 
         def exec(self):
-            seen["minimized_during"] = parent.isMinimized()
+            events.append(("exec", parent.isMinimized()))
             return QDialog.Accepted
 
+    def fake_screenshot(*args, **kwargs):
+        events.append(("screenshot", parent.isMinimized()))
+        return sentinel
+
     monkeypatch.setattr(capture, "_PickOverlay", FakeOverlay)
+    monkeypatch.setattr(capture.pyautogui, "screenshot", fake_screenshot)
     try:
         result = capture.pick_points(parent, 2, "prompt")
-        assert seen["minimized_during"] is True
-        assert not parent.isMinimized()
+        # Grabbed while pyaint is minimized and *before* the overlay runs.
+        assert events[0] == ("screenshot", True)
+        assert events[1] == ("exec", True)
         assert result is not None and len(result.points) == 2
+        assert result.image is sentinel
+        assert not parent.isMinimized()
     finally:
         parent.close()
+
+
+def test_setup_teach_palette_samples_and_previews(app, tmp_path, monkeypatch):
+    """Two taught corners must set the palette status and fill the preview."""
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    import pyaint.ui.setup_dialog as setup_module
+    from pyaint.profile import Profile
+    from pyaint.ui.capture import PickResult
+    from pyaint.ui.setup_dialog import SetupDialog
+
+    image = Image.new("RGB", (400, 300), (240, 240, 240))
+    colors = [
+        (255, 0, 0), (0, 200, 0), (0, 0, 255), (255, 255, 0),
+        (255, 0, 255), (0, 255, 255), (128, 0, 128), (255, 128, 0),
+    ]
+    # 2 rows x 4 columns inside (100, 50)-(260, 130).
+    for index, color in enumerate(colors):
+        row, col = divmod(index, 4)
+        for y in range(50 + row * 40, 50 + (row + 1) * 40):
+            for x in range(100 + col * 40, 100 + (col + 1) * 40):
+                image.putpixel((x, y), color)
+
+    profile = Profile()
+    profile["Palette"]["rows"] = 2
+    profile["Palette"]["cols"] = 4
+    dialog = SetupDialog(None, Bot(), profile, required_tools=("Palette", "Canvas"))
+    try:
+        assert dialog._current == "Palette"
+        monkeypatch.setattr(
+            setup_module,
+            "pick_points",
+            lambda parent, count, prompt: PickResult([(100, 50), (260, 130)], image),
+        )
+        dialog._teach()
+        assert profile["Palette"]["status"] is True
+        assert profile["Palette"]["color_coords"]
+        assert dialog._palette_preview._original is not None
+    finally:
+        dialog.close()
+
+
+def test_setup_teach_palette_failure_keeps_status_unset(app, tmp_path, monkeypatch):
+    """A failed sample must not claim the palette is configured."""
+    monkeypatch.chdir(tmp_path)
+    from PySide6.QtWidgets import QMessageBox
+
+    import pyaint.ui.setup_dialog as setup_module
+    from pyaint.profile import Profile
+    from pyaint.ui.capture import PickResult
+    from pyaint.ui.setup_dialog import SetupDialog
+
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+    profile = Profile()
+    dialog = SetupDialog(None, Bot(), profile, required_tools=("Palette", "Canvas"))
+    try:
+        # No screenshot was captured, so sampling must fail rather than fall
+        # back to a fresh grab that shows the dialog itself.
+        monkeypatch.setattr(
+            setup_module,
+            "pick_points",
+            lambda parent, count, prompt: PickResult([(10, 10), (80, 60)], None),
+        )
+        dialog._teach()
+        assert profile["Palette"]["status"] is False
+        assert dialog._palette_preview._original is None
+    finally:
+        dialog.close()
+
+
+def test_pick_points_scales_logical_clicks_to_screenshot(app, monkeypatch):
+    """A scaled display must not offset a manually taught box."""
+    from PIL import Image
+    from PySide6.QtCore import QRect
+
+    import pyaint.ui.capture as capture
+
+    class FakeScreen:
+        def geometry(self):
+            return QRect(0, 0, 1280, 720)
+
+    monkeypatch.setattr(
+        capture.QGuiApplication, "primaryScreen", staticmethod(lambda: FakeScreen())
+    )
+    physical = Image.new("RGB", (1920, 1080))
+    assert capture._to_screenshot_points([(100, 50)], physical) == [(150, 75)]
+
+    # A 1:1 display passes clicks through untouched.
+    assert capture._to_screenshot_points(
+        [(100, 50)], Image.new("RGB", (1280, 720))
+    ) == [(100, 50)]
+    assert capture._to_screenshot_points([(1, 2)], None) == [(1, 2)]
 
 
 def test_progress_signal_updates_bar(app, tmp_path, monkeypatch):

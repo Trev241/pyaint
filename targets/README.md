@@ -43,10 +43,16 @@ tried until one succeeds).
 | `color_signature` | the block covering the most distinct listed colours | `colors`, `tolerance`, `gap`, `min_colors`, `min_fill` |
 | `window_relative` | a sub-rectangle of an OS window | `window` (title substring), `rect` `[x,y,w,h]` (0..1) |
 
-Every locator also accepts **`region`** `[x, y, w, h]` (absolute pixels):
-detection runs inside that crop and the result is offset back to screen
-coordinates. Use it to keep a locator from being distracted by unrelated UI
-(e.g. limitting a palette search to the ribbon).
+Every locator also accepts **`region`** `[x, y, w, h]` (pixels): detection runs
+inside that crop and the result is offset back to screen coordinates. Use it
+to keep a locator from being distracted by unrelated UI (e.g. limiting a
+palette search to the ribbon).
+
+Add **`region_window`** (a window title substring, or a list tried in order) to
+interpret `region` relative to that window's visible frame instead of the
+screen origin. The crop then follows the window if it moves or is a different
+size, so the same recipe works across monitor sizes and window layouts. If no
+named window is found, `region` falls back to absolute screen pixels.
 
 `color_signature` and `window_relative` return `rows`/`cols` from the spec, so
 include them when detecting a palette.

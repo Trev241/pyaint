@@ -17,10 +17,15 @@ Supported locator types: ``white_rect`` (a large near-white canvas),
 ``color_signature`` (match a known set of colours), and ``window_relative``
 (a sub-rectangle of an OS window). Anything that fails returns ``None`` so the
 caller can fall back to manual teaching.
+
+Every locator also accepts ``region`` (a pixel crop) and ``region_window``
+(the window title that crop is relative to), so a small search area can follow
+the target window across monitor sizes, positions, and layouts.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -408,9 +413,8 @@ def window_relative_rect(window: Rect, normalized: Sequence[float]) -> Rect:
     )
 
 
-def get_window_rect(title_substring: str) -> Optional[Rect]:
-    """Best-effort client-rect lookup for a window whose title contains the
-    given text. Windows-only; returns ``None`` elsewhere or on failure."""
+def _find_window(title_substring: str):
+    """Best-effort hwnd for the first visible window whose title matches."""
     try:
         import ctypes
         from ctypes import wintypes
@@ -419,7 +423,7 @@ def get_window_rect(title_substring: str) -> Optional[Rect]:
 
     try:
         user32 = ctypes.windll.user32
-        found: List[Rect] = []
+        found = []
 
         def callback(hwnd, _):
             length = user32.GetWindowTextLengthW(hwnd)
@@ -427,19 +431,10 @@ def get_window_rect(title_substring: str) -> Optional[Rect]:
                 return True
             buffer = ctypes.create_unicode_buffer(length + 1)
             user32.GetWindowTextW(hwnd, buffer, length + 1)
-            if title_substring.lower() in buffer.value.lower() and user32.IsWindowVisible(hwnd):
-                rect = wintypes.RECT()
-                if user32.GetClientRect(hwnd, ctypes.byref(rect)):
-                    origin = wintypes.POINT(0, 0)
-                    user32.ClientToScreen(hwnd, ctypes.byref(origin))
-                    found.append(
-                        (
-                            origin.x,
-                            origin.y,
-                            rect.right - rect.left,
-                            rect.bottom - rect.top,
-                        )
-                    )
+            if title_substring.lower() in buffer.value.lower() and user32.IsWindowVisible(
+                hwnd
+            ):
+                found.append(hwnd)
             return True
 
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
@@ -449,17 +444,152 @@ def get_window_rect(title_substring: str) -> Optional[Rect]:
         return None
 
 
+def get_window_rect(title_substring: str) -> Optional[Rect]:
+    """Best-effort client-rect lookup for a window whose title contains the
+    given text. Windows-only; returns ``None`` elsewhere or on failure."""
+    hwnd = _find_window(title_substring)
+    if hwnd is None:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        rect = wintypes.RECT()
+        if user32.GetClientRect(hwnd, ctypes.byref(rect)):
+            origin = wintypes.POINT(0, 0)
+            user32.ClientToScreen(hwnd, ctypes.byref(origin))
+            return (
+                origin.x,
+                origin.y,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+            )
+    except Exception:
+        return None
+    return None
+
+
+def get_window_frame_rect(title_substring: str) -> Optional[Rect]:
+    """Best-effort *visible* frame rect for a window.
+
+    This is the rectangle a screenshot actually shows, so pixel offsets into a
+    screenshot line up with it. It prefers DWM's extended frame bounds (which
+    exclude the invisible resize border of a maximized window) and falls back
+    to ``GetWindowRect``. Windows-only; ``None`` elsewhere or on failure.
+    """
+    hwnd = _find_window(title_substring)
+    if hwnd is None:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        try:
+            rect = wintypes.RECT()
+            DWMWA_EXTENDED_FRAME_BOUNDS = 9
+            result = ctypes.windll.dwmapi.DwmGetWindowAttribute(
+                wintypes.HWND(hwnd),
+                ctypes.c_uint(DWMWA_EXTENDED_FRAME_BOUNDS),
+                ctypes.byref(rect),
+                ctypes.sizeof(rect),
+            )
+            if result == 0:
+                return (
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                )
+        except Exception:
+            pass
+        rect = wintypes.RECT()
+        if ctypes.windll.user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+            return (
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+            )
+    except Exception:
+        return None
+    return None
+
+
+def get_window_dpi_scale(title_substring: str) -> float:
+    """Best-effort display scale (1.0 == 96 DPI) for a window.
+
+    Recipe regions are authored in 96-DPI pixels, but Windows renders the built
+    of a scaled display (125%, 150%, ...) at larger *physical* pixel sizes. A
+    screenshot taken on such a display therefore needs every hard-coded
+    pixel region widened and shifted by this factor. Windows-only; returns
+    ``1.0`` elsewhere or on failure.
+    """
+    hwnd = _find_window(title_substring)
+    if hwnd is None:
+        return 1.0
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        try:
+            dpi = user32.GetDpiForWindow(wintypes.HWND(hwnd))
+        except (AttributeError, OSError):
+            dpi = 0
+        if not dpi:
+            # Pre-1607 fallback: the system DPI reported for the desktop DC.
+            gdi32 = ctypes.windll.gdi32
+            hdc = user32.GetDC(0)
+            try:
+                dpi = gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+            finally:
+                user32.ReleaseDC(0, hdc)
+        if dpi:
+            return float(dpi) / 96.0
+    except Exception:
+        return 1.0
+    return 1.0
+
+
+def get_primary_dpi_scale() -> float:
+    """Display scale of the primary monitor (``1.0`` on failure)."""
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
+        hdc = user32.GetDC(0)
+        try:
+            dpi = gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+        finally:
+            user32.ReleaseDC(0, hdc)
+        if dpi:
+            return float(dpi) / 96.0
+    except Exception:
+        return 1.0
+    return 1.0
+
+
 # ---------------------------------------------------------------------------
 # Detection orchestration
 # ---------------------------------------------------------------------------
 @dataclass
 class Detection:
-    """What auto-detection found. Falsy when nothing usable was detected."""
+    """What auto-detection found. Falsy when nothing usable was detected.
+
+    ``canvas_expected`` / ``palette_expected`` record whether the recipe
+    actually configured a locator for that region. Callers should only treat a
+    missing region as a failed capture when it was expected; a recipe that does
+    not detect a palette must not wipe a manually taught one.
+    """
 
     canvas: Optional[Rect] = None
     palette: Optional[Rect] = None
     palette_rows: Optional[int] = None
     palette_cols: Optional[int] = None
+    canvas_expected: bool = False
+    palette_expected: bool = False
 
     def __bool__(self) -> bool:
         return self.canvas is not None or self.palette is not None
@@ -494,7 +624,7 @@ def register_locator(name: str, allowed_params):
     """Register a locator type usable as ``{"type": name, ...}`` in a recipe."""
 
     def decorator(func: LocatorHandler) -> LocatorHandler:
-        _LOCATORS[name] = (func, set(allowed_params) | {"region"})
+        _LOCATORS[name] = (func, set(allowed_params) | {"region", "region_window"})
         return func
 
     return decorator
@@ -561,6 +691,7 @@ def _run_spec(
     image: Image.Image,
     recipe: Any,
     window_provider: Optional[WindowProvider],
+    dpi_scale_provider: Optional[Callable[[str], float]] = None,
 ) -> Tuple[Optional[Rect], Optional[int], Optional[int]]:
     if not isinstance(spec, dict):
         return None, None, None
@@ -569,17 +700,72 @@ def _run_spec(
         return None, None, None
     handler, allowed = entry
 
-    # Optional absolute-pixel region of interest: detect inside a crop, then
-    # offset the result back to full-image coordinates.
+    # Optional pixel region of interest: detect inside a crop, then offset the
+    # result back to full-image coordinates. When ``region_window`` is given,
+    # ``region`` is interpreted relative to that window's visible frame, so the
+    # crop follows a moved or differently sized target window instead of being
+    # pinned to one monitor layout.
     region = spec.get("region")
     offset = (0, 0)
     work = image
+    scale = 1.0
     if isinstance(region, (list, tuple)) and len(region) == 4:
         rx, ry, rw, rh = (int(v) for v in region)
+        region_window = spec.get("region_window")
+        base_x = base_y = 0
+        matched_title = None
+        if region_window:
+            provider_fn = window_provider or get_window_frame_rect
+            candidates = (
+                region_window
+                if isinstance(region_window, (list, tuple))
+                else [region_window]
+            )
+            for title in candidates:
+                window = provider_fn(str(title))
+                if window:
+                    base_x, base_y = window[0], window[1]
+                    matched_title = str(title)
+                    break
+            # If no window is found, fall through and treat the region as
+            # absolute screen pixels: for a maximized window at the screen
+            # origin that is exactly where the palette is, and a wrong guess
+            # still has to satisfy the locator's own colour checks.
+
+        # A window-relative region is authored in 96-DPI pixels. On a scaled
+        # display the target renders larger, so widen and shift the crop by the
+        # window's display scale before mapping it onto the physical screenshot.
+        # An absolute region is left in raw pixels: it was tuned for a specific
+        # screen, not for a DPI-independent layout.
+        if region_window:
+            if dpi_scale_provider is not None:
+                scale = float(dpi_scale_provider(matched_title or ""))
+            elif window_provider is None:
+                scale = (
+                    get_window_dpi_scale(matched_title)
+                    if matched_title is not None
+                    else get_primary_dpi_scale()
+                )
+            if scale <= 0:
+                scale = 1.0
+
+        rx = base_x + int(round(rx * scale))
+        ry = base_y + int(round(ry * scale))
+        rw = max(1, int(round(rw * scale)))
+        rh = max(1, int(round(rh * scale)))
         work = image.crop((rx, ry, rx + rw, ry + rh))
         offset = (rx, ry)
 
-    params = {k: v for k, v in spec.items() if k in allowed and k != "region"}
+    params = {
+        k: v
+        for k, v in spec.items()
+        if k in allowed and k not in ("region", "region_window")
+    }
+    # Pixel-sized kernel params must scale with the display too; otherwise the
+    # swatches no longer merge into one component on a high-DPI screen.
+    if "gap" in params and scale != 1.0:
+        gap = int(params["gap"])
+        params["gap"] = max(gap, int(math.ceil(gap * scale)) + 1)
     try:
         rect, rows, cols = handler(work, recipe, params, window_provider)
     except TypeError:
@@ -594,13 +780,16 @@ def _run_chain(
     image: Image.Image,
     recipe: Any,
     window_provider: Optional[WindowProvider],
+    dpi_scale_provider: Optional[Callable[[str], float]] = None,
 ) -> Tuple[Optional[Rect], Optional[int], Optional[int]]:
     """Try a spec, or an ordered list of specs, returning the first success."""
     specs = spec if isinstance(spec, list) else [spec]
     for item in specs:
         if not isinstance(item, dict):
             continue
-        rect, rows, cols = _run_spec(item, image, recipe, window_provider)
+        rect, rows, cols = _run_spec(
+            item, image, recipe, window_provider, dpi_scale_provider
+        )
         if rect:
             return rect, rows, cols
     return None, None, None
@@ -610,23 +799,33 @@ def detect_target(
     recipe: Any,
     image: Image.Image,
     window_provider: Optional[WindowProvider] = None,
+    dpi_scale_provider: Optional[Callable[[str], float]] = None,
 ) -> Detection:
     """Run a recipe's configured locators against ``image``.
 
     Never raises for "not found"; callers are expected to fall back to manual
     teaching when the returned :class:`Detection` is falsy.
+
+    ``window_provider`` / ``dpi_scale_provider`` are injectable for tests. When
+    left unset the locators use the real OS window and display-scale lookups.
     """
     detection = Detection()
     config = getattr(recipe, "detection", None) or {}
 
     canvas_spec = config.get("canvas")
     if canvas_spec:
-        rect, _, _ = _run_chain(canvas_spec, image, recipe, window_provider)
+        detection.canvas_expected = True
+        rect, _, _ = _run_chain(
+            canvas_spec, image, recipe, window_provider, dpi_scale_provider
+        )
         detection.canvas = rect
 
     palette_spec = config.get("palette")
     if palette_spec:
-        rect, rows, cols = _run_chain(palette_spec, image, recipe, window_provider)
+        detection.palette_expected = True
+        rect, rows, cols = _run_chain(
+            palette_spec, image, recipe, window_provider, dpi_scale_provider
+        )
         detection.palette = rect
         detection.palette_rows = rows
         detection.palette_cols = cols

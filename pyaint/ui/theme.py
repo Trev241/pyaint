@@ -570,10 +570,14 @@ def stylesheet(tokens: dict | None = None) -> str:
         font-weight: 600;
     }}
     #PreviewStage {{
-        background: {t['bg']};
+        background: {t['bg_card']};
+        border: 1px solid {t['border']};
+        border-radius: 6px;
     }}
     #PreviewImage {{
-        background: transparent;
+        background: {t['bg']};
+        border: 1px solid {t['border']};
+        border-radius: 4px;
     }}
     #PreviewImage[dragActive="true"] {{
         background: {t['bg_card']};
@@ -583,7 +587,23 @@ def stylesheet(tokens: dict | None = None) -> str:
     #StageHeader {{
         color: {t['fg_muted']};
         font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
         padding: 0 2px;
+    }}
+    #StageMeta {{
+        color: {t['fg_dim']};
+        font-size: 11px;
+        padding: 0 2px;
+    }}
+    #ModeHint {{
+        color: {t['fg_muted']};
+        font-size: 11px;
+        padding: 0 2px;
+    }}
+    #ModeHint[experimental="true"] {{
+        color: {t['warning']};
     }}
     #StageHint {{
         color: {t['fg_dim']};

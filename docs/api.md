@@ -88,7 +88,7 @@ Legacy views onto the profile: `new_layer`, `color_button`,
 |--------|-------------|
 | `capture_screen()` | Return the current screen as a PIL image |
 | `detect_target(recipe=None)` | Run the recipe's locators → `Detection` |
-| `apply_detection(detection, image=None)` | Write a `Detection` into the profile/palette |
+| `apply_detection(detection, image=None, clear_missing=False)` | Write a `Detection` into the profile/palette |
 
 ### Processing
 
@@ -125,8 +125,10 @@ and delegate here, so the same functions are headlessly testable and cacheable.
 
 `stroke_distance` (outline mode) is retained for API / cache compatibility and
 no longer changes the plan: every traced contour is emitted as one polyline.
-`Bot` still exposes it as `Bot.stroke_distance`, and the UI shows the control
-only when Outline is selected.
+`Bot` still exposes it as `Bot.stroke_distance`, but the stale control was
+removed from the UI. Outline pacing is tuned with the continuous-stroke knobs
+(`Bot.stroke_speed`, `Bot.frame_interval`, `Bot.travel_delay`) shown only while
+Outline is selected.
 
 `quantize_image` supersamples each output cell and takes the modal palette
 colour, which votes out isolated compression / anti-aliasing artifacts at the
@@ -217,9 +219,25 @@ here; `Bot` owns one as `bot.painter`.
 - `find_white_rect`, `find_color_rect`, `find_center_rect`,
   `find_color_grid`, `find_color_signature`
 - `window_relative_rect(window, normalized)`, `get_window_rect(title)`
-- `detect_target(recipe, image, window_provider=None)` → `Detection`
-- `Detection` — `canvas`, `palette`, `palette_rows`, `palette_cols`; falsy when
-  empty
+  (client rect), `get_window_frame_rect(title)` (visible DWM frame bounds, used
+  by `region_window` so screenshot offsets line up), `get_window_dpi_scale(title)`
+  and `get_primary_dpi_scale()` (display scale for scaling 96-DPI regions)
+- `detect_target(recipe, image, window_provider=None, dpi_scale_provider=None)`
+  → `Detection`
+- `Detection` — `canvas`, `palette`, `palette_rows`, `palette_cols`,
+  `canvas_expected`, `palette_expected`; falsy when empty. The `*_expected`
+  flags say whether the recipe configured a locator for that region, so a
+  missing expected region can be reported rather than mistaken for a saved one.
+  `apply_detection` leaves an expected-but-missing region alone by default so a
+  failed detection cannot wipe a manually taught palette; pass
+  `clear_missing=True` for the old authoritative behaviour.
+
+Every locator spec accepts `region` `[x, y, w, h]` and, optionally,
+`region_window` (a window title substring) to make that crop relative to the
+window instead of the screen — which keeps a tight search area correct across
+window positions and monitor sizes. A window-relative region is interpreted in
+96-DPI pixels and scaled by the window's display factor, and the locator's
+pixel-sized `gap` is scaled too.
 
 `pyaint.annotate.annotate_detection(image, detection)` draws the regions and
 palette swatch centres onto a screenshot copy.

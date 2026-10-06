@@ -13,6 +13,35 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Manually teaching the palette now samples the right pixels.** The point
+  picker grabbed its screenshot *after* hiding its translucent black veil, so
+  the veil could still be composited into the shot — the palette preview came
+  out dark/blank and the sampled colours were wrong. The picker now grabs a
+  clean full-screen image before the overlay appears, and Setup refuses to
+  sample a fresh screenshot (which would show its own dialog) if that capture
+  failed.
+- **Auto-detect no longer wipes a palette or canvas you taught by hand.** A
+  failed detection used to clear an expected-but-missing region, so running
+  Auto-detect on a target whose palette it couldn't find silently erased the
+  manually taught palette (leaving status unset and the preview blank). Regions
+  the recipe attempts but does not find are now left untouched; the app reports
+  that the taught region was kept so the result is never mistaken for a silent
+  success or a lost setup. Callers can still opt into the destructive behaviour
+  with `apply_detection(..., clear_missing=True)`.
+- **MS Paint palette detection works at any display scaling.** The palette
+  locator searched a hard-coded absolute-pixel region authored for a 100%
+  display, so on a 125%/150% screen (where the DWM frame is still measured in
+  physical pixels) it cropped the wrong part of the ribbon and found nothing.
+  Window-relative regions now scale by the window's DPI factor, and the swatch
+  merge kernel (`gap`) scales with them, so the exact-colour signature still
+  spans the whole grid. Verified on Windows 11 Paint at 125% scaling, where the
+  palette is now found as a full 2x10 grid.
+- **A failed palette sample is no longer reported as configured.** Setup marks
+  the palette as set only after it actually samples the colours, refuses a
+  zero-area box, and surfaces the reason in a dialog instead of silently
+  logging it. The picker also makes its own windows fully transparent before
+  grabbing the teaching screenshot, so the Windows minimize animation can't
+  leak pyaint into the shot.
 - **Strokes no longer land on the canvas border.** The planner now insets the
   taught canvas by `CANVAS_PADDING` (4px) before fitting, so edge strokes stay
   inside the drawable area. Targets like skribbl can register a click a hair
@@ -56,6 +85,24 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   eagerly.
 
 ### Changed
+- **The preview is now a framed card.** The image sits on a bordered
+  `#PreviewStage` that mirrors the source header above it, with a recessed
+  image surface and a small header showing the loaded dimensions. This gives
+  light or transparent images a visible boundary instead of floating on the
+  panel background.
+- **Stroke-mode controls now match the selected method.** The inspector shows
+  only the pacing controls that apply to the chosen mode: Slotted and Layered
+  expose the run settings (time per stroke / pause after big moves), while
+  **Outline (experimental)** exposes the continuous-stroke knobs from the
+  human-strokes prototype — stroke speed, move-event interval, and pause
+  between strokes — alongside a warning banner marking it experimental. Detail
+  and trigger distance stay shared because every mode uses them.
+- **Removed the stale Stroke distance slider.** The outline planner has emitted
+  one polyline per contour since the human-strokes rework, so the slider no
+  longer changed anything. It is gone from Stroke mode, per-target snapshots,
+  and `config.json`; `Bot.stroke_distance` remains only for API/cache
+  compatibility. The unused `#PreviewStage` / `#StageHeader` styles are now
+  actually used by the preview card.
 - **Artifacts are removed at the source, not patched up in the planner.**
   Image fitting used nearest-neighbour point sampling, so a single
   compression/anti-aliasing pixel could become a stray cell and the LAYERED,
@@ -122,13 +169,6 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   inspector, leaving Start drawing as the single primary action.
 
 ### Added
-- **Outline mode now has an adjustable stroke distance.** When **Outline** is
-  selected, a **Stroke distance** slider appears in the Stroke mode section. It
-  controls how many traced boundary cells are batched into a single stroke
-  (`1` traces every cell separately; higher values join them into fewer, longer
-  strokes). The value is stored per target alongside the other drawing settings,
-  is included in the precompute cache key, and flows through
-  `Bot.stroke_distance` to `planner.plan_image` / `plan_region_image`.
 - **Openverse as a second image source, with a Source selector.** Online image
   search now supports Openverse (`api.openverse.org`, no API key) alongside
   Wikimedia Commons, and defaults to Openverse for its much broader coverage

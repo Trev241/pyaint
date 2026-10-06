@@ -1,19 +1,21 @@
 """Full-screen click-capture overlay used to teach screen coordinates.
 
 A translucent, always-on-top window covers every screen and records where the
-user clicks; the underlying app stays visible through the veil. On the final
-click the overlay hides itself and grabs a screenshot of the screen *without*
-pyaint on top, so callers can sample colours from the target app rather than
-from pyaint's own window.
+user clicks; the underlying app stays visible through the veil. Before the
+veil appears, pyaint is minimized and a clean full-screen screenshot is taken,
+so callers can sample colours from the target app rather than from pyaint's own
+window -- or from the darkened veil.
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import pyautogui
 from PySide6.QtCore import QRect, Qt, QTimer
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QVBoxLayout
 
 
@@ -34,7 +36,6 @@ class _PickOverlay(QDialog):
         self._count = count
         self._prompt = prompt
         self.points: List[Tuple[int, int]] = []
-        self.image = None
 
         geometry = QRect()
         for screen in QApplication.screens():
@@ -73,12 +74,6 @@ class _PickOverlay(QDialog):
                 self._update()
 
     def _finish(self) -> None:
-        # Grab the screen with the overlay hidden so the target app (not
-        # pyaint) is captured for colour sampling.
-        try:
-            self.image = pyautogui.screenshot()
-        except Exception:
-            self.image = None
         self.accept()
 
     def keyPressEvent(self, event):  # noqa: N802
@@ -116,8 +111,29 @@ def pick_points(
     """
     overlay = _PickOverlay(count, prompt)
     minimized = _window_chain(parent)
+    # Make pyaint fully transparent as well as minimized. Windows animates the
+    # minimize by default, so a fixed sleep can still catch a half-faded
+    # window in the grab; zero opacity removes it from the shot immediately.
     for widget in minimized:
+        try:
+            widget.setWindowOpacity(0.0)
+        except Exception:
+            pass
         widget.showMinimized()
+
+    # Grab the target screen *before* the overlay is shown: it is translucent,
+    # so grabbing after hiding it can capture the veil (giving darkened, wrong
+    # palette colours). Wait briefly for the minimize to finish first so pyaint
+    # itself is not in the shot.
+    image = None
+    try:
+        QApplication.processEvents()
+        time.sleep(0.15)
+        QApplication.processEvents()
+        image = pyautogui.screenshot()
+    except Exception:
+        image = None
+
     try:
         accepted = overlay.exec() == QDialog.Accepted
     finally:
@@ -127,8 +143,34 @@ def pick_points(
                 (widget.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive
             )
             widget.showNormal()
+            try:
+                widget.setWindowOpacity(1.0)
+            except Exception:
+                pass
             widget.raise_()
             widget.activateWindow()
     if not accepted:
         return None
-    return PickResult(overlay.points, overlay.image)
+    return PickResult(_to_screenshot_points(overlay.points, image), image)
+
+
+def _to_screenshot_points(points, image):
+    """Map Qt's logical click points onto the physical screenshot pixels.
+
+    On a scaled display Qt reports logical coordinates while ``screenshot()``
+    returns physical pixels, so without this a manually taught box lands in the
+    wrong place (and samples the wrong colours).
+    """
+    if image is None or not points:
+        return points
+    screen = QGuiApplication.primaryScreen()
+    if screen is None:
+        return points
+    geo = screen.geometry()
+    if geo.width() <= 0 or geo.height() <= 0:
+        return points
+    scale_x = image.width / geo.width()
+    scale_y = image.height / geo.height()
+    if abs(scale_x - 1.0) < 1e-6 and abs(scale_y - 1.0) < 1e-6:
+        return points
+    return [(int(round(x * scale_x)), int(round(y * scale_y))) for x, y in points]

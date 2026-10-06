@@ -256,7 +256,9 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
         "drawing_options": {"ignore_white_pixels": True},
         # Best-effort, tuned from a maximized Windows 11 Paint screenshot:
         # the canvas is found from the image centre; the palette is found with
-        # the exact swatch colours inside the ribbon's Colors region.
+        # the exact swatch colours inside the ribbon's Colors region. That
+        # region is relative to the Paint window (region_window), so it follows
+        # the window instead of assuming one fixed screen layout.
         "detection": {
             "canvas": [
                 {"type": "center_rect", "tolerance": 5},
@@ -265,6 +267,7 @@ _BUILTIN_DATA: Tuple[Dict[str, Any], ...] = (
             "palette": {
                 "type": "color_signature",
                 "colors": PAINT_PALETTE,
+                "region_window": [" - Paint", "Paint"],
                 "region": [780, 76, 246, 48],
                 "tolerance": 25,
                 "gap": 4,

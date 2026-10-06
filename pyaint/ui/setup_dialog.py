@@ -223,21 +223,59 @@ class SetupDialog(QDialog):
     def _apply_box(self, name: str, box, image=None) -> None:
         entry = self.profile[name]
         entry["box"] = list(box)
-        entry["status"] = True
         try:
             if name == "Canvas":
                 self.bot.init_canvas(box)
             elif name == "Palette":
-                self._setup_palette(box, image=image)
+                if not self._setup_palette(box, image=image):
+                    # Sampling failed; do not leave a half-configured palette
+                    # showing as ready. The warning was already shown.
+                    entry["status"] = False
+                    return
         except Exception as exc:  # noqa: BLE001
+            entry["status"] = False
             log.info(f"[Setup] applying {name} failed: {exc}")
+            self.raise_()
+            self.activateWindow()
+            QMessageBox.warning(
+                self,
+                "Setup",
+                f"Could not apply the {_FRIENDLY.get(name, name)} setting: {exc}",
+            )
+            return
+        entry["status"] = True
 
-    def _setup_palette(self, box, image=None) -> None:
+    def _setup_palette(self, box, image=None) -> bool:
+        """Sample a taught palette box. Returns ``False`` if it could not run."""
         rows = self._rows.value()
         cols = self._cols.value()
         entry = self.profile["Palette"]
         entry["rows"] = rows
         entry["cols"] = cols
+        if image is None:
+            # Without the screenshot from teaching time, the only fallback is a
+            # fresh grab -- which shows this dialog, not the target palette. Do
+            # not silently sample the wrong thing.
+            self.raise_()
+            self.activateWindow()
+            QMessageBox.warning(
+                self,
+                "Palette",
+                "Could not capture the screen while teaching, so the palette "
+                "cannot be sampled. Close other windows and try again.",
+            )
+            return False
+        if box[2] - box[0] < 2 or box[3] - box[1] < 2:
+            self.raise_()
+            self.activateWindow()
+            QMessageBox.warning(
+                self,
+                "Palette",
+                "The two corners are on top of each other, so there is no "
+                "palette to sample. Pick the top-left and bottom-right corners "
+                "of the swatch grid.",
+            )
+            return False
         try:
             palette = self.bot.init_palette(
                 pbox=(box[0], box[1], box[2] - box[0], box[3] - box[1]),
@@ -246,17 +284,16 @@ class SetupDialog(QDialog):
                 image=image,
             )
             entry["color_coords"] = {str(k): list(v) for k, v in palette.colors_pos.items()}
-            if image is not None:
-                try:
-                    preview = annotate_palette(
-                        image,
-                        (box[0], box[1], box[2] - box[0], box[3] - box[1]),
-                        rows,
-                        cols,
-                    )
-                    self._palette_preview.set_pixmap(pil_to_qpixmap(preview))
-                except Exception as exc:  # noqa: BLE001
-                    log.info(f"[Setup] palette preview failed: {exc}")
+            try:
+                preview = annotate_palette(
+                    image,
+                    (box[0], box[1], box[2] - box[0], box[3] - box[1]),
+                    rows,
+                    cols,
+                )
+                self._palette_preview.set_pixmap(pil_to_qpixmap(preview))
+            except Exception as exc:  # noqa: BLE001
+                log.info(f"[Setup] palette preview failed: {exc}")
             if len(palette.colors) <= 1:
                 # Make sure the warning is not a hidden modal if the picker
                 # left the dialog behind/ inactive.
@@ -269,8 +306,18 @@ class SetupDialog(QDialog):
                     "app was visible when you clicked the corners, and that the "
                     "rows/columns match the palette.",
                 )
+            return True
         except Exception as exc:  # noqa: BLE001
             log.info(f"[Setup] palette sampling failed: {exc}")
+            self.raise_()
+            self.activateWindow()
+            QMessageBox.warning(
+                self,
+                "Palette",
+                f"Could not sample the palette: {exc}. Make sure the target app "
+                "was visible when you clicked the corners.",
+            )
+            return False
 
     # ------------------------------------------------------------------
     def _on_enable_toggled(self, checked: bool) -> None:

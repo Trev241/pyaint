@@ -134,11 +134,17 @@ replays each run as a segmented drag. It supports pause/resume (state is kept in
 
 `locators.py` finds the canvas and palette from a screenshot using declarative
 specs from the active recipe: `white_rect`, `color_rect`, `center_rect`,
-`color_grid`, `color_signature`, and `window_relative`. Detection is pure over a
-PIL image (headlessly testable); failures fall back to manual teaching. Review
-happens on screen: `overlay.py` dims the desktop, spotlights the detected
-canvas/palette with palette cell-centre dots, and offers Use / Try again /
-Teach manually / Not now.
+`color_grid`, `color_signature`, and `window_relative`. A locator's `region`
+crop can be anchored to the target window with `region_window`, so a tight
+search area (e.g. Paint's Colors ribbon) follows the window instead of assuming
+a fixed screen layout. Such window-relative crops are authored at 96 DPI and
+scaled by the window's display factor, so detection also works at 125%/150%
+scaling. Detection is pure over a PIL image (headlessly testable); failures fall
+back to manual teaching. Applying a detection is non-destructive: a region the
+recipe did not find is left alone, so a failed auto-detect can never wipe a
+palette or canvas taught by hand. Review happens on screen: `overlay.py`
+dims the desktop, spotlights the detected canvas/palette with palette
+cell-centre dots, and offers Use / Try again / Teach manually / Not now.
 
 ### Caching
 
