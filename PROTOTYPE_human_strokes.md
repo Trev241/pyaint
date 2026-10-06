@@ -41,9 +41,15 @@ is held, so a dropped first press can't produce an empty stroke. Tests stub
 - `Bot` calls `ScreenPainter.focus_target(canvas)` before drawing, which uses
 `WindowFromPoint` + `SetForegroundWindow` (with an `AttachThreadInput`
 fallback) to make the target window foreground, since the first click on an
-inactive window is consumed by activation. `Bot.prime_first_stroke` (default
-True) additionally replays the very first stroke once so that even if it is
-swallowed, the replay lands exactly like the strokes that already work.
+inactive window is consumed by activation.
+- `Bot.prime_first_stroke` (default True) draws the very first stroke twice,
+and the first attempt additionally passes `prime=True` to `execute_path`,
+which sends two throwaway clicks before holding the button. This mirrors the
+observed "double-click then hold" workaround; the replay covers the case where
+even the primed attempt is swallowed.
+- Diagnostics: `Bot.draw` logs `[Focus] target window foreground: True/False`,
+`execute_path` logs `[Prime] ...`, and `press_left` logs a warning if Windows
+never confirms the button went down.
 
 ## What changed
 

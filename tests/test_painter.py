@@ -165,6 +165,17 @@ def test_focus_target_uses_canvas_centre(monkeypatch):
     assert calls == [(60, 40)]
 
 
+def test_execute_path_prime_clicks_before_drawing(monkeypatch):
+    painter, fake = make_painter(monkeypatch)
+    painter.execute_path(
+        [(0, 0), (100, 0)], speed=1000.0, frame_interval=1 / 60, prime=True
+    )
+    events = names(fake)
+    # two throwaway clicks, then the real press + the final release
+    assert events.count("mouseDown") == 3
+    assert events.count("mouseUp") == 3
+
+
 def test_click_swatch_mspaint_double_clicks(monkeypatch):
     painter, fake = make_painter(monkeypatch)
     painter.bot.profile.mspaint_mode.update({"enabled": True, "delay": 0.2})

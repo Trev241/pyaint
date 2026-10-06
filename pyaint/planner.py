@@ -395,7 +395,7 @@ def _outline(
         for contour in contours:
             if cv2.contourArea(contour) < 10:
                 continue
-            simplified = cv2.approxPolyDP(contour, epsilon=1.0, closed=True)
+            simplified = cv2.approxPolyDP(contour, epsilon=0.5, closed=True)
             points: Stroke = [
                 (xo + int(point[0][0]) * step, yo + int(point[0][1]) * step)
                 for point in simplified

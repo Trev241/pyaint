@@ -41,8 +41,8 @@ class FakePainter:
     def execute_stroke(self, start, end, delay):
         self._rec("execute_stroke", start, end, delay)
 
-    def execute_path(self, points, speed=1500.0, frame_interval=1.0 / 60.0):
-        self._rec("execute_path", points, speed, frame_interval)
+    def execute_path(self, points, speed=1500.0, frame_interval=1.0 / 60.0, prime=False):
+        self._rec("execute_path", points, speed, frame_interval, prime)
 
     def focus_target(self, canvas):
         self._rec("focus_target", canvas)
@@ -152,8 +152,8 @@ class TerminatingPainter(FakePainter):
         super().__init__()
         self.bot = bot
 
-    def execute_path(self, points, speed=1500.0, frame_interval=1.0 / 60.0):
-        super().execute_path(points, speed, frame_interval)
+    def execute_path(self, points, speed=1500.0, frame_interval=1.0 / 60.0, prime=False):
+        super().execute_path(points, speed, frame_interval, prime)
         self.bot.terminate = True
 
 

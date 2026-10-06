@@ -258,11 +258,13 @@ class Bot(CacheMixin):
         # that do not implement focus_target.
         canvas = getattr(self, "_canvas", None)
         focus = getattr(self.painter, "focus_target", None)
+        focused = False
         if canvas is not None and focus is not None:
             try:
-                focus(tuple(canvas))
+                focused = bool(focus(tuple(canvas)))
             except Exception:
-                pass
+                focused = False
+        log.info(f"[Focus] target window foreground: {focused}")
         first_stroke = True
         last_stroke_end = None  # Track last stroke position for jump detection
         self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
@@ -402,9 +404,13 @@ class Bot(CacheMixin):
                 for _attempt in range(attempts):
                     if self.terminate:
                         break
+                    prime = first_stroke and _attempt == 0
                     if self.human_strokes or len(line) > 2:
                         self.painter.execute_path(
-                            line, self.stroke_speed, self.frame_interval
+                            line,
+                            self.stroke_speed,
+                            self.frame_interval,
+                            prime=prime,
                         )
                     else:
                         self.painter.execute_stroke(

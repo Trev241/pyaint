@@ -89,7 +89,7 @@ def _focus_window_at(x: int, y: int) -> bool:
             user32.SetForegroundWindow(hwnd)
             for thread in attached:
                 user32.AttachThreadInput(current_thread, thread, False)
-        return True
+        return bool(user32.GetForegroundWindow() == hwnd)
     except Exception:
         return False
 
@@ -298,11 +298,14 @@ class ScreenPainter:
         failure mode impossible.
         """
         pyautogui.mouseDown(button="left")
+        if self._left_is_down():
+            return
         for _ in range(max(1, attempts) - 1):
-            if self._left_is_down():
-                return
             time.sleep(0.02)
             pyautogui.mouseDown(button="left")
+            if self._left_is_down():
+                return
+        log.warning("[Press] left button not confirmed down after retries")
 
     def release_left(self) -> None:
         """Release the left button."""
@@ -348,6 +351,7 @@ class ScreenPainter:
         speed: float = 1500.0,
         frame_interval: float = 1.0 / 60.0,
         settle: float = 0.03,
+        prime: bool = False,
     ) -> None:
         """Draw a polyline as one continuous, human-paced drag.
 
@@ -402,6 +406,18 @@ class ScreenPainter:
         pyautogui.moveTo(*pts[0])
         # Let the app register the new cursor position before the press.
         time.sleep(min(settle, 0.05))
+        if prime:
+            # Some apps ignore the first synthetic interaction after a UI
+            # change. A throwaway double-click warms up the canvas/tool before
+            # the real drag; the dot it may leave sits on the first vertex.
+            log.info("[Prime] double-clicking before the first stroke")
+            for _ in range(2):
+                self.press_left()
+                time.sleep(0.05)
+                self.release_left()
+                time.sleep(0.05)
+            pyautogui.moveTo(*pts[0])
+            time.sleep(min(settle, 0.05))
         self.press_left()
         time.sleep(settle)
 
