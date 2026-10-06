@@ -6,11 +6,7 @@ back. Click capture is handled by :mod:`pyaint.ui.capture`.
 
 from __future__ import annotations
 
-import os
-from typing import Optional
-
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -24,10 +20,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pyaint import paths
-from pyaint.annotate import annotate_palette
 from pyaint.log import log
 from pyaint.ui.capture import pick_points
+from pyaint.ui.previews import delete_preview, load_preview_pixmap, store_box_preview
 from pyaint.ui.widgets import CheckBox, ImagePreview, pil_to_qpixmap
 
 _FRIENDLY = {
@@ -50,56 +45,6 @@ _BOX_TOOLS = {"Palette", "Canvas"}
 _COORD_TOOLS = {"New Layer", "Color Button", "Color Button Okay"}
 _MODIFIER_TOOLS = {"New Layer", "Color Button", "Color Button Okay"}
 _DELAY_TOOLS = {"Color Button", "Color Button Okay"}
-
-
-def _preview_path(name: str, target: str = "") -> str:
-    """Stable on-disk path for a tool's annotated preview.
-
-    The target id is part of the filename so each app's per-target snapshot
-    keeps its own preview instead of overwriting the previous target's.
-    """
-    safe = name.replace(" ", "_").lower()
-    if target:
-        safe = f"{target}_{safe}"
-    return os.path.join(paths.PROJECT_ROOT, "previews", f"{safe}_preview.png")
-
-
-def _save_preview(image, name: str, target: str = ""):
-    """Persist ``image`` so the preview survives closing Setup. Returns path."""
-    try:
-        filepath = _preview_path(name, target)
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        image.save(filepath)
-        return os.path.relpath(filepath, paths.PROJECT_ROOT)
-    except Exception as exc:  # noqa: BLE001
-        log.info(f"[Setup] could not save {name} preview: {exc}")
-        return None
-
-
-def _load_preview_pixmap(path) -> Optional[QPixmap]:
-    """Resolve a stored preview path (absolute or relative to the app root)."""
-    if not path:
-        return None
-    resolved = path
-    if not os.path.isabs(resolved):
-        resolved = os.path.join(paths.PROJECT_ROOT, resolved)
-    if not os.path.exists(resolved):
-        return None
-    pixmap = QPixmap(resolved)
-    return None if pixmap.isNull() else pixmap
-
-
-def _delete_preview(path) -> None:
-    if not path:
-        return
-    resolved = path
-    if not os.path.isabs(resolved):
-        resolved = os.path.join(paths.PROJECT_ROOT, resolved)
-    try:
-        if os.path.exists(resolved):
-            os.remove(resolved)
-    except Exception:
-        pass
 
 
 class SetupDialog(QDialog):
@@ -182,6 +127,7 @@ class SetupDialog(QDialog):
 
         self._palette_preview = ImagePreview()
         self._palette_preview.setMinimumHeight(120)
+        self._palette_preview.setMargin(10)
         self._palette_preview.setVisible(False)
         right_layout.addWidget(self._palette_preview)
 
@@ -283,43 +229,50 @@ class SetupDialog(QDialog):
         self._delay.setValue(int(float(entry.get("delay", 0.1)) * 1000))
 
     def _show_box_preview(self, name: str, entry) -> None:
-        """Refresh the captured-region preview and feedback for a box tool."""
-        if name == "Palette":
-            self._preview_label.setText("Palette preview")
-            empty = "No preview yet — click Teach… to capture the swatch grid."
-        else:
-            self._preview_label.setText("Canvas preview")
-            empty = "No preview yet — click Teach… to capture the canvas."
+        """Refresh the captured-region preview and feedback for a box tool.
 
-        pixmap = _load_preview_pixmap(entry.get("preview"))
+        The image area carries the picture (or a single short placeholder);
+        the label underneath carries the status, so the two never repeat the
+        same sentence.
+        """
+        is_palette = name == "Palette"
+        self._preview_label.setText(
+            "Palette preview" if is_palette else "Canvas preview"
+        )
+
+        pixmap = load_preview_pixmap(entry.get("preview"))
         if pixmap is not None:
             self._palette_preview.set_pixmap(pixmap)
         else:
-            self._palette_preview.set_placeholder(empty)
+            self._palette_preview.set_placeholder("No preview yet — click Teach…")
 
-        if name != "Palette":
-            self._palette_feedback.setText(
-                "✓ Canvas region captured."
-                if entry.get("status") and pixmap is not None
-                else empty
-            )
-            return
-
-        coords = entry.get("color_coords") or {}
-        rows = entry.get("rows")
-        cols = entry.get("cols")
-        if entry.get("status") and coords:
-            grid = f" ({rows} × {cols})" if rows and cols else ""
-            self._palette_feedback.setText(f"✓ {len(coords)} colours sampled{grid}.")
-        elif entry.get("status"):
-            self._palette_feedback.setText(
-                "Configured, but no colour preview is saved. Teach it again to "
-                "check the swatches."
-            )
+        if is_palette:
+            coords = entry.get("color_coords") or {}
+            rows = entry.get("rows")
+            cols = entry.get("cols")
+            if entry.get("status") and coords:
+                grid = f" ({rows} × {cols})" if rows and cols else ""
+                feedback = f"✓ {len(coords)} colours sampled{grid}."
+            elif entry.get("status"):
+                feedback = (
+                    "Configured, but no colour preview is saved. Teach it again "
+                    "to check the swatches."
+                )
+            elif pixmap is not None:
+                feedback = "Detected region shown — click Teach… to sample and confirm."
+            else:
+                feedback = "Not set yet."
         else:
-            self._palette_feedback.setText(
-                "Not set — teach the palette to sample its swatches."
-            )
+            box = entry.get("box")
+            if entry.get("status") and box and len(box) == 4:
+                width = abs(int(box[2]) - int(box[0]))
+                height = abs(int(box[3]) - int(box[1]))
+                feedback = f"✓ Canvas region captured ({width} × {height} px)."
+            elif pixmap is not None:
+                feedback = "Detected region shown — click Teach… to confirm."
+            else:
+                feedback = "Not set yet."
+        self._palette_feedback.setText(feedback)
 
     def _teach(self) -> None:
         name = self._current
@@ -350,7 +303,11 @@ class SetupDialog(QDialog):
         try:
             if name == "Canvas":
                 self.bot.init_canvas(box)
-                self._store_box_preview(name, entry, box, image)
+                preview = store_box_preview(
+                    entry, name, box, image, self.profile.target
+                )
+                if preview is not None:
+                    self._palette_preview.set_pixmap(pil_to_qpixmap(preview))
             elif name == "Palette":
                 if not self._setup_palette(box, image=image):
                     # Sampling failed; do not leave a half-configured palette
@@ -369,36 +326,6 @@ class SetupDialog(QDialog):
             )
             return
         entry["status"] = True
-
-    def _store_box_preview(self, name: str, entry, box, image) -> bool:
-        """Annotate and persist the captured region so feedback survives."""
-        if image is None:
-            return False
-        try:
-            x, y = box[0], box[1]
-            w, h = box[2] - box[0], box[3] - box[1]
-            if name == "Palette":
-                preview = annotate_palette(
-                    image, (x, y, w, h), entry["rows"], entry["cols"]
-                )
-            else:
-                from PIL import ImageDraw
-
-                preview = image.crop((x, y, x + w, y + h)).convert("RGB")
-                draw = ImageDraw.Draw(preview)
-                draw.rectangle(
-                    [0, 0, preview.width - 1, preview.height - 1],
-                    outline=(241, 76, 76),
-                    width=3,
-                )
-            stored = _save_preview(preview, name, self.profile.target)
-            if stored:
-                entry["preview"] = stored
-            self._palette_preview.set_pixmap(pil_to_qpixmap(preview))
-            return True
-        except Exception as exc:  # noqa: BLE001
-            log.info(f"[Setup] {name} preview failed: {exc}")
-            return False
 
     def _setup_palette(self, box, image=None) -> bool:
         """Sample a taught palette box. Returns ``False`` if it could not run."""
@@ -439,7 +366,11 @@ class SetupDialog(QDialog):
                 image=image,
             )
             entry["color_coords"] = {str(k): list(v) for k, v in palette.colors_pos.items()}
-            self._store_box_preview("Palette", entry, box, image)
+            preview = store_box_preview(
+                entry, "Palette", box, image, self.profile.target, rows, cols
+            )
+            if preview is not None:
+                self._palette_preview.set_pixmap(pil_to_qpixmap(preview))
             if len(palette.colors) <= 1:
                 # Make sure the warning is not a hidden modal if the picker
                 # left the dialog behind/ inactive.
@@ -493,7 +424,7 @@ class SetupDialog(QDialog):
         entry["status"] = False
         if name in _BOX_TOOLS:
             entry["box"] = None
-            _delete_preview(entry.get("preview"))
+            delete_preview(entry.get("preview"))
             entry["preview"] = None
             if name == "Palette":
                 entry["color_coords"] = None

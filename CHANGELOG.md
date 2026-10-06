@@ -47,6 +47,16 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   soon as Setup was closed and reopened. Previews are now rendered and saved
   under `previews/`, restored on reopen, and shown with a caption and a
   colour-count/grid summary ("✓ 20 colours sampled (2 × 10).").
+- **Auto-detect previews now carry into Setup.** Reviewing a detection and
+  choosing Use / Teach manually left the Setup preview panes empty because the
+  detection screenshot was discarded. The detected canvas and palette are now
+  rendered through the same renderer as manual teaching, so Setup opens with
+  the exact picture that was just approved.
+- **The preview pane's placeholder no longer duplicates itself.** The canvas
+  pane printed the same "no preview" sentence in both the image area and the
+  feedback label; the image area now carries a single short placeholder and the
+  label reports only the status. A 10px margin keeps the placeholder and scaled
+  image clear of the frame.
 - **Reset config now resets immediately.** The old button only deleted
   `config.json` and told the user to restart. It now also clears the cache and
   preview folders and rebuilds the live profile, drawing settings, target list,

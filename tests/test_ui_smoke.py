@@ -296,6 +296,48 @@ def test_apply_detection_keeps_taught_palette_and_warns(app, tmp_path, monkeypat
         window.close()
 
 
+def test_apply_detection_stores_region_previews(app, tmp_path, monkeypatch):
+    """Auto-detected regions must show up as previews in Setup."""
+    import os
+
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    from pyaint import paths
+    from pyaint.locators import Detection
+    from pyaint.ui.setup_dialog import SetupDialog
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        image = Image.new("RGB", (300, 200), (255, 255, 255))
+        window._detection_result = Detection(
+            canvas=(10, 10, 200, 120),
+            palette=(20, 150, 120, 40),
+            palette_rows=2,
+            palette_cols=4,
+        )
+        window._detection_image = image
+        window._apply_detection()
+
+        assert window.profile["Canvas"]["preview"]
+        assert window.profile["Palette"]["preview"]
+        for name in ("Canvas", "Palette"):
+            path = os.path.join(paths.PROJECT_ROOT, window.profile[name]["preview"])
+            assert os.path.exists(path)
+
+        # Reopening Setup must load the saved preview rather than a blank pane.
+        dialog = SetupDialog(
+            None, bot, window.profile, required_tools=("Palette", "Canvas")
+        )
+        try:
+            assert dialog._palette_preview._original is not None
+        finally:
+            dialog.close()
+    finally:
+        window.close()
+
+
 def test_reset_config_wipes_everything_immediately(app, tmp_path, monkeypatch):
     """Reset must reinitialize live state, not just delete the file."""
     import os

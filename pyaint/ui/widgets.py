@@ -561,6 +561,7 @@ class ImagePreview(QLabel):
         super().__init__(parent)
         self.setObjectName("PreviewImage")
         self.setAlignment(Qt.AlignCenter)
+        self.setWordWrap(True)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.setMinimumSize(200, 160)
         self.setAcceptDrops(True)
@@ -620,8 +621,10 @@ class ImagePreview(QLabel):
     def _rescale(self) -> None:
         if self._original is None:
             return
+        # ``contentsRect`` (not ``size``) so a margin/padding on the label is
+        # respected and the scaled image never spills over the text padding.
         scaled = self._original.scaled(
-            self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            self.contentsRect().size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         self.setPixmap(scaled)
 

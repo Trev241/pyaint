@@ -66,6 +66,7 @@ from pyaint.ui import theme
 from pyaint.ui.countdown import CountdownBanner
 from pyaint.ui.icons import icon
 from pyaint.ui.overlay import DetectionOverlay, ProgressOverlay
+from pyaint.ui.previews import store_box_preview
 from pyaint.ui.widgets import (
     CheckBox,
     CollapsibleSection,
@@ -1901,6 +1902,9 @@ class MainWindow(QMainWindow):
         applied = self.bot.apply_detection(
             self._detection_result, image=self._detection_image
         )
+        # Show the same annotated regions in Setup that the review overlay
+        # showed, instead of leaving the preview panes empty.
+        self._store_detection_previews()
         self._sync_env_ui()
         self._refresh_detection_status()
         self._store_drawing_settings()
@@ -2009,7 +2013,38 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+        # Seed the panes with the detected regions so manual teaching starts
+        # from the preview the user just reviewed.
+        self._store_detection_previews()
         self.open_setup()
+
+    def _store_detection_previews(self) -> None:
+        """Persist the auto-detect screenshot as canvas/palette previews.
+
+        Uses the same renderer as manual teaching, so Setup shows the picture
+        the user approved instead of an empty pane.
+        """
+        image = self._detection_image
+        detection = self._detection_result
+        if image is None or detection is None:
+            return
+        target = self.profile.target
+        if detection.canvas:
+            x, y, w, h = detection.canvas
+            store_box_preview(
+                self.profile["Canvas"], "Canvas", (x, y, x + w, y + h), image, target
+            )
+        if detection.palette and detection.palette_rows and detection.palette_cols:
+            x, y, w, h = detection.palette
+            store_box_preview(
+                self.profile["Palette"],
+                "Palette",
+                (x, y, x + w, y + h),
+                image,
+                target,
+                detection.palette_rows,
+                detection.palette_cols,
+            )
 
     def _dismiss_detection(self) -> None:
         self._detection_overlay.hide_detection()

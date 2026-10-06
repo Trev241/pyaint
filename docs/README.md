@@ -66,6 +66,7 @@ pyaint/
 ├── ui/                PySide6 (Qt) desktop UI
 │   ├── main_window.py  hub: target bar, preview, inspector, action/status bars
 │   ├── setup_dialog.py setup wizard (manual tool teaching)
+│   ├── previews.py     render/save/load the region previews (Setup + auto-detect)
 │   ├── capture.py      full-screen click-capture overlay
 │   ├── overlay.py      detection-review overlay + progress overlay
 │   ├── countdown.py    pre-capture countdown banner
