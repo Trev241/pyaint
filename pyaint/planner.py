@@ -29,6 +29,9 @@ from PIL import Image
 
 from pyaint import utils
 
+# import numpy as np
+import cv2
+
 try:  # numpy powers palette-aware downsampling; fall back if unavailable
     import numpy as _np
 except ImportError:  # pragma: no cover - only when numpy is not installed
@@ -374,10 +377,6 @@ def plan_regions(
     return _outline(grid, xo, yo, step, stroke_distance, palette)
 
 
-#: Contours enclosing fewer than this many grid cells are noise; skip them.
-_MIN_CONTOUR_AREA = 10
-
-
 def _outline(
     grid: ColourGrid,
     xo: int,
@@ -388,118 +387,41 @@ def _outline(
 ):
     """Trace region boundaries and emit one closed polyline per contour.
 
-    Each region's boundary is walked as a loop of unit lattice edges, so the
-    executor can replay it as one continuous drag instead of one stroke per
-    edge. Implemented with stdlib/Pillow types only (no OpenCV or NumPy) so
-    the frozen build stays dependency-light.
+    Each contour from ``cv2.findContours``/``approxPolyDP`` becomes a single
+    :data:`Stroke`, so the executor can replay it as one continuous drag
+    instead of one stroke per edge.
 
     ``stroke_distance`` is retained only for API / cache compatibility; it no
     longer affects the result (a contour is always one stroke).
     """
-    if not grid:
-        return {}
-
     colors = (
         list(palette.color_list)
         if palette is not None
         else sorted({c for row in grid for c in row if c is not None})
     )
 
-    rows = len(grid)
     strokes: List[Stroke] = []
     for color in colors:
-        for loop in _trace_contours(grid, color, rows):
-            if _contour_area(loop) < _MIN_CONTOUR_AREA:
+        mask = _np.array(
+            [[1 if cell == color else 0 for cell in row] for row in grid],
+            dtype=_np.uint8,
+        )
+        contours, _ = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+        for contour in contours:
+            if cv2.contourArea(contour) < 10:
                 continue
-            simplified = _drop_collinear(loop)
-            if len(simplified) < 3:
-                continue
+            simplified = cv2.approxPolyDP(contour, epsilon=0.5, closed=True)
             points: Stroke = [
-                (xo + point[1] * step, yo + point[0] * step) for point in simplified
+                (xo + int(point[0][0]) * step, yo + int(point[0][1]) * step)
+                for point in simplified
             ]
+            if len(points) < 2:
+                continue
             points.append(points[0])  # close the loop for one continuous drag
             strokes.append(points)
 
     return {OUTLINE_COLOUR: strokes} if strokes else {}
-
-
-def _trace_contours(grid: ColourGrid, color, rows: int) -> List[List[Point]]:
-    """Return the boundary loops of every region of ``color`` as corner paths.
-
-    A boundary edge is directed so the coloured cell always sits to its left;
-    that keeps in/out degree balanced at every lattice vertex, so each walk is
-    guaranteed to close. Loops are lists of ``(row, col)`` lattice corners.
-    """
-
-    def filled(r: int, c: int) -> bool:
-        return 0 <= r < rows and 0 <= c < len(grid[r]) and grid[r][c] == color
-
-    edges: Dict[Point, List[Point]] = {}
-
-    def add(src: Point, dst: Point) -> None:
-        edges.setdefault(src, []).append(dst)
-
-    for r in range(rows):
-        for c in range(len(grid[r])):
-            if not filled(r, c):
-                continue
-            if not filled(r - 1, c):  # top edge -> interior below, travel left
-                add((r, c + 1), (r, c))
-            if not filled(r + 1, c):  # bottom edge -> interior above, travel right
-                add((r + 1, c), (r + 1, c + 1))
-            if not filled(r, c - 1):  # left edge -> interior right, travel down
-                add((r, c), (r + 1, c))
-            if not filled(r, c + 1):  # right edge -> interior left, travel up
-                add((r + 1, c + 1), (r, c + 1))
-
-    loops: List[List[Point]] = []
-    while edges:
-        start = next(iter(edges))
-        loop = [start]
-        current = start
-        closed = False
-        while True:
-            outgoing = edges.get(current)
-            if not outgoing:
-                break
-            nxt = outgoing.pop()
-            if not outgoing:
-                del edges[current]
-            if nxt == start:
-                closed = True
-                break
-            loop.append(nxt)
-            current = nxt
-        if closed and len(loop) >= 4:
-            loops.append(loop)
-    return loops
-
-
-def _drop_collinear(points: List[Point]) -> List[Point]:
-    """Drop interior corners that lie on a straight run of the loop."""
-    if len(points) <= 3:
-        return points
-    kept: List[Point] = []
-    count = len(points)
-    for index, current in enumerate(points):
-        prev = points[index - 1]
-        nxt = points[(index + 1) % count]
-        cross = (current[0] - prev[0]) * (nxt[1] - current[1]) - (
-            current[1] - prev[1]
-        ) * (nxt[0] - current[0])
-        if cross != 0:
-            kept.append(current)
-    return kept or points
-
-
-def _contour_area(points: List[Point]) -> float:
-    """Absolute polygon area (in grid cells) via the shoelace formula."""
-    area = 0
-    count = len(points)
-    for index, (r, c) in enumerate(points):
-        nxt_r, nxt_c = points[(index + 1) % count]
-        area += c * nxt_r - nxt_c * r
-    return abs(area) / 2.0
 
 
 def plan(
