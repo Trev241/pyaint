@@ -43,6 +43,10 @@ class Bot(CacheMixin):
         self.stroke_speed = 1500.0  # px/s of cursor travel
         self.frame_interval = 1.0 / 60.0  # seconds between moveTo events
         self.travel_delay = 0.05  # pause when jumping between strokes
+        # Pause after selecting a colour before drawing. Without it the first
+        # mouseDown lands within the double-click window of the swatch click and
+        # some apps (MS Paint) swallow it as a focus/double-click.
+        self.color_settle = 0.4
         # Number of traced boundary cells per stroke in OUTLINE mode.
         self.stroke_distance = planner.STROKE_DISTANCE
         self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
@@ -284,6 +288,10 @@ class Bot(CacheMixin):
 
             # If Color Button Okay Mode is enabled, click "Set Okay" button after color selection
             self.painter.color_button_okay()
+
+            # Let the app finish the palette/dialog transition before the first
+            # stroke, otherwise it can be read as a double-click/focus click.
+            time.sleep(self.color_settle)
 
             for line_idx, line in enumerate(lines):
                 # Skip lines already drawn if resuming

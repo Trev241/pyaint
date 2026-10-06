@@ -34,8 +34,9 @@ def make_painter(monkeypatch):
     monkeypatch.setattr(painter_mod.time, "sleep", lambda *_: None)
     painter = Bot().painter
     # Record drag moves through the same recorder and keep tests off the real
-    # Windows mouse_event() path.
+    # Windows mouse_event() / GetAsyncKeyState() paths.
     monkeypatch.setattr(painter, "_drag_move", fake.moveTo)
+    monkeypatch.setattr(painter, "_left_is_down", lambda: True)
     return painter, fake
 
 
@@ -144,6 +145,14 @@ def test_execute_path_uses_drag_moves_while_button_held(monkeypatch):
     assert (100, 0) in drags  # the drag went through _drag_move
     # plain moveTo is used only once, to park the cursor before mouseDown
     assert names(fake).count("moveTo") == 1
+
+
+def test_press_left_retries_until_button_is_confirmed(monkeypatch):
+    painter, fake = make_painter(monkeypatch)
+    states = iter([False, False, True])
+    monkeypatch.setattr(painter, "_left_is_down", lambda: next(states))
+    painter.press_left(attempts=5)
+    assert names(fake).count("mouseDown") == 3
 
 
 def test_click_swatch_mspaint_double_clicks(monkeypatch):

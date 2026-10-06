@@ -25,6 +25,20 @@ held, so the app receives `WM_MOUSEMOVE` with the button bit set and follows
 the path. It falls back to `pyautogui.moveTo` off Windows. `execute_stroke`
 also routes its segment moves through `_drag_move` for the same reason.
 
+### First stroke after a colour selection was swallowed
+
+The first `mouseDown` followed the palette click within the OS double-click
+window, so MS Paint sometimes read it as the tail of a double-click / focus
+click and ignored it (the stroke drew nothing; later strokes were fine).
+Two mitigations:
+
+- `Bot.color_settle` (default 0.4 s) pauses after selecting a colour before
+the first stroke, breaking the double-click window.
+- `ScreenPainter.press_left()` sends the press, then on Windows checks
+`GetAsyncKeyState(VK_LBUTTON)` and re-sends until the OS confirms the button
+is held, so a dropped first press can't produce an empty stroke. Tests stub
+`_left_is_down` and never touch the real API.
+
 ## What changed
 
 - `pyaint/planner.py`
@@ -56,6 +70,7 @@ also routes its segment moves through `_drag_move` for the same reason.
 | `stroke_speed` | cursor px/s | faster = shorter total time, larger server load |
 | `frame_interval` | seconds between `moveTo` events | larger = safer/slower, smaller = higher event rate |
 | `travel_delay` | pause when jumping between strokes | replaces `jump_delay` for path strokes |
+| `color_settle` | pause after selecting a colour | avoid the first stroke being read as a double-click |
 | `human_strokes` | `False` reverts 2-point runs to `execute_stroke` | A/B comparison for slotted/layered |
 
 ## A/B comparison

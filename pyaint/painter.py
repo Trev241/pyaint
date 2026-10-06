@@ -190,6 +190,37 @@ class ScreenPainter:
             self._release_all_modifiers()
 
     # -- stroke execution ------------------------------------------------
+    def _left_is_down(self) -> bool:
+        """Whether Windows currently reports the left mouse button held."""
+        if sys.platform == "win32":
+            try:
+                import ctypes
+
+                return bool(ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000)
+            except Exception:
+                return False
+        # Non-Windows: cannot read button state, so trust the synthetic press.
+        return True
+
+    def press_left(self, attempts: int = 5) -> None:
+        """Press the left button and confirm it actually went down.
+
+        The first synthetic press after a UI interaction (palette click, dialog
+        OK) can be swallowed by the target app, producing a stroke that draws
+        nothing. Re-sending until the OS reports the button held makes that
+        failure mode impossible.
+        """
+        pyautogui.mouseDown(button="left")
+        for _ in range(max(1, attempts) - 1):
+            if self._left_is_down():
+                return
+            time.sleep(0.02)
+            pyautogui.mouseDown(button="left")
+
+    def release_left(self) -> None:
+        """Release the left button."""
+        pyautogui.mouseUp()
+
     def _drag_move(self, x: int, y: int) -> None:
         """Move the cursor while a button is held so apps register a drag.
 
@@ -251,9 +282,9 @@ class ScreenPainter:
         # A single point, or a degenerate path: tap once in place.
         if len(pts) == 1 or all(p == pts[0] for p in pts):
             pyautogui.moveTo(*pts[0])
-            pyautogui.mouseDown(button="left")
+            self.press_left()
             time.sleep(settle)
-            pyautogui.mouseUp()
+            self.release_left()
             return
 
         interval = max(float(frame_interval), 1e-4)
@@ -282,7 +313,9 @@ class ScreenPainter:
             return int(round(x1 + (x2 - x1) * t)), int(round(y1 + (y2 - y1) * t))
 
         pyautogui.moveTo(*pts[0])
-        pyautogui.mouseDown(button="left")
+        # Let the app register the new cursor position before the press.
+        time.sleep(min(settle, 0.05))
+        self.press_left()
         time.sleep(settle)
 
         last = time.perf_counter()
@@ -296,7 +329,7 @@ class ScreenPainter:
             last = time.perf_counter()
 
         time.sleep(settle)
-        pyautogui.mouseUp()
+        self.release_left()
 
     def execute_stroke(
         self,
@@ -318,7 +351,7 @@ class ScreenPainter:
         segment_delay = delay / segments
 
         pyautogui.moveTo(start_pos)
-        pyautogui.mouseDown(button="left")
+        self.press_left()
 
         if self.bot.draw_state.get("was_paused", False):
             log.info("Replaying stroke after pause - ensuring clean result")
@@ -329,7 +362,7 @@ class ScreenPainter:
             self._drag_move(start_pos[0] + dx * t, start_pos[1] + dy * t)
             time.sleep(segment_delay)
 
-        pyautogui.mouseUp()
+        self.release_left()
 
     def execute_test_stroke(
         self,
