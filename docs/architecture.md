@@ -86,9 +86,9 @@ that opens the image, reads the canvas, and hands the rest over:
      Slotted appends every run directly; Layered accumulates per-row tables and
      then `_merge_layers()` sorts colours by frequency and merges lower-layer
      runs into fewer strokes.
-   - **Outline** (`plan_regions`): traces region boundaries and emits them as
-     strokes. `stroke_distance` controls how many traced cells each stroke
-     batches (1 = one stroke per traced cell).
+   - **Outline** (`plan_regions`): traces region boundaries and emits one
+     closed polyline per contour in `OUTLINE_COLOUR`. `stroke_distance` is kept
+     for API/cache compatibility but no longer affects the plan.
 
 `process_region()` uses `fit_region()` + the same quantize/plan steps for
 partial redraws.
@@ -101,8 +101,10 @@ partial redraws.
 2. For each colour: optionally create a new layer, optionally click the colour
    button, select the swatch via `ScreenPainter.select_color()`, optionally
    click the colour-dialog OK button.
-3. For each run: insert a jump delay if the cursor moved more than
-   `jump_threshold`; honour pause/terminate; replay the run as a segmented drag.
+3. For each stroke: insert a jump/travel delay if the cursor moved more than
+   `jump_threshold`; honour pause/terminate; replay it either as a continuous
+   human-paced path (`human_strokes`, the default) or as one segmented run
+   (`execute_stroke`). Polylines always take the path route.
 4. Report estimated vs actual time and reset state.
 
 Pause/terminate is driven by the global `pynput` listener in

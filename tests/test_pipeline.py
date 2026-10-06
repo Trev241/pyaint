@@ -185,7 +185,7 @@ def test_layered_transparent_gap_is_not_bridged(tmp_path):
     bot = make_bot(step=1, canvas=(0, 0, 3, 1), positions=palette)
     cmap = bot.process(str(path), flags=Bot.IGNORE_TRANSPARENT, mode=Bot.LAYERED)
     # Two separate strokes; the transparent middle must not be painted over.
-    assert cmap[RED] == [((0, 0), (0, 0)), ((2, 0), (2, 0))]
+    assert cmap[RED] == [[(0, 0), (0, 0)], [(2, 0), (2, 0)]]
 
 
 def test_transparent_alpha_cutoff(tmp_path):
@@ -198,7 +198,7 @@ def test_transparent_alpha_cutoff(tmp_path):
 
     bot = make_bot(step=1, canvas=(0, 0, 2, 1), positions=palette)
     cmap = bot.process(str(path), flags=Bot.IGNORE_TRANSPARENT, mode=Bot.SLOTTED)
-    assert cmap[(0, 0, 0)] == [((1, 0), (1, 0))]
+    assert cmap[(0, 0, 0)] == [[(1, 0), (1, 0)]]
 
 
 def test_process_coordinates_within_canvas(tmp_path):

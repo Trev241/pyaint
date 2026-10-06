@@ -37,6 +37,12 @@ class Bot(CacheMixin):
         self.jump_threshold = (
             5  # Pixel distance threshold for jump detection (default 5)
         )
+        # Human-like continuous strokes (prototype): one drag per polyline,
+        # paced at ~display refresh instead of one stroke per edge.
+        self.human_strokes = True
+        self.stroke_speed = 1500.0  # px/s of cursor travel
+        self.frame_interval = 1.0 / 60.0  # seconds between moveTo events
+        self.travel_delay = 0.05  # pause when jumping between strokes
         # Number of traced boundary cells per stroke in OUTLINE mode.
         self.stroke_distance = planner.STROKE_DISTANCE
         self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
@@ -332,10 +338,15 @@ class Bot(CacheMixin):
                         + (start_pos[1] - last_stroke_end[1]) ** 2
                     ) ** 0.5
                     if jump_distance > self.jump_threshold:
-                        log.info(
-                            f"Large jump detected ({jump_distance:.1f} pixels) - adding {self.settings[Bot.JUMP_DELAY]}s delay"
+                        jump_delay = (
+                            self.travel_delay
+                            if self.human_strokes or len(line) > 2
+                            else self.settings[Bot.JUMP_DELAY]
                         )
-                        time.sleep(self.settings[Bot.JUMP_DELAY])
+                        log.info(
+                            f"Large jump detected ({jump_distance:.1f} pixels) - adding {jump_delay}s delay"
+                        )
+                        time.sleep(jump_delay)
 
                 # Wait if paused - detect when we come out of pause for stroke replay
                 was_paused = False
@@ -359,11 +370,18 @@ class Bot(CacheMixin):
                     self.drawing = False  # Clear drawing flag on termination
                     return "terminated"
 
-                # Draw line with pause support (complete each stroke before checking pause)
-                end_pos = (line[1][0], line[1][1])
-                self.painter.execute_stroke(
-                    start_pos, end_pos, self.settings[Bot.DELAY]
-                )
+                # Draw the stroke. Human mode replays a whole polyline as one
+                # continuous, paced drag; legacy mode replays a single run.
+                # Multi-point polylines can only be drawn as a path.
+                end_pos = line[-1]
+                if self.human_strokes or len(line) > 2:
+                    self.painter.execute_path(
+                        line, self.stroke_speed, self.frame_interval
+                    )
+                else:
+                    self.painter.execute_stroke(
+                        start_pos, end_pos, self.settings[Bot.DELAY]
+                    )
 
                 # Check for pause after completing the stroke
                 if self.paused or self.terminate:
@@ -498,6 +516,17 @@ class Bot(CacheMixin):
 
     def _estimate_drawing_time_seconds(self, cmap):
         """Estimate drawing time in seconds (internal helper method)."""
+        has_polylines = any(
+            len(stroke) > 2 for strokes in cmap.values() for stroke in strokes
+        )
+        if getattr(self, "human_strokes", False) or has_polylines:
+            return utils.estimate_path_seconds(
+                cmap,
+                self.stroke_speed,
+                self.frame_interval,
+                self.travel_delay,
+                self.jump_threshold,
+            )
         return utils.estimate_drawing_seconds(
             cmap,
             self.settings[Bot.DELAY],

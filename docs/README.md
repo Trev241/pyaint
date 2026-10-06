@@ -115,9 +115,9 @@ artifacts at the source), and `plan()` turns that grid into a stroke map.
 - **Layered** (default): builds per-row colour tables, then `_merge_layers()`
   sorts colours by frequency and repaints lower layers, yielding fewer strokes.
 - **Slotted**: a direct colour → list-of-runs map.
-- **Outline** (`plan_regions`): traces region boundaries into
-  `OUTLINE_COLOUR` strokes. Its `stroke_distance` option batches several
-  traced cells into one stroke (`1` = one stroke per traced cell).
+- **Outline** (`plan_regions`): traces region boundaries into one closed
+  polyline per contour in `OUTLINE_COLOUR`. `stroke_distance` is retained for
+  compatibility and no longer changes the plan.
 
 `process_region()` reuses `fit_region()` + the same quantize/plan steps for
 partial redraws.

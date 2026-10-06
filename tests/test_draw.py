@@ -41,6 +41,9 @@ class FakePainter:
     def execute_stroke(self, start, end, delay):
         self._rec("execute_stroke", start, end, delay)
 
+    def execute_path(self, points, speed=1500.0, frame_interval=1.0 / 60.0):
+        self._rec("execute_path", points, speed, frame_interval)
+
     def execute_test_stroke(self, start, end):
         self._rec("execute_test_stroke", start, end)
 
@@ -74,8 +77,16 @@ def test_draw_selects_each_colour_and_draws_each_stroke(monkeypatch, tmp_path):
     bot, fake = make_bot(monkeypatch, tmp_path)
     assert bot.draw(cmap()) == "success"
     assert fake.names().count("select_color") == 2
-    assert fake.names().count("execute_stroke") == 2
+    assert fake.names().count("execute_path") == 2
     assert bot.drawing is False
+
+
+def test_draw_legacy_mode_uses_execute_stroke(monkeypatch, tmp_path):
+    bot, fake = make_bot(monkeypatch, tmp_path)
+    bot.human_strokes = False
+    assert bot.draw(cmap()) == "success"
+    assert fake.names().count("execute_stroke") == 2
+    assert "execute_path" not in fake.names()
 
 
 def test_draw_skip_first_color(monkeypatch, tmp_path):
@@ -115,8 +126,8 @@ class TerminatingPainter(FakePainter):
         super().__init__()
         self.bot = bot
 
-    def execute_stroke(self, start, end, delay):
-        super().execute_stroke(start, end, delay)
+    def execute_path(self, points, speed=1500.0, frame_interval=1.0 / 60.0):
+        super().execute_path(points, speed, frame_interval)
         self.bot.terminate = True
 
 

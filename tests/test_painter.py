@@ -110,6 +110,28 @@ def test_execute_stroke_short_uses_drag_not_segments(monkeypatch):
     assert "mouseDown" not in events
 
 
+def test_execute_path_presses_once_and_visits_every_vertex(monkeypatch):
+    painter, fake = make_painter(monkeypatch)
+    painter.execute_path(
+        [(0, 0), (100, 0), (100, 100)], speed=1000.0, frame_interval=1 / 60
+    )
+    events = names(fake)
+    assert events.count("mouseDown") == 1
+    assert events.count("mouseUp") == 1
+    assert events[0] == "moveTo"
+    coords = {c[1][:2] for c in fake.calls if c[0] == "moveTo"}
+    assert {(0, 0), (100, 0), (100, 100)}.issubset(coords)
+
+
+def test_execute_path_single_point_taps_in_place(monkeypatch):
+    painter, fake = make_painter(monkeypatch)
+    painter.execute_path([(5, 5)])
+    events = names(fake)
+    assert events.count("mouseDown") == 1
+    assert events.count("mouseUp") == 1
+    assert events.count("moveTo") == 1
+
+
 def test_click_swatch_mspaint_double_clicks(monkeypatch):
     painter, fake = make_painter(monkeypatch)
     painter.bot.profile.mspaint_mode.update({"enabled": True, "delay": 0.2})

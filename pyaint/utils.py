@@ -74,3 +74,38 @@ def estimate_drawing_seconds(cmap, delay, jump_delay, jump_threshold):
         return estimated
     except Exception:
         return 0.0
+
+
+def estimate_path_seconds(cmap, speed, frame_interval, travel_delay, jump_threshold):
+    """Estimate duration for human-style continuous strokes.
+
+    Each stroke is a single button-down/up, so there is no per-stroke delay
+    term: time is dominated by ``path_length / speed`` plus a ``travel_delay``
+    pause whenever the cursor jumps to a new stroke. ``frame_interval`` is
+    accepted for symmetry with the executor and future per-point accounting.
+    """
+    try:
+        estimated = 0.0
+        speed = max(float(speed), 1.0)
+        for strokes in cmap.values():
+            last_end = None
+            for stroke in strokes:
+                points = [(float(x), float(y)) for x, y in stroke]
+                if len(points) < 2:
+                    continue
+                length = 0.0
+                for (x1, y1), (x2, y2) in zip(points, points[1:]):
+                    length += ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                estimated += length / speed
+                if last_end is not None:
+                    jump = (
+                        (points[0][0] - last_end[0]) ** 2
+                        + (points[0][1] - last_end[1]) ** 2
+                    ) ** 0.5
+                    if jump > jump_threshold:
+                        estimated += travel_delay
+                last_end = points[-1]
+        estimated += len(cmap) * 0.5  # colour-switch overhead
+        return estimated
+    except Exception:
+        return 0.0

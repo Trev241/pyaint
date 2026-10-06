@@ -189,6 +189,80 @@ class ScreenPainter:
             self._release_all_modifiers()
 
     # -- stroke execution ------------------------------------------------
+    def execute_path(
+        self,
+        points: Sequence[Tuple[int, int]],
+        speed: float = 1500.0,
+        frame_interval: float = 1.0 / 60.0,
+        settle: float = 0.03,
+    ) -> None:
+        """Draw a polyline as one continuous, human-paced drag.
+
+        The button is pressed once, the cursor is walked along the path with at
+        most one ``moveTo`` per ``frame_interval`` (and always one at every
+        vertex, so corners are never skipped), then released once. Few
+        down/up events plus a steady move stream is the input shape a human
+        produces and that browser apps are built to handle.
+
+        ``speed`` is in pixels per second; ``frame_interval`` caps the event
+        rate at ``1 / frame_interval`` Hz. ``settle`` is a short pause after
+        the button goes down / before it comes up so a web app can register
+        the stroke endpoints.
+        """
+        pts = [(int(x), int(y)) for x, y in points]
+        if not pts:
+            return
+
+        # A single point, or a degenerate path: tap once in place.
+        if len(pts) == 1 or all(p == pts[0] for p in pts):
+            pyautogui.moveTo(*pts[0])
+            pyautogui.mouseDown(button="left")
+            time.sleep(settle)
+            pyautogui.mouseUp()
+            return
+
+        interval = max(float(frame_interval), 1e-4)
+        step = max(float(speed), 1.0) * interval
+
+        # Cumulative distance to each vertex.
+        cum = [0.0]
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+            cum.append(cum[-1] + ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5)
+        total = cum[-1]
+
+        # Emit on a fixed distance cadence, but always include every vertex so
+        # a fast speed can never cut a corner.
+        distances = set(cum)
+        if total > 0:
+            distances.update(i * step for i in range(int(total / step) + 1))
+            distances.add(total)
+
+        def point_at(distance: float) -> Tuple[int, int]:
+            edge = 0
+            while edge < len(cum) - 2 and cum[edge + 1] < distance:
+                edge += 1
+            span = cum[edge + 1] - cum[edge]
+            t = 0.0 if span <= 0 else (distance - cum[edge]) / span
+            (x1, y1), (x2, y2) = pts[edge], pts[edge + 1]
+            return int(round(x1 + (x2 - x1) * t)), int(round(y1 + (y2 - y1) * t))
+
+        pyautogui.moveTo(*pts[0])
+        pyautogui.mouseDown(button="left")
+        time.sleep(settle)
+
+        last = time.perf_counter()
+        for distance in sorted(distances):
+            pyautogui.moveTo(*point_at(distance))
+            # Hold the cadence even if a moveTo ran long; never sleep a
+            # negative amount.
+            wait = interval - (time.perf_counter() - last)
+            if wait > 0:
+                time.sleep(wait)
+            last = time.perf_counter()
+
+        time.sleep(settle)
+        pyautogui.mouseUp()
+
     def execute_stroke(
         self,
         start_pos: Tuple[int, int],
