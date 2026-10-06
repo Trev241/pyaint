@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -255,7 +254,6 @@ class MainWindow(QMainWindow):
         root.addLayout(body, 1)
 
         root.addWidget(self._build_action_bar())
-        self._build_statusbar()
 
     def _build_topbar(self) -> QWidget:
         bar = QFrame()
@@ -799,18 +797,6 @@ class MainWindow(QMainWindow):
         self._btn_start.clicked.connect(self._on_start)
         layout.addWidget(self._btn_start)
         return bar
-
-    def _build_statusbar(self) -> None:
-        bar = self.statusBar()
-        self._status_label = QLabel("Ready")
-        self._status_label.setObjectName("StatusText")
-        bar.addWidget(self._status_label, 1)
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        self._progress.setTextVisible(False)
-        self._progress.setFixedWidth(220)
-        bar.addPermanentWidget(self._progress)
 
     # ------------------------------------------------------------------
     # Recipes / targets
@@ -1420,8 +1406,6 @@ class MainWindow(QMainWindow):
         self.signals.progress.emit(int(completed), int(total), float(eta))
 
     def _on_progress(self, completed: int, total: int, eta: float) -> None:
-        if total > 0:
-            self._progress.setValue(int(100 * completed / total))
         self._overlay.update_progress(completed, total, eta)
         # Pause/stop are toggled by the global hotkey listener, so mirror the
         # bot's pause state onto the overlay here.
@@ -1440,7 +1424,6 @@ class MainWindow(QMainWindow):
             return
         self._busy = True
         self._set_running(True, interruptible=interruptible)
-        self._progress.setValue(0)
         self._set_status(f"{name}…")
         if overlay:
             self._overlay.show_overlay(f"{name}…", self.bot.pause_key or "p")
@@ -1499,7 +1482,9 @@ class MainWindow(QMainWindow):
             self._refresh_readiness()
 
     def _set_status(self, text: str) -> None:
-        self._status_label.setText(text)
+        # The status bar was removed (unreadable while the window is minimized
+        # during a draw). Progress is shown on the floating overlay instead;
+        # this keeps the textual trace in the log for debugging.
         log.info(text)
 
     # ------------------------------------------------------------------

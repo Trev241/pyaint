@@ -641,13 +641,15 @@ def test_pick_points_scales_logical_clicks_to_screenshot(app, monkeypatch):
     assert capture._to_screenshot_points([(1, 2)], None) == [(1, 2)]
 
 
-def test_progress_signal_updates_bar(app, tmp_path, monkeypatch):
+def test_progress_signal_updates_overlay_bar(app, tmp_path, monkeypatch):
+    """Drawing progress goes to the floating overlay, not a status bar."""
     monkeypatch.chdir(tmp_path)
     bot = Bot()
     window = MainWindow(bot)
     try:
         window.signals.progress.emit(5, 10, 1.0)
-        assert window._progress.value() == 50
+        assert window._overlay._bar.value() == 50
+        assert not hasattr(window, "_progress")
     finally:
         window.close()
 

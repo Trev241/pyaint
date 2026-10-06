@@ -112,6 +112,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   eagerly.
 
 ### Changed
+- **The bottom status bar is gone.** Its progress bar was unreadable while a
+  draw is running (the window is minimized), and the floating click-through
+  overlay already shows the same `strokes done / total` figure with an ETA.
+  Drawing progress now lives only on that overlay; status text is still
+  written to the log. The unused `QStatusBar` / `#StatusText` styles were
+  removed too.
 - **The preview is now a framed card.** The image sits on a bordered
   `#PreviewStage` that mirrors the source header above it, with a recessed
   image surface and a small header showing the loaded dimensions. This gives

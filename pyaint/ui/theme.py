@@ -489,14 +489,6 @@ def stylesheet(tokens: dict | None = None) -> str:
         background: {t['accent']};
         border-radius: 2px;
     }}
-    QStatusBar {{
-        background: {t['bg_status']};
-        color: {t['fg_muted']};
-        border-top: 1px solid {t['border']};
-    }}
-    QStatusBar::item {{ border: none; }}
-    #StatusText {{ color: {t['fg_muted']}; padding-left: 8px; }}
-
     /* --- Content toolbar ------------------------------------------------ */
     #EditorToolbar {{
         background: {t['bg']};
