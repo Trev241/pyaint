@@ -4,6 +4,7 @@ Extracted from ``bot.py`` into a mixin. Cluster into separate modules as
 useful. The methods use ``self.settings`` / ``self._canvas`` / ``self._palette``.
 """
 from pyaint.log import log
+from pyaint import planner
 
 import hashlib
 import json
@@ -30,7 +31,8 @@ class CacheMixin:
         metric = getattr(self, "color_metric", "ciede2000")
         stroke_distance = getattr(self, "stroke_distance", 1)
         settings_str = (
-            f"{self.settings}_{flags}_{mode}_{canvas_info}_{metric}_{stroke_distance}"
+            f"{self.settings}_{flags}_{mode}_{canvas_info}_{metric}_"
+            f"{stroke_distance}_{planner.CANVAS_PADDING}"
         )
         settings_hash = hashlib.md5(settings_str.encode()).hexdigest()[:8]
 

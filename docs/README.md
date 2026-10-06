@@ -107,7 +107,8 @@ See [`configuration.md`](configuration.md).
 ### Processing
 
 The pure planner (`planner.py`) does the work; `Bot.process()` just gathers the
-environment and delegates. `fit_to_canvas()` fits and centres the image,
+environment and delegates. `fit_to_canvas()` insets the canvas by
+`CANVAS_PADDING` px, then fits and centres the image,
 `quantize_image()` supersamples each cell and majority-votes in palette space to
 produce the shared colour grid (removing isolated compression / anti-aliasing
 artifacts at the source), and `plan()` turns that grid into a stroke map.

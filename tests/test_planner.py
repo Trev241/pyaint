@@ -116,3 +116,24 @@ def test_outline_stroke_distance_no_longer_changes_the_plan():
     fine = planner.plan(grid, 0, 0, 10, 0, planner.OUTLINE, stroke_distance=1)
     coarse = planner.plan(grid, 0, 0, 10, 0, planner.OUTLINE, stroke_distance=5)
     assert fine == coarse
+
+
+# ---------------------------------------------------------------------------
+# canvas padding
+# ---------------------------------------------------------------------------
+def test_inset_canvas_shrinks_every_edge():
+    assert planner._inset_canvas((10, 20, 100, 50)) == (14, 24, 92, 42)
+
+
+def test_inset_canvas_never_eats_tiny_canvases():
+    # The inset clamps to leave at least one pixel of width/height.
+    assert planner._inset_canvas((0, 0, 1, 1)) == (0, 0, 1, 1)
+    assert planner._inset_canvas((0, 0, 2, 1)) == (0, 0, 2, 1)
+
+
+def test_fit_to_canvas_keeps_origin_inside_padded_border():
+    image = Image.new("RGB", (100, 100))
+    x, y, w, h = (1000, 2000, 400, 200)
+    _, _, xo, yo = planner.fit_to_canvas(image, (x, y, w, h), 10)
+    assert xo >= x + planner.CANVAS_PADDING
+    assert yo >= y + planner.CANVAS_PADDING

@@ -26,6 +26,7 @@ class Bot(CacheMixin):
     IGNORE_TRANSPARENT = planner.IGNORE_TRANSPARENT
     ALPHA_CUTOFF = planner.ALPHA_CUTOFF
     STROKE_DISTANCE = planner.STROKE_DISTANCE
+    CANVAS_PADDING = planner.CANVAS_PADDING
 
     def __init__(self, profile=None):
         self.terminate = False
@@ -47,9 +48,9 @@ class Bot(CacheMixin):
         # mouseDown lands within the double-click window of the swatch click and
         # some apps (MS Paint) swallow it as a focus/double-click.
         self.color_settle = 0.4
-        # Replay the very first stroke once. The first synthetic stroke after a
-        # UI interaction can be consumed by window activation; the second
-        # attempt behaves like the strokes that already work.
+        # Prime the first stroke with throwaway clicks. The first synthetic
+        # interaction after a UI change can be consumed by window activation;
+        # this warms the target up without drawing the stroke twice.
         self.prime_first_stroke = True
         # Number of traced boundary cells per stroke in OUTLINE mode.
         self.stroke_distance = planner.STROKE_DISTANCE
@@ -400,22 +401,18 @@ class Bot(CacheMixin):
                 # continuous, paced drag; legacy mode replays a single run.
                 # Multi-point polylines can only be drawn as a path.
                 end_pos = line[-1]
-                attempts = 2 if (first_stroke and self.prime_first_stroke) else 1
-                for _attempt in range(attempts):
-                    if self.terminate:
-                        break
-                    prime = first_stroke and _attempt == 0
-                    if self.human_strokes or len(line) > 2:
-                        self.painter.execute_path(
-                            line,
-                            self.stroke_speed,
-                            self.frame_interval,
-                            prime=prime,
-                        )
-                    else:
-                        self.painter.execute_stroke(
-                            start_pos, end_pos, self.settings[Bot.DELAY]
-                        )
+                prime = first_stroke and self.prime_first_stroke
+                if self.human_strokes or len(line) > 2:
+                    self.painter.execute_path(
+                        line,
+                        self.stroke_speed,
+                        self.frame_interval,
+                        prime=prime,
+                    )
+                else:
+                    self.painter.execute_stroke(
+                        start_pos, end_pos, self.settings[Bot.DELAY]
+                    )
                 first_stroke = False
 
                 # Check for pause after completing the stroke

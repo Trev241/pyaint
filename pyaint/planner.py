@@ -49,6 +49,10 @@ IGNORE_WHITE = 1 << 0
 IGNORE_TRANSPARENT = 1 << 1
 ALPHA_CUTOFF = 128  # alpha below this counts as transparent
 STROKE_DISTANCE = 1
+#: Safety inset (px) applied to every edge of the taught canvas before fitting.
+#: Some targets (e.g. skribbl) register a click a hair outside the drawable
+#: area as a miss, so strokes are kept this far from the canvas border.
+CANVAS_PADDING = 4
 BLACK: Colour = (0, 0, 0)
 OUTLINE_COLOUR = BLACK
 
@@ -74,14 +78,26 @@ def _resize_nearest(image: Image.Image, size: Tuple[int, int]) -> Image.Image:
         return image.resize(size, resample=Image.NEAREST)  # type: ignore[attr-defined]
 
 
+def _inset_canvas(canvas, pad: int = CANVAS_PADDING):
+    """Shrink a ``(x, y, w, h)`` canvas by ``pad`` on every edge.
+
+    The inset is clamped so it never eats more than half the smaller
+    dimension, keeping tiny canvases (tests, thumbnails) at least 1px wide.
+    """
+    x, y, w, h = (int(v) for v in canvas)
+    p = max(0, min(int(pad), (w - 1) // 2, (h - 1) // 2))
+    return x + p, y + p, w - 2 * p, h - 2 * p
+
+
 def fit_to_canvas(image: Image.Image, canvas, step: int):
-    """Fit ``image`` into the canvas (centred).
+    """Fit ``image`` into the canvas (centred), minus a safety inset.
 
     Returns ``(source, (tw, th), xo, yo)``: the full-resolution source image,
     the output grid size, and the canvas origin. Downsampling is left to
-    :func:`quantize_image` so it can vote in palette space.
+    :func:`quantize_image` so it can vote in palette space. The canvas is
+    inset by :data:`CANVAS_PADDING` so edge strokes stay off the border.
     """
-    x, y, cw, ch = canvas
+    x, y, cw, ch = _inset_canvas(canvas)
     tw, th = (int(p // step) for p in utils.adjusted_img_size(image, (cw, ch)))
     xo = x + ((cw - tw * step) // 2)
     yo = y + ((ch - th * step) // 2)
@@ -98,11 +114,11 @@ def fit_region(image: Image.Image, region, canvas, step: int, canvas_target=None
     """
     x1, y1, x2, y2 = region
     cropped = image.crop((x1, y1, x2, y2))
-    canvas_x, canvas_y, canvas_w, canvas_h = canvas
+    canvas_x, canvas_y, canvas_w, canvas_h = _inset_canvas(canvas)
     cropped_w, cropped_h = cropped.size
 
     if canvas_target is not None:
-        target_x, target_y, target_w, target_h = canvas_target
+        target_x, target_y, target_w, target_h = _inset_canvas(canvas_target)
         scale = min(target_w / cropped_w, target_h / cropped_h)
         xo, yo = target_x, target_y
     else:

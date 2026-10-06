@@ -114,14 +114,14 @@ and delegate here, so the same functions are headlessly testable and cacheable.
 
 | Function | Description |
 |----------|-------------|
-| `fit_to_canvas(image, canvas, step)` / `fit_region(image, region, canvas, step, canvas_target=None)` | Fit/crop and centre → `(source, (tw, th), xo, yo)` |
+| `fit_to_canvas(image, canvas, step)` / `fit_region(image, region, canvas, step, canvas_target=None)` | Inset the canvas by `CANVAS_PADDING`, then fit/crop and centre → `(source, (tw, th), xo, yo)` |
 | `quantize(pix, w, h, palette, metric, flags)` | Pixels → colour grid: `grid[row][col] -> colour \| None` (single-sample) |
 | `quantize_image(image, (tw, th), palette, metric, flags)` | Palette-aware majority downsample of the full source → colour grid (numpy-accelerated) |
 | `plan_rows(grid, xo, yo, step, flags, mode)` | Colour grid → `cmap` (slotted / layered) |
 | `plan_regions(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE)` | Colour grid → `cmap` of closed polylines, one per contour (outline mode) |
 | `plan(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE)` | Dispatch by mode (`OUTLINE` → `plan_regions`, else `plan_rows`) |
 | `plan_image(...)` / `plan_region_image(...)` | Whole-image / sub-region entry points; both accept `stroke_distance` |
-| `SLOTTED` / `LAYERED` / `OUTLINE`, `IGNORE_WHITE`, `IGNORE_TRANSPARENT`, `ALPHA_CUTOFF`, `STROKE_DISTANCE` | Mode + flag constants (re-exported on `Bot`) |
+| `SLOTTED` / `LAYERED` / `OUTLINE`, `IGNORE_WHITE`, `IGNORE_TRANSPARENT`, `ALPHA_CUTOFF`, `STROKE_DISTANCE`, `CANVAS_PADDING` | Mode + flag constants (re-exported on `Bot`) |
 
 `stroke_distance` (outline mode) is retained for API / cache compatibility and
 no longer changes the plan: every traced contour is emitted as one polyline.

@@ -44,11 +44,10 @@ stub `_left_is_down` / `_send_input_mouse` and never touch the real API.
 `WindowFromPoint` + `SetForegroundWindow` (with an `AttachThreadInput`
 fallback) to make the target window foreground, since the first click on an
 inactive window is consumed by activation.
-- `Bot.prime_first_stroke` (default True) draws the very first stroke twice,
-and the first attempt additionally passes `prime=True` to `execute_path`,
-which sends two throwaway clicks before holding the button. This mirrors the
-observed "double-click then hold" workaround; the replay covers the case where
-even the primed attempt is swallowed.
+- `Bot.prime_first_stroke` (default True) passes `prime=True` to
+`execute_path` for the first stroke, which sends two throwaway clicks before
+holding the button. This mirrors the observed "double-click then hold"
+workaround without drawing the first stroke twice.
 - Diagnostics: `Bot.draw` logs `[Focus] target window foreground: True/False`,
 `execute_path` logs `[Prime] ...`, and `press_left` logs a warning if Windows
 never confirms the button went down.
@@ -85,7 +84,7 @@ never confirms the button went down.
 | `frame_interval` | seconds between `moveTo` events | larger = safer/slower, smaller = higher event rate |
 | `travel_delay` | pause when jumping between strokes | replaces `jump_delay` for path strokes |
 | `color_settle` | pause after selecting a colour | avoid the first stroke being read as a double-click |
-| `prime_first_stroke` | replay the first stroke once | hide a swallowed activation click |
+| `prime_first_stroke` | throwaway clicks before the first stroke | hide a swallowed activation click |
 | `human_strokes` | `False` reverts 2-point runs to `execute_stroke` | A/B comparison for slotted/layered |
 
 ## A/B comparison

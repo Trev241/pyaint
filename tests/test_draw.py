@@ -81,8 +81,8 @@ def test_draw_selects_each_colour_and_draws_each_stroke(monkeypatch, tmp_path):
     bot, fake = make_bot(monkeypatch, tmp_path)
     assert bot.draw(cmap()) == "success"
     assert fake.names().count("select_color") == 2
-    # the first stroke is replayed as a primer, so 2 + 1
-    assert fake.names().count("execute_path") == 3
+    # one stroke per colour, each drawn exactly once
+    assert fake.names().count("execute_path") == 2
     assert bot.drawing is False
 
 
@@ -90,8 +90,7 @@ def test_draw_legacy_mode_uses_execute_stroke(monkeypatch, tmp_path):
     bot, fake = make_bot(monkeypatch, tmp_path)
     bot.human_strokes = False
     assert bot.draw(cmap()) == "success"
-    # first stroke replayed as a primer
-    assert fake.names().count("execute_stroke") == 3
+    assert fake.names().count("execute_stroke") == 2
     assert "execute_path" not in fake.names()
 
 
@@ -104,15 +103,20 @@ def test_draw_focuses_target_window_before_strokes(monkeypatch, tmp_path):
 def test_draw_primes_the_first_stroke(monkeypatch, tmp_path):
     bot, fake = make_bot(monkeypatch, tmp_path)
     bot.draw(cmap())
-    # first stroke drawn twice, second once
-    assert fake.names().count("execute_path") == 3
+    paths = [c for c in fake.calls if c[0] == "execute_path"]
+    # two strokes, each drawn once; only the first is primed
+    assert len(paths) == 2
+    assert paths[0][1][3] is True
+    assert paths[1][1][3] is False
 
 
 def test_draw_prime_can_be_disabled(monkeypatch, tmp_path):
     bot, fake = make_bot(monkeypatch, tmp_path)
     bot.prime_first_stroke = False
     bot.draw(cmap())
-    assert fake.names().count("execute_path") == 2
+    paths = [c for c in fake.calls if c[0] == "execute_path"]
+    assert len(paths) == 2
+    assert all(call[1][3] is False for call in paths)
 
 
 def test_draw_skip_first_color(monkeypatch, tmp_path):

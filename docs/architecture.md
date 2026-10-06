@@ -72,7 +72,8 @@ reversed corners).
 The pure half lives in `pyaint/planner.py`; `Bot.process()` is a thin facade
 that opens the image, reads the canvas, and hands the rest over:
 
-1. `fit_to_canvas()` — fit/centre the image and report the output grid size
+1. `fit_to_canvas()` — inset the canvas by `CANVAS_PADDING` px, then
+   fit/centre the image and report the output grid size
    (`utils.adjusted_img_size`). It no longer downsamples.
 2. `quantize_image(image, (tw, th), palette, metric, flags)` — supersample each
    output cell, map every sample to the nearest palette colour, and take the
