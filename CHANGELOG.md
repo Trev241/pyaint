@@ -13,6 +13,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **The standalone `.exe` no longer crashes on launch.** The Outline planner
+  imported `cv2` (OpenCV), which the PyInstaller spec deliberately excludes and
+  the project never listed as a dependency — so the frozen build (and any
+  source install without OpenCV) died with `ModuleNotFoundError: No module
+  named 'cv2'` before the window opened. Outline now traces region boundaries
+  in plain Python (no OpenCV or NumPy), keeping the build dependency-light.
 - **Manually teaching a palette (or canvas) now actually saves the clicks.**
   The point picker hid its modal overlay before calling `accept()`; hiding a
   modal `QDialog` exits its `exec()` loop immediately with `Rejected`, so

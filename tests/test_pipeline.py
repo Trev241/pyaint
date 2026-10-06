@@ -328,6 +328,29 @@ def test_process_outline_honours_stroke_distance(tmp_path):
     assert coarse_count <= fine_count
 
 
+def test_outline_emits_closed_polylines():
+    grid = [[BLUE] * 12 for _ in range(12)]
+    for r in range(2, 10):
+        for c in range(2, 10):
+            grid[r][c] = RED
+
+    cmap = planner.plan(grid, 0, 0, 5, 0, planner.OUTLINE)
+    strokes = cmap[planner.OUTLINE_COLOUR]
+    assert strokes
+    for stroke in strokes:
+        assert len(stroke) >= 4
+        assert stroke[0] == stroke[-1]  # closed loop -> one continuous drag
+
+
+def test_outline_does_not_require_numpy(monkeypatch):
+    # The frozen build excludes numpy (and cv2); the outline planner must still
+    # trace contours with plain Python.
+    monkeypatch.setattr(planner, "_np", None)
+    grid = [[RED] * 8 for _ in range(8)]
+    cmap = planner.plan(grid, 0, 0, 1, 0, planner.OUTLINE)
+    assert cmap[planner.OUTLINE_COLOUR]
+
+
 def test_precompute_then_load_round_trip(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     path = write_image(tmp_path, {(0, 0): RED, (1, 0): BLUE}, (2, 1))
