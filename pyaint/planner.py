@@ -419,12 +419,22 @@ def plan_regions(
     return _outline(grid, xo, yo, step, stroke_distance, palette, morphology)
 
 
+# TODO: Remove the per-colour mask morphology once a better anti-aliasing
+# cleanup lands. To delete: drop this kernel, `_despeckle_mask`, the
+# `morphology` args on `plan_regions`/`_outline`/`plan`/`plan_image`/
+# `plan_region_image`, `Bot.outline_morphology`, the `outline_morphology` terms
+# in `cache.py`, the "Despeckle anti-aliased edges" checkbox in
+# `ui/main_window.py`, and the `morphology`/despeckle tests.
 #: 3x3 ellipse used to despeckle each region mask before contour tracing.
 _MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
 
 def _despeckle_mask(mask):
-    """Remove anti-aliasing specks and bridge 1px breaks in a region mask."""
+    """TEMPORARY experiment: remove anti-aliasing specks / bridge 1px breaks.
+
+    See the TODO above. A 3x3 kernel also erases genuine 1px detail, so this is
+    opt-in and slated for removal.
+    """
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _MORPH_KERNEL)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, _MORPH_KERNEL)
     return mask
