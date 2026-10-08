@@ -116,7 +116,7 @@ and delegate here, so the same functions are headlessly testable and cacheable.
 |----------|-------------|
 | `fit_to_canvas(image, canvas, step)` / `fit_region(image, region, canvas, step, canvas_target=None)` | Inset the canvas by `CANVAS_PADDING`, then fit/crop and centre → `(source, (tw, th), xo, yo)` |
 | `quantize(pix, w, h, palette, metric, flags)` | Pixels → colour grid: `grid[row][col] -> colour \| None` (single-sample) |
-| `quantize_image(image, (tw, th), palette, metric, flags)` | Palette-aware majority downsample of the full source → colour grid (numpy-accelerated) |
+| `quantize_image(image, (tw, th), palette, metric, flags, source_quality=False)` | Palette-aware majority downsample of the full source → colour grid (numpy-accelerated) |
 | `plan_rows(grid, xo, yo, step, flags, mode)` | Colour grid → `cmap` (slotted / layered) |
 | `plan_regions(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE)` | Colour grid → `cmap` of closed polylines, one per contour (outline mode) |
 | `plan(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE)` | Dispatch by mode (`OUTLINE` → `plan_regions`, else `plan_rows`) |
@@ -133,7 +133,10 @@ Outline is selected.
 `quantize_image` supersamples each output cell and takes the modal palette
 colour, which votes out isolated compression / anti-aliasing artifacts at the
 source. It uses numpy when available and falls back to single-sample
-`quantize` otherwise.
+`quantize` otherwise. With `source_quality=True`, the sample grid is scaled to
+the source resolution so every source pixel votes; `plan_image` /
+`plan_region_image` enable it for `OUTLINE` only, because a thin anti-aliased
+outline otherwise fragments across cells.
 
 `cmap` is `{(r, g, b): [((x1, y1), (x2, y2)), ...]}`.
 

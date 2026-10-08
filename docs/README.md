@@ -114,6 +114,8 @@ environment and delegates. `fit_to_canvas()` insets the canvas by
 `quantize_image()` supersamples each cell and majority-votes in palette space to
 produce the shared colour grid (removing isolated compression / anti-aliasing
 artifacts at the source), and `plan()` turns that grid into a stroke map.
+Outline asks for `source_quality=True`, sampling at the source resolution so a
+thin anti-aliased contour is resolved consistently rather than fragmented.
 
 - **Layered**: builds per-row colour tables, then `_merge_layers()`
   sorts colours by frequency and repaints lower layers, yielding fewer strokes.

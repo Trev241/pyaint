@@ -168,8 +168,41 @@ def quantize(pix, w: int, h: int, palette, metric, flags: int) -> ColourGrid:
 #: source resolution for very large images.
 _SAMPLE_BUDGET = 400_000
 
+#: Sample grid budget for :func:`quantize_image`'s ``source_quality`` mode. The
+#: vote table is int64, so even a very large source is bounded by this many
+#: supersample pixels instead of its full resolution.
+_SOURCE_SAMPLE_BUDGET = 16_000_000
 
-def quantize_image(image: Image.Image, size, palette, metric, flags: int) -> ColourGrid:
+
+def _supersample_scale(image: Image.Image, size, source_quality: bool) -> int:
+    """Return the samples-per-output-cell edge used by :func:`quantize_image`.
+
+    The default budget samples a handful of pixels per cell: cheap, but it can
+    under-sample a thin anti-aliased line inconsistently, so the line wins in
+    one cell and loses in the next and its contour fragments. ``source_quality``
+    instead scales the sample grid to at least the source resolution, so every
+    source pixel casts a vote and a thin line is cleanly resolved (kept or
+    outvoted) instead of broken up across neighbouring cells.
+    """
+    tw, th = size
+    if not source_quality:
+        scale = int(round((_SAMPLE_BUDGET / (tw * th)) ** 0.5))
+        return max(1, min(8, scale))
+
+    # Ceiling division so the sample grid covers every source pixel.
+    scale = max(1, -(-image.width // tw), -(-image.height // th))
+    budget = int((_SOURCE_SAMPLE_BUDGET / (tw * th)) ** 0.5)
+    return max(1, min(scale, budget))
+
+
+def quantize_image(
+    image: Image.Image,
+    size,
+    palette,
+    metric,
+    flags: int,
+    source_quality: bool = False,
+) -> ColourGrid:
     """Quantize ``image`` into a ``size`` grid using palette-aware voting.
 
     Unlike :func:`quantize`, which snaps a single sampled pixel per cell, this
@@ -178,6 +211,10 @@ def quantize_image(image: Image.Image, size, palette, metric, flags: int) -> Col
     compression / anti-aliasing artifacts without inventing blend colours, so
     they never reach the LAYERED / SLOTTED / OUTLINE planners. Falls back to
     nearest-neighbour sampling when numpy is unavailable.
+
+    ``source_quality`` supersamples at the source resolution (see
+    :func:`_supersample_scale`). OUTLINE enables it so a thin anti-aliased
+    outline votes consistently instead of fragmenting into tiny regions.
     """
     tw, th = size
     if tw <= 0 or th <= 0:
@@ -190,8 +227,7 @@ def quantize_image(image: Image.Image, size, palette, metric, flags: int) -> Col
     if not colors:
         return [[None] * tw for _ in range(th)]
 
-    scale = int(round((_SAMPLE_BUDGET / (tw * th)) ** 0.5))
-    scale = max(1, min(8, scale))
+    scale = _supersample_scale(image, size, source_quality)
 
     # Supersample each output cell into a scale x scale block. Nearest keeps
     # real palette colours (no blends), and the block spreads the vote across
@@ -354,7 +390,8 @@ def plan_regions(
 ) -> Cmap:
     """Plan an outline-and-fill stroke map from the quantised colour grid.
 
-    Traces region boundaries as strokes in :data:`OUTLINE_COLOUR`.
+    Traces region boundaries as strokes in :data:`OUTLINE_COLOUR`, drawing each
+    edge shared by two regions only once.
 
     Args:
         grid: row-major ``grid[row][col] -> colour | None`` (from
@@ -371,7 +408,7 @@ def plan_regions(
 
     Returns:
         A :data:`Cmap` sharing the shape :func:`plan_rows` returns, but with
-        each value a list of :data:`Stroke` (point lists): one closed polyline
+        each value a list of :data:`Stroke` (point lists): one polyline
         per traced contour, all in :data:`OUTLINE_COLOUR`.
     """
     return _outline(grid, xo, yo, step, stroke_distance, palette)
@@ -385,51 +422,38 @@ def _outline(
     stroke_distance: int = STROKE_DISTANCE,
     palette=None,
 ):
-    """Trace region boundaries and emit one closed polyline per contour.
+    """Trace region boundaries into polylines, once per shared edge.
 
-    Each contour from ``cv2.findContours``/``approxPolyDP`` becomes a single
-    :data:`Stroke`, so the executor can replay it as one continuous drag
-    instead of one stroke per edge.
+    Each region's contour from ``cv2.findContours`` is split into runs wherever
+    it crosses a boundary owned by a lower-numbered region, and each run
+    becomes one :data:`Stroke`. This keeps the executor to one continuous drag
+    per run while never tracing a shared curve twice.
 
     ``stroke_distance`` is retained only for API / cache compatibility; it no
-    longer affects the result (a contour is always one stroke).
+    longer affects the result.
     """
-    colors = (
-        list(palette.color_list)
-        if palette is not None
-        else sorted({c for row in grid for c in row if c is not None})
-    )
-
     strokes: List[Stroke] = []
-    contours_map: Dict[Colour, List[Stroke]]
-    contours_grid = _np.array([[0 for _ in row] for row in grid])
-    ids = {}
+    ids: Dict[Colour, int] = {}
 
-    # This line does two things simultaneously:
-    # It maps each colour in the grid to an ID starting from index 1.
-    # And at the same time, it creates a matrix of the image where each cell
-    # contains the ID mapped to its colour.
+    # Map each colour to an id (from 1) and the grid to a label matrix in one
+    # pass, so a region mask is just ``labels == id``. Ids are assigned in
+    # first-seen order, which is what makes shared edges unambiguous.
     labels = _np.array(
         [[ids.setdefault(cell, len(ids) + 1) for cell in row] for row in grid],
         dtype=_np.int32,
     )
+    padded = _np.pad(labels, 1, constant_values=0)
 
-    for color, region_id in ids.items():
-        # The mask selects those cells containing the colour marked by index k.
-        # Since this loop passes over all the colours in `ids`, we will eventually
-        # mark contours for the entire image.
+    for region_id in ids.values():
         mask = (labels == region_id).astype(_np.uint8)
-        # mask = _np.array(
-        #     [[1 if cell == color else 0 for cell in row] for row in grid],
-        #     dtype=_np.uint8,
-        # )
         contours, _ = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
         contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
         for contour in contours:
             points = [(int(p[0][0]), int(p[0][1])) for p in contour]
             keep_flags = [
-                not _touches_lower_region(x, y, region_id, labels) for x, y in points
+                not _touches_lower_region(x, y, region_id, padded)
+                for x, y in points
             ]
 
             for run, closed in _split_into_runs(points, keep_flags):
@@ -444,40 +468,20 @@ def _outline(
                 if len(stroke) >= 2:
                     strokes.append(stroke)
 
-            # if cv2.contourArea(contour) < 10:
-            #     continue
-
-            # new_contour = []
-            # for point in contour:
-            #     row = point[0][0, 1]
-            #     col = point[0][1, 0]
-
-            #     if not drop:
-            #         new_contour.append([point])
-
-            # simplified = cv2.approxPolyDP(new_contour, epsilon=0.5, closed=True)
-            # points: Stroke = [
-            #     (xo + int(point[0][0]) * step, yo + int(point[0][1]) * step)
-            #     for point in simplified
-            # ]
-
-            # if len(points) < 2:
-            #     continue
-
-            # points.append(points[0])  # close the loop for one continuous drag
-            # strokes.append(points)
-
     return {OUTLINE_COLOUR: strokes} if strokes else {}
 
 
-def _touches_lower_region(x, y, region_id, labels):
-    """Returns true if any of the 8 neighbouring cells is of a lower region"""
+def _touches_lower_region(x, y, region_id, padded_labels):
+    """True when any of the 8 neighbours is a lower-numbered region.
+
+    A shared edge belongs to the lower-numbered region, so the higher-numbered
+    side drops it. ``padded_labels`` is :data:`labels` padded by one cell.
+    """
 
     offsets = [[-1, 0], [-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1]]
-    padded_labels = _np.pad(labels, 1, constant_values=0)
 
     for dx, dy in offsets:
-        # If we detect a neighbouring contour cell with a lower color ID,
+        # If we detect a neighbouring contour cell with a lower colour ID,
         # we must drop this cell to avoid double drawing.
         neighbour_id = padded_labels[y + 1 + dy, x + 1 + dx]
         if 0 < neighbour_id < region_id:
@@ -552,7 +556,9 @@ def plan_image(
 ) -> Cmap:
     """Fit + quantise + plan a full image. Returns a stroke map (``cmap``)."""
     source, (tw, th), xo, yo = fit_to_canvas(image, canvas, step)
-    grid = quantize_image(source, (tw, th), palette, metric, flags)
+    grid = quantize_image(
+        source, (tw, th), palette, metric, flags, source_quality=mode == OUTLINE
+    )
     return plan(grid, xo, yo, step, flags, mode, stroke_distance, palette)
 
 
@@ -570,5 +576,7 @@ def plan_region_image(
 ) -> Cmap:
     """Fit + quantise + plan a sub-region. Returns a stroke map (``cmap``)."""
     source, (tw, th), xo, yo = fit_region(image, region, canvas, step, canvas_target)
-    grid = quantize_image(source, (tw, th), palette, metric, flags)
+    grid = quantize_image(
+        source, (tw, th), palette, metric, flags, source_quality=mode == OUTLINE
+    )
     return plan(grid, xo, yo, step, flags, mode, stroke_distance, palette)

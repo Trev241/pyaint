@@ -64,6 +64,47 @@ def test_quantize_image_honours_transparency():
     assert grid == [[RED, None], [RED, None]]
 
 
+def test_supersample_scale_default_is_budgeted_and_capped():
+    # 4x4 grid over a 320px source = 80 source px per cell, but the default
+    # budget keeps the sample grid cheap and caps at 8.
+    image = Image.new("RGB", (320, 320))
+    assert planner._supersample_scale(image, (4, 4), False) == 8
+
+
+def test_supersample_scale_source_quality_samples_every_source_pixel():
+    image = Image.new("RGB", (320, 320))
+    assert planner._supersample_scale(image, (4, 4), True) == 80
+
+
+def test_quantize_image_source_quality_votes_every_source_pixel():
+    # The top-left 16x16 cell is 60% red; sampling every source pixel resolves
+    # it to red instead of letting a sparse sample decide.
+    image = Image.new("RGBA", (32, 32), BLUE + (255,))
+    for y in range(16):
+        for x in range(16):
+            if (x + y) % 5 < 3:
+                image.putpixel((x, y), RED + (255,))
+    grid = planner.quantize_image(
+        image, (2, 2), _palette(), "rgb", 0, source_quality=True
+    )
+    assert grid == [[RED, BLUE], [BLUE, BLUE]]
+
+
+def test_plan_image_uses_source_quality_for_outline_only(monkeypatch):
+    calls = []
+
+    def fake_quantize(image, size, palette, metric, flags, source_quality=False):
+        calls.append(source_quality)
+        return [[RED]]
+
+    monkeypatch.setattr(planner, "quantize_image", fake_quantize)
+    image = Image.new("RGB", (10, 10))
+    canvas = (0, 0, 10, 10)
+    planner.plan_image(image, canvas, 1, _palette(), "rgb", 0, planner.LAYERED)
+    planner.plan_image(image, canvas, 1, _palette(), "rgb", 0, planner.OUTLINE)
+    assert calls == [False, True]
+
+
 def test_nearest_color_indices_match_scalar():
     from pyaint.palette import Palette as P
 
@@ -116,6 +157,21 @@ def test_outline_stroke_distance_no_longer_changes_the_plan():
     fine = planner.plan(grid, 0, 0, 10, 0, planner.OUTLINE, stroke_distance=1)
     coarse = planner.plan(grid, 0, 0, 10, 0, planner.OUTLINE, stroke_distance=5)
     assert fine == coarse
+
+
+def test_outline_draws_each_shared_edge_once():
+    from collections import Counter
+
+    # Two same-colour blocks meet along one vertical boundary.
+    grid = [[RED, RED, BLUE, BLUE], [RED, RED, BLUE, BLUE]]
+    cmap = planner.plan(grid, 0, 0, 10, 0, planner.OUTLINE)
+    segments = Counter()
+    for stroke in cmap[planner.OUTLINE_COLOUR]:
+        for a, b in zip(stroke, stroke[1:]):
+            segments[frozenset((a, b))] += 1
+    assert segments
+    # The shared edge must not be traced by both region contours.
+    assert all(count == 1 for count in segments.values())
 
 
 # ---------------------------------------------------------------------------

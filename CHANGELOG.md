@@ -124,6 +124,14 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   eagerly.
 
 ### Changed
+- **Outline now quantises at source resolution.** The shared quantiser samples
+  a handful of pixels per output cell, which is fine for the run-based modes but
+  can capture a thin anti-aliased outline in one cell and miss it in the next,
+  so its contour fragmented into many tiny strokes. Outline now requests
+  `source_quality=True`: the sample grid is scaled to the source resolution so
+  every source pixel votes and thin edges are resolved consistently instead of
+  being approximated into stray palette colours. The other modes keep the
+  cheaper budgeted sampling.
 - **Outline is now the default stroke mode.** New installs (and configs with no
   saved `draw_mode`) start in Outline instead of Layered. Existing configs keep
   whichever mode they had saved.

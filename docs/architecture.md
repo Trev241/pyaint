@@ -75,13 +75,16 @@ that opens the image, reads the canvas, and hands the rest over:
 1. `fit_to_canvas()` — inset the canvas by `CANVAS_PADDING` px, then
    fit/centre the image and report the output grid size
    (`utils.adjusted_img_size`). It no longer downsamples.
-2. `quantize_image(image, (tw, th), palette, metric, flags)` — supersample each
-   output cell, map every sample to the nearest palette colour, and take the
-   **majority**. Voting in palette space removes isolated compression /
-   anti-aliasing artifacts without inventing blend colours, producing the
-   colour grid; transparent cells become `None` when `IGNORE_TRANSPARENT` is
-   set. This is the **shared boundary**: every planning mode consumes the same
-   grid. (`quantize()` remains the single-sample fallback.)
+2. `quantize_image(image, (tw, th), palette, metric, flags, source_quality=False)`
+   — supersample each output cell, map every sample to the nearest palette
+   colour, and take the **majority**. Voting in palette space removes isolated
+   compression / anti-aliasing artifacts without inventing blend colours,
+   producing the colour grid; transparent cells become `None` when
+   `IGNORE_TRANSPARENT` is set. Outline passes `source_quality=True`, which
+   samples at the source resolution so a thin anti-aliased contour votes
+   consistently instead of fragmenting. This is the **shared boundary**: every
+   planning mode consumes the same grid. (`quantize()` remains the single-sample
+   fallback.)
 3. `plan(grid, xo, yo, step, flags, mode)` — dispatch to the mode planner:
    - **Slotted** / **Layered** (`plan_rows`): run-length encode the grid.
      Slotted appends every run directly; Layered accumulates per-row tables and
