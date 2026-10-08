@@ -124,6 +124,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   eagerly.
 
 ### Changed
+- **Outline region ids are ordered by brightness, not first appearance.** Dark
+  colours get the lower ids and therefore own (trace) the edges they share with
+  a lighter fill, so a dark outline is drawn rather than the fill side of it.
 - **Outline now quantises at source resolution.** The shared quantiser samples
   a handful of pixels per output cell, which is fine for the run-based modes but
   can capture a thin anti-aliased outline in one cell and miss it in the next,
@@ -225,6 +228,14 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   inspector, leaving Start drawing as the single primary action.
 
 ### Added
+- **Pyaint remembers the last image you selected.** The loaded image is copied
+  next to `config.json` as `last_image.png` and restored on the next launch, so
+  a gallery pick or an upload no longer has to be reselected. Reset clears it.
+- **Outline has an opt-in *Despeckle anti-aliased edges* cleanup.** It runs a
+  morphological open/close on each colour's mask before contour tracing,
+  removing 1px anti-aliasing specks and bridging 1px breaks so they do not each
+  become a tiny stroke. Off by default because a 3x3 kernel also erases genuine
+  1px detail; the checkbox lives in the Outline controls and is cached.
 - **A Clear button in the Setup window.** Each tool's row now has a Clear
   action that forgets the taught position (and its saved preview) without
   closing the dialog, so a wrong capture can be undone and retaught in place.

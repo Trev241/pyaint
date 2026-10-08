@@ -56,6 +56,10 @@ class Bot(CacheMixin):
         # outline planner emits one polyline per contour and ignores the value,
         # so it is no longer exposed in the UI.
         self.stroke_distance = planner.STROKE_DISTANCE
+        # Opt-in: despeckle each outline region mask (open then close) before
+        # tracing, so anti-aliased specks do not become tiny stroke fragments.
+        # Off by default because it also erases genuine 1px detail.
+        self.outline_morphology = False
         self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
 
         # The taught environment lives in one shared Profile (pyaint/profile.py).
@@ -262,6 +266,7 @@ class Bot(CacheMixin):
             flags,
             mode,
             self.stroke_distance,
+            self.outline_morphology,
         )
 
     def draw(self, cmap):
@@ -635,6 +640,7 @@ class Bot(CacheMixin):
             mode,
             canvas_target,
             self.stroke_distance,
+            self.outline_morphology,
         )
 
     def simple_test_draw(self):

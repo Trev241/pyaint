@@ -166,6 +166,11 @@ class MainWindow(QMainWindow):
         self._mode = Bot.OUTLINE
         self._busy = False
         self._last_url = ""
+        # Durable copy of the most recently loaded image, restored on startup.
+        self._last_image_path = ""
+        self._last_image_file = os.path.join(
+            os.path.dirname(self._config_path), "last_image.png"
+        )
         self._pending_source = None
         self._search_query = ""
         self._search_continue = None
@@ -423,6 +428,14 @@ class MainWindow(QMainWindow):
             "warning",
         )
         outline_layout.addWidget(self._outline_notice)
+        self._chk_despeckle = CheckBox("Despeckle anti-aliased edges")
+        self._chk_despeckle.setToolTip(
+            "Outline only: clean each colour's mask before tracing, removing "
+            "single-pixel anti-aliasing specks and bridging 1px breaks so they "
+            "do not each become a tiny stroke fragment."
+        )
+        self._chk_despeckle.toggled.connect(self._on_outline_despeckle_changed)
+        outline_layout.addWidget(self._chk_despeckle)
         outline_layout.addWidget(self._stroke_speed)
         outline_layout.addWidget(self._event_interval)
         outline_layout.addWidget(self._travel_delay)
@@ -881,6 +894,7 @@ class MainWindow(QMainWindow):
         self.bot.stroke_speed = 1500.0
         self.bot.frame_interval = 1.0 / 60.0
         self.bot.travel_delay = 0.05
+        self.bot.outline_morphology = False
         self.draw_options = merge_drawing_options(
             self.draw_options,
             recipe.drawing_options or {},
@@ -949,6 +963,7 @@ class MainWindow(QMainWindow):
             0.001, float(settings.get("frame_interval", 1.0 / 60.0))
         )
         self.bot.travel_delay = max(0.0, float(settings.get("travel_delay", 0.05)))
+        self.bot.outline_morphology = bool(settings.get("outline_morphology", False))
 
         metric = self.tools.get("color_metric", DEFAULT_METRIC)
         if metric not in METRICS:
@@ -963,6 +978,7 @@ class MainWindow(QMainWindow):
         if last_url:
             self._last_url = last_url
             self._url_edit.setText(last_url)
+        self._last_image_path = str(self.tools.get("last_image_path", ""))
 
         provider = str(
             self.tools.get("image_search_provider", image_search.DEFAULT_PROVIDER)
@@ -1060,6 +1076,7 @@ class MainWindow(QMainWindow):
             "stroke_speed": float(self.bot.stroke_speed),
             "frame_interval": float(self.bot.frame_interval),
             "travel_delay": float(self.bot.travel_delay),
+            "outline_morphology": bool(self.bot.outline_morphology),
             "drawing_options": {
                 "ignore_white_pixels": bool(self.draw_options & Bot.IGNORE_WHITE),
                 "ignore_transparent_pixels": bool(
@@ -1089,6 +1106,8 @@ class MainWindow(QMainWindow):
             self.bot.frame_interval = max(0.001, float(data["frame_interval"]))
         if "travel_delay" in data:
             self.bot.travel_delay = max(0.0, float(data["travel_delay"]))
+        if "outline_morphology" in data:
+            self.bot.outline_morphology = bool(data["outline_morphology"])
         options = data.get("drawing_options") or {}
         self.draw_options = 0
         if options.get("ignore_white_pixels", True):
@@ -1113,6 +1132,7 @@ class MainWindow(QMainWindow):
         settings["stroke_speed"] = float(self.bot.stroke_speed)
         settings["frame_interval"] = float(self.bot.frame_interval)
         settings["travel_delay"] = float(self.bot.travel_delay)
+        settings["outline_morphology"] = bool(self.bot.outline_morphology)
 
     def _store_drawing_options(self) -> None:
         options = self.tools.setdefault("drawing_options", {})
@@ -1132,6 +1152,7 @@ class MainWindow(QMainWindow):
         self.tools["image_search_provider"] = self._provider
         if self._last_url:
             self.tools["last_image_url"] = self._last_url
+        self.tools["last_image_path"] = self._last_image_path
         self._drawing_by_target[self.profile.target] = self._drawing_snapshot()
         self.tools["drawing_by_target"] = self._drawing_by_target
         self._environments[self.profile.target] = self.profile.snapshot_environment()
@@ -1169,6 +1190,9 @@ class MainWindow(QMainWindow):
         self._stroke_speed.set_value(float(self.bot.stroke_speed))
         self._event_interval.set_value(round(self.bot.frame_interval * 1000))
         self._travel_delay.set_value(float(self.bot.travel_delay))
+        self._chk_despeckle.blockSignals(True)
+        self._chk_despeckle.setChecked(bool(self.bot.outline_morphology))
+        self._chk_despeckle.blockSignals(False)
         mode_index = self._mode_combo.findData(self._mode)
         if mode_index >= 0:
             self._mode_combo.blockSignals(True)
@@ -1313,6 +1337,13 @@ class MainWindow(QMainWindow):
             0.001, float(self._event_interval.value()) / 1000.0
         )
         self.bot.travel_delay = max(0.0, float(self._travel_delay.value()))
+        self._store_drawing_settings()
+        self._save_config()
+
+    def _on_outline_despeckle_changed(self, checked: bool) -> None:
+        if self._initializing:
+            return
+        self.bot.outline_morphology = bool(checked)
         self._store_drawing_settings()
         self._save_config()
 
@@ -1491,12 +1522,15 @@ class MainWindow(QMainWindow):
     # Image loading
     # ------------------------------------------------------------------
     def _load_default_image(self) -> None:
-        if os.path.exists(self._imname):
-            self._set_image_path(self._imname)
-        else:
-            self._preview.set_placeholder("Drag an image here, or use the field above.")
-            self._preview_meta.setText("No image")
-            self._image_stack.setCurrentWidget(self._preview_page)
+        # Prefer the image selected last session (a durable copy next to
+        # ``config.json``); fall back to the bundled sample.
+        for path in (self._last_image_path, self._imname):
+            if path and os.path.exists(path):
+                self._set_image_path(path)
+                return
+        self._preview.set_placeholder("Drag an image here, or use the field above.")
+        self._preview_meta.setText("No image")
+        self._image_stack.setCurrentWidget(self._preview_page)
 
     def _on_url_changed(self, text: str) -> None:
         self._load_btn.setEnabled(bool(text.strip()))
@@ -1715,6 +1749,7 @@ class MainWindow(QMainWindow):
             self._set_status(f"Could not open image: {exc}")
             return
         self._imname = path
+        self._remember_last_image(path)
         self._preview.set_pixmap(pil_to_qpixmap(image))
         self._preview_meta.setText(f"{image.width} \u00d7 {image.height} px")
         self._image_stack.setCurrentWidget(self._preview_page)
@@ -1738,6 +1773,24 @@ class MainWindow(QMainWindow):
         else:
             self._set_status("Image loaded. Detect or teach the canvas next.")
         self._refresh_readiness()
+
+    def _remember_last_image(self, path: str) -> None:
+        """Keep a durable copy of the loaded image and remember it in config.
+
+        A local path can move and a gallery/remote download lives in a temp
+        file, so the source is copied next to ``config.json`` and reloaded on
+        the next launch.
+        """
+        try:
+            if os.path.abspath(path) != os.path.abspath(self._last_image_file):
+                os.makedirs(os.path.dirname(self._last_image_file), exist_ok=True)
+                shutil.copyfile(path, self._last_image_file)
+            self._last_image_path = self._last_image_file
+        except Exception as exc:  # noqa: BLE001 - never block a load on this
+            log.info(f"[Config] could not persist last image: {exc}")
+            self._last_image_path = path
+        self.tools["last_image_path"] = self._last_image_path
+        self._save_config()
 
     # Drag & drop
     def dragEnterEvent(self, event):  # noqa: N802
@@ -2317,6 +2370,8 @@ class MainWindow(QMainWindow):
                 folder = os.path.join(paths.PROJECT_ROOT, name)
                 if os.path.exists(folder):
                     shutil.rmtree(folder)
+            if os.path.exists(self._last_image_file):
+                os.remove(self._last_image_file)
         except Exception as exc:  # noqa: BLE001
             self._set_status(f"Could not reset config: {exc}")
             return
@@ -2328,6 +2383,7 @@ class MainWindow(QMainWindow):
             self._drawing_by_target = {}
             self.tools = {}
             self._last_url = ""
+            self._last_image_path = ""
             self._url_edit.clear()
             self._imname = os.path.join(paths.PROJECT_ROOT, "assets", "sample.png")
             self.load_config()

@@ -13,6 +13,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PIL import Image  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from pyaint.bot import Bot  # noqa: E402
@@ -111,6 +112,48 @@ def test_outline_settings_persist(app, tmp_path, monkeypatch):
         assert restored.bot.frame_interval == pytest.approx(0.025)
         assert restored.bot.travel_delay == pytest.approx(0.2)
         assert restored._mode == Bot.OUTLINE
+    finally:
+        restored.close()
+
+
+def test_last_selected_image_restores_on_restart(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "picked.png"
+    Image.new("RGBA", (6, 4), (255, 0, 0, 255)).save(source)
+
+    window = MainWindow(Bot())
+    try:
+        window._load_local_path(str(source))
+        window._save_config()
+        assert os.path.exists(window._last_image_file)
+    finally:
+        window.close()
+
+    # Drop the original so the restore has to come from the durable copy.
+    os.remove(source)
+    restored = MainWindow(Bot())
+    try:
+        assert restored._imname == restored._last_image_file
+        assert os.path.exists(restored._imname)
+    finally:
+        restored.close()
+
+
+def test_outline_despeckle_toggle_persists(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        assert window._chk_despeckle.isChecked() is False
+        window._chk_despeckle.setChecked(True)
+        assert window.bot.outline_morphology is True
+        window._save_config()
+    finally:
+        window.close()
+
+    restored = MainWindow(Bot())
+    try:
+        assert restored.bot.outline_morphology is True
+        assert restored._chk_despeckle.isChecked() is True
     finally:
         restored.close()
 

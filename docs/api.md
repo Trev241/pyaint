@@ -118,17 +118,22 @@ and delegate here, so the same functions are headlessly testable and cacheable.
 | `quantize(pix, w, h, palette, metric, flags)` | Pixels → colour grid: `grid[row][col] -> colour \| None` (single-sample) |
 | `quantize_image(image, (tw, th), palette, metric, flags, source_quality=False)` | Palette-aware majority downsample of the full source → colour grid (numpy-accelerated) |
 | `plan_rows(grid, xo, yo, step, flags, mode)` | Colour grid → `cmap` (slotted / layered) |
-| `plan_regions(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE)` | Colour grid → `cmap` of closed polylines, one per contour (outline mode) |
-| `plan(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE)` | Dispatch by mode (`OUTLINE` → `plan_regions`, else `plan_rows`) |
-| `plan_image(...)` / `plan_region_image(...)` | Whole-image / sub-region entry points; both accept `stroke_distance` |
+| `plan_regions(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE, palette=None, morphology=False)` | Colour grid → `cmap` of polylines (outline mode) |
+| `plan(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE, palette=None, morphology=False)` | Dispatch by mode (`OUTLINE` → `plan_regions`, else `plan_rows`) |
+| `plan_image(...)` / `plan_region_image(...)` | Whole-image / sub-region entry points; both accept `stroke_distance` and `morphology` |
 | `SLOTTED` / `LAYERED` / `OUTLINE`, `IGNORE_WHITE`, `IGNORE_TRANSPARENT`, `ALPHA_CUTOFF`, `STROKE_DISTANCE`, `CANVAS_PADDING` | Mode + flag constants (re-exported on `Bot`) |
 
 `stroke_distance` (outline mode) is retained for API / cache compatibility and
-no longer changes the plan: every traced contour is emitted as one polyline.
+no longer changes the plan: every traced contour/run is emitted as one polyline.
 `Bot` still exposes it as `Bot.stroke_distance`, but the stale control was
 removed from the UI. Outline pacing is tuned with the continuous-stroke knobs
 (`Bot.stroke_speed`, `Bot.frame_interval`, `Bot.travel_delay`) shown only while
 Outline is selected.
+
+`morphology` (outline mode, default off) runs `cv2.morphologyEx` open+close on
+each colour mask before tracing, removing anti-aliasing specks and bridging 1px
+breaks. `Bot` exposes it as `Bot.outline_morphology` (the *Despeckle anti-aliased
+edges* checkbox) and it is part of the precompute cache key.
 
 `quantize_image` supersamples each output cell and takes the modal palette
 colour, which votes out isolated compression / anti-aliasing artifacts at the

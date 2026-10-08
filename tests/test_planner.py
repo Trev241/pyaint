@@ -159,6 +159,20 @@ def test_outline_stroke_distance_no_longer_changes_the_plan():
     assert fine == coarse
 
 
+def test_outline_morphology_removes_isolated_specks():
+    # A small blue speck inside a red block leaves a hole in the red mask (and
+    # a speck in the blue one). Morphology closes the hole and deletes the
+    # speck, so the region traces as one contour instead of two.
+    grid = [[RED] * 8 for _ in range(8)]
+    for i in (3, 4):
+        for j in (3, 4):
+            grid[i][j] = BLUE
+    plain = planner.plan(grid, 0, 0, 10, 0, planner.OUTLINE)
+    cleaned = planner.plan(grid, 0, 0, 10, 0, planner.OUTLINE, morphology=True)
+    assert len(cleaned[planner.OUTLINE_COLOUR]) < len(plain[planner.OUTLINE_COLOUR])
+    assert len(cleaned[planner.OUTLINE_COLOUR]) == 1
+
+
 def test_outline_draws_each_shared_edge_once():
     from collections import Counter
 

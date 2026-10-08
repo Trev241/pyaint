@@ -120,6 +120,10 @@ the exact stroke.
 Settings live in `config.json` next to the executable (or the repo root for a
 source checkout) and are written whenever you change something in the UI.
 
+The last image you load is remembered too: it is copied to `last_image.png`
+next to `config.json` and restored on the next launch, whether you picked it
+from the gallery or uploaded it. **Reset config** clears it.
+
 | Setting | Range | Meaning |
 |---------|-------|---------|
 | **Time per stroke** | 0.0–1.0 s | How long each stroke takes |

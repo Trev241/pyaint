@@ -120,9 +120,11 @@ thin anti-aliased contour is resolved consistently rather than fragmented.
 - **Layered**: builds per-row colour tables, then `_merge_layers()`
   sorts colours by frequency and repaints lower layers, yielding fewer strokes.
 - **Slotted**: a direct colour → list-of-runs map.
-- **Outline** (default, `plan_regions`): traces region boundaries into one
-  closed polyline per contour in `OUTLINE_COLOUR`. `stroke_distance` is
-  retained for compatibility and no longer changes the plan.
+- **Outline** (default, `plan_regions`): traces region boundaries as polylines
+  in `OUTLINE_COLOUR`, drawing each edge shared by two colours once (dark
+  colours own the shared edge). An opt-in *Despeckle* pass can open/close each
+  mask first to remove anti-aliasing specks. `stroke_distance` is retained for
+  compatibility and no longer changes the plan.
 
 `process_region()` reuses `fit_region()` + the same quantize/plan steps for
 partial redraws.

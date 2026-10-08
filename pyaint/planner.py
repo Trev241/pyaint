@@ -387,6 +387,7 @@ def plan_regions(
     mode: str = OUTLINE,
     stroke_distance: int = STROKE_DISTANCE,
     palette=None,
+    morphology: bool = False,
 ) -> Cmap:
     """Plan an outline-and-fill stroke map from the quantised colour grid.
 
@@ -405,13 +406,28 @@ def plan_regions(
         palette: optional :class:`~pyaint.palette.Palette`. The planner is given
             the grid's colours already, but this exposes the swatch set, order
             and screen positions to region logic.
+        morphology: Opt-in despeckling of each region mask (open then close)
+            before tracing, so anti-aliased specks and 1px breaks do not become
+            tiny contours. Off by default because it also erases genuine 1px
+            detail.
 
     Returns:
         A :data:`Cmap` sharing the shape :func:`plan_rows` returns, but with
         each value a list of :data:`Stroke` (point lists): one polyline
         per traced contour, all in :data:`OUTLINE_COLOUR`.
     """
-    return _outline(grid, xo, yo, step, stroke_distance, palette)
+    return _outline(grid, xo, yo, step, stroke_distance, palette, morphology)
+
+
+#: 3x3 ellipse used to despeckle each region mask before contour tracing.
+_MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+
+
+def _despeckle_mask(mask):
+    """Remove anti-aliasing specks and bridge 1px breaks in a region mask."""
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _MORPH_KERNEL)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, _MORPH_KERNEL)
+    return mask
 
 
 def _outline(
@@ -421,6 +437,7 @@ def _outline(
     step: int,
     stroke_distance: int = STROKE_DISTANCE,
     palette=None,
+    morphology: bool = False,
 ):
     """Trace region boundaries into polylines, once per shared edge.
 
@@ -435,25 +452,39 @@ def _outline(
     strokes: List[Stroke] = []
     ids: Dict[Colour, int] = {}
 
-    # Map each colour to an id (from 1) and the grid to a label matrix in one
-    # pass, so a region mask is just ``labels == id``. Ids are assigned in
-    # first-seen order, which is what makes shared edges unambiguous.
+    def brightness(color):
+        if color is None:
+            return 999
+
+        r, g, b = color  # swap the order if your colors are BGR
+        return 0.299 * r + 0.587 * g + 0.114 * b
+
+    # Map each colour to an id (lower = darker) and the grid to a label matrix,
+    # so a region mask is just ``labels == id``. Dark outline colours get the
+    # lower ids, so they own (trace) the edges they share with a lighter fill.
+    unique_colors = {cell for row in grid for cell in row}
+    ordered = sorted(unique_colors, key=brightness)
+    ids = {color: i + 1 for i, color in enumerate(ordered)}
+
     labels = _np.array(
-        [[ids.setdefault(cell, len(ids) + 1) for cell in row] for row in grid],
-        dtype=_np.int32,
+        [[ids[cell] for cell in row] for row in grid],
+        dtype=_np.uint8,
     )
     padded = _np.pad(labels, 1, constant_values=0)
 
     for region_id in ids.values():
         mask = (labels == region_id).astype(_np.uint8)
+        if morphology:
+            # Anti-aliased edges leave 1px specks and pinholes; clean them here
+            # so they do not each become a tiny contour to trace.
+            mask = _despeckle_mask(mask)
         contours, _ = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
         contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
         for contour in contours:
             points = [(int(p[0][0]), int(p[0][1])) for p in contour]
             keep_flags = [
-                not _touches_lower_region(x, y, region_id, padded)
-                for x, y in points
+                not _touches_lower_region(x, y, region_id, padded) for x, y in points
             ]
 
             for run, closed in _split_into_runs(points, keep_flags):
@@ -530,14 +561,18 @@ def plan(
     mode: str,
     stroke_distance: int = STROKE_DISTANCE,
     palette=None,
+    morphology: bool = False,
 ) -> Cmap:
     """Plan ``grid`` into a stroke map using the requested ``mode``.
 
     ``stroke_distance`` is accepted for compatibility and ignored by the
-    outline planner; ``palette`` is forwarded to :func:`plan_regions`.
+    outline planner; ``palette`` and ``morphology`` are forwarded to
+    :func:`plan_regions`.
     """
     if mode == OUTLINE:
-        return plan_regions(grid, xo, yo, step, flags, mode, stroke_distance, palette)
+        return plan_regions(
+            grid, xo, yo, step, flags, mode, stroke_distance, palette, morphology
+        )
     return plan_rows(grid, xo, yo, step, flags, mode)
 
 
@@ -553,13 +588,14 @@ def plan_image(
     flags: int,
     mode: str,
     stroke_distance: int = STROKE_DISTANCE,
+    morphology: bool = False,
 ) -> Cmap:
     """Fit + quantise + plan a full image. Returns a stroke map (``cmap``)."""
     source, (tw, th), xo, yo = fit_to_canvas(image, canvas, step)
     grid = quantize_image(
         source, (tw, th), palette, metric, flags, source_quality=mode == OUTLINE
     )
-    return plan(grid, xo, yo, step, flags, mode, stroke_distance, palette)
+    return plan(grid, xo, yo, step, flags, mode, stroke_distance, palette, morphology)
 
 
 def plan_region_image(
@@ -573,10 +609,11 @@ def plan_region_image(
     mode: str,
     canvas_target=None,
     stroke_distance: int = STROKE_DISTANCE,
+    morphology: bool = False,
 ) -> Cmap:
     """Fit + quantise + plan a sub-region. Returns a stroke map (``cmap``)."""
     source, (tw, th), xo, yo = fit_region(image, region, canvas, step, canvas_target)
     grid = quantize_image(
         source, (tw, th), palette, metric, flags, source_quality=mode == OUTLINE
     )
-    return plan(grid, xo, yo, step, flags, mode, stroke_distance, palette)
+    return plan(grid, xo, yo, step, flags, mode, stroke_distance, palette, morphology)

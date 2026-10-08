@@ -90,8 +90,10 @@ that opens the image, reads the canvas, and hands the rest over:
      Slotted appends every run directly; Layered accumulates per-row tables and
      then `_merge_layers()` sorts colours by frequency and merges lower-layer
      runs into fewer strokes.
-   - **Outline** (`plan_regions`): traces region boundaries and emits one
-     closed polyline per contour in `OUTLINE_COLOUR`. `stroke_distance` is kept
+   - **Outline** (`plan_regions`): traces region boundaries as polylines in
+     `OUTLINE_COLOUR`, one per run (an edge shared by two colours is drawn
+     once, owned by the darker region). An opt-in `morphology` pass can
+     open/close each mask to remove anti-aliasing specks. `stroke_distance` is kept
      for API/cache compatibility but no longer affects the plan.
 
 `process_region()` uses `fit_region()` + the same quantize/plan steps for
