@@ -13,6 +13,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Outline no longer traces a shared edge twice.** When two colour regions
+  meet, `cv2.findContours` returns the shared boundary in *both* region masks,
+  so the edge was drawn once per side. The outline planner now labels every
+  region, then drops the boundary cells that touch a lower-numbered region,
+  emitting each shared curve exactly once (splitting a contour into open runs
+  where it is dropped).
 - **The standalone `.exe` no longer crashes on launch.** The Outline planner
   needs OpenCV (`cv2`), but the PyInstaller spec excluded it and it was never a
   declared dependency — so the frozen build died with `ModuleNotFoundError: No

@@ -401,27 +401,120 @@ def _outline(
     )
 
     strokes: List[Stroke] = []
-    for color in colors:
-        mask = _np.array(
-            [[1 if cell == color else 0 for cell in row] for row in grid],
-            dtype=_np.uint8,
-        )
+    contours_map: Dict[Colour, List[Stroke]]
+    contours_grid = _np.array([[0 for _ in row] for row in grid])
+    ids = {}
+
+    # This line does two things simultaneously:
+    # It maps each colour in the grid to an ID starting from index 1.
+    # And at the same time, it creates a matrix of the image where each cell
+    # contains the ID mapped to its colour.
+    labels = _np.array(
+        [[ids.setdefault(cell, len(ids) + 1) for cell in row] for row in grid],
+        dtype=_np.int32,
+    )
+
+    for color, region_id in ids.items():
+        # The mask selects those cells containing the colour marked by index k.
+        # Since this loop passes over all the colours in `ids`, we will eventually
+        # mark contours for the entire image.
+        mask = (labels == region_id).astype(_np.uint8)
+        # mask = _np.array(
+        #     [[1 if cell == color else 0 for cell in row] for row in grid],
+        #     dtype=_np.uint8,
+        # )
         contours, _ = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
         contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
         for contour in contours:
-            if cv2.contourArea(contour) < 10:
-                continue
-            simplified = cv2.approxPolyDP(contour, epsilon=0.5, closed=True)
-            points: Stroke = [
-                (xo + int(point[0][0]) * step, yo + int(point[0][1]) * step)
-                for point in simplified
+            points = [(int(p[0][0]), int(p[0][1])) for p in contour]
+            keep_flags = [
+                not _touches_lower_region(x, y, region_id, labels) for x, y in points
             ]
-            if len(points) < 2:
-                continue
-            points.append(points[0])  # close the loop for one continuous drag
-            strokes.append(points)
+
+            for run, closed in _split_into_runs(points, keep_flags):
+                if len(run) < 2:
+                    continue
+
+                simplified = _simplify(run, closed)
+                stroke = [(xo + x * step, yo + y * step) for x, y in simplified]
+
+                if closed:
+                    stroke.append(stroke[0])
+                if len(stroke) >= 2:
+                    strokes.append(stroke)
+
+            # if cv2.contourArea(contour) < 10:
+            #     continue
+
+            # new_contour = []
+            # for point in contour:
+            #     row = point[0][0, 1]
+            #     col = point[0][1, 0]
+
+            #     if not drop:
+            #         new_contour.append([point])
+
+            # simplified = cv2.approxPolyDP(new_contour, epsilon=0.5, closed=True)
+            # points: Stroke = [
+            #     (xo + int(point[0][0]) * step, yo + int(point[0][1]) * step)
+            #     for point in simplified
+            # ]
+
+            # if len(points) < 2:
+            #     continue
+
+            # points.append(points[0])  # close the loop for one continuous drag
+            # strokes.append(points)
 
     return {OUTLINE_COLOUR: strokes} if strokes else {}
+
+
+def _touches_lower_region(x, y, region_id, labels):
+    """Returns true if any of the 8 neighbouring cells is of a lower region"""
+
+    offsets = [[-1, 0], [-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1]]
+    padded_labels = _np.pad(labels, 1, constant_values=0)
+
+    for dx, dy in offsets:
+        # If we detect a neighbouring contour cell with a lower color ID,
+        # we must drop this cell to avoid double drawing.
+        neighbour_id = padded_labels[y + 1 + dy, x + 1 + dx]
+        if 0 < neighbour_id < region_id:
+            return True
+
+    return False
+
+
+def _split_into_runs(points, keep_flags):
+    if all(keep_flags):
+        return [(points, True)]
+    if not any(keep_flags):
+        return []
+
+    start = keep_flags.index(False)
+    points = points[start:] + points[:start]
+    keep_flags = keep_flags[start:] + keep_flags[:start]
+
+    runs = []
+    current_run = []
+    for point, keep in zip(points, keep_flags):
+        if keep:
+            current_run.append(point)
+        elif current_run:
+            runs.append(current_run)
+            current_run = []
+
+    if current_run:
+        runs.append(current_run)
+
+    return [(run, False) for run in runs]
+
+
+def _simplify(points, closed):
+    array = _np.array(points, dtype=_np.int32).reshape(-1, 1, 2)
+    simplified = cv2.approxPolyDP(array, epsilon=0.5, closed=closed)
+    return [[int(p[0][0]), int(p[0][1])] for p in simplified]
 
 
 def plan(
