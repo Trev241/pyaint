@@ -209,6 +209,13 @@ python scripts/build_exe.py  # build dist/pyaint.exe
 The test suite is fully headless (163 tests); the GUI and screen input are
 verified manually on Windows.
 
+**Building** is Windows-only: `scripts/build_exe.py` runs the checked-in
+`pyaint.spec` through PyInstaller to produce a single `dist/pyaint.exe` that
+bundles Python and all dependencies. At runtime it writes `config.json`,
+`cache/`, and `targets/` next to the executable, so keep it in a writable
+folder. See [`docs/releasing.md`](docs/releasing.md) for the smoke test and
+release steps.
+
 ## License
 
 GNU General Public License v3.0 or later — see [`LICENSE.md`](LICENSE.md).

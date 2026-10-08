@@ -16,6 +16,7 @@ horizontal brush strokes, and replays them with `pyautogui`.
 - [Supported apps & recipes](#supported-apps--recipes)
 - [Guides](#guides)
 - [Development](#development)
+- [Building](#building)
 
 ## Overview
 
@@ -183,6 +184,22 @@ python scripts/build_exe.py  # build dist/pyaint.exe
 
 Tests live in `tests/` and never touch the screen: `Palette` is built from an
 explicit colour map, and screen actions are replaced with fakes.
+
+### Building
+
+Building produces a single, self-contained `dist/pyaint.exe` that bundles
+Python and the runtime dependencies, so end users don't need Python installed.
+The build is **Windows-only** and requires the optional `build` extra:
+
+```bash
+pip install -e ".[build]"    # installs PyInstaller
+python scripts/build_exe.py  # wraps: pyinstaller --noconfirm --clean pyaint.spec
+```
+
+The checked-in `pyaint.spec` drives the build, so the same result is produced
+locally and in CI. When frozen, `config.json`, `cache/`, and `targets/` are
+written **next to** the executable, so ship it in a writable folder. See
+[Releasing](releasing.md) for the post-build smoke test and release steps.
 
 ### Dependencies
 
