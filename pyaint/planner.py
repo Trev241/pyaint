@@ -894,6 +894,14 @@ def _merge_soft_boundaries(
     real = palette_lab[1:]
     gaps = _np.linalg.norm(means[:, None, :] - real[None, :, :], axis=2)
     result = (gaps.argmin(axis=1) + 1)[group].astype(_np.uint8)
+
+    # A component that merged with nothing keeps its original label, so the soft
+    # merge can only delete boundaries, never recolour (and thus move) a region
+    # that is not part of a merge. The weighted quantize and the unweighted
+    # remap can otherwise disagree on a near-tie.
+    group_size = _np.bincount(group.ravel(), minlength=total + 1)
+    singleton = group_size[group] == 1
+    result[singleton] = labels[singleton]
     result[comp == 0] = 0
     return result
 
