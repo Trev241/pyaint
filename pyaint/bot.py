@@ -60,6 +60,19 @@ class Bot(CacheMixin):
         # tracing, so anti-aliased specks do not become tiny stroke fragments.
         # Off by default because it also erases genuine 1px detail.
         self.outline_morphology = False
+        # When set, outline traces each region's full boundary along cell edges
+        # (shared edges drawn twice but on the same segment) instead of dropping
+        # shared edges. Avoids fragmenting a region into a run per shared edge.
+        self.outline_double_edges = False
+        # Outline cleaner knobs (INSTRUCTIONS.md). ``outline_smoothing`` is the
+        # bilateral-filter level (0 disables it) applied before quantising; the
+        # rest are the label-map merge / geometric-dedupe / join thresholds.
+        # Areas are in grid cells, distances in canvas pixels.
+        self.outline_smoothing = planner.OUTLINE_SMOOTHING
+        self.outline_join_distance = planner.OUTLINE_JOIN_DISTANCE
+        self.outline_small_area = planner.OUTLINE_SMALL_AREA
+        self.outline_tiny_area = planner.OUTLINE_TINY_AREA
+        self.outline_similar_color = planner.OUTLINE_SIMILAR_COLOR
         self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
 
         # The taught environment lives in one shared Profile (pyaint/profile.py).
@@ -267,6 +280,12 @@ class Bot(CacheMixin):
             mode,
             self.stroke_distance,
             self.outline_morphology,
+            self.outline_double_edges,
+            self.outline_smoothing,
+            self.outline_join_distance,
+            self.outline_small_area,
+            self.outline_tiny_area,
+            self.outline_similar_color,
         )
 
     def draw(self, cmap):
@@ -641,6 +660,12 @@ class Bot(CacheMixin):
             canvas_target,
             self.stroke_distance,
             self.outline_morphology,
+            self.outline_double_edges,
+            self.outline_smoothing,
+            self.outline_join_distance,
+            self.outline_small_area,
+            self.outline_tiny_area,
+            self.outline_similar_color,
         )
 
     def simple_test_draw(self):

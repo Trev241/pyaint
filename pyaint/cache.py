@@ -31,9 +31,17 @@ class CacheMixin:
         metric = getattr(self, "color_metric", "ciede2000")
         stroke_distance = getattr(self, "stroke_distance", 1)
         outline_morphology = getattr(self, "outline_morphology", False)
+        double_edges = getattr(self, "outline_double_edges", False)
+        outline_smoothing = getattr(self, "outline_smoothing", planner.OUTLINE_SMOOTHING)
+        outline_join_distance = getattr(self, "outline_join_distance", 6.0)
+        outline_small_area = getattr(self, "outline_small_area", 12)
+        outline_tiny_area = getattr(self, "outline_tiny_area", 4)
+        outline_similar_color = getattr(self, "outline_similar_color", 10.0)
         settings_str = (
             f"{self.settings}_{flags}_{mode}_{canvas_info}_{metric}_"
-            f"{stroke_distance}_{outline_morphology}_{planner.CANVAS_PADDING}"
+            f"{stroke_distance}_{outline_morphology}_{double_edges}_"
+            f"{outline_smoothing}_{outline_join_distance}_{outline_small_area}_"
+            f"{outline_tiny_area}_{outline_similar_color}_{planner.CANVAS_PADDING}"
         )
         settings_hash = hashlib.md5(settings_str.encode()).hexdigest()[:8]
 
@@ -65,6 +73,12 @@ class CacheMixin:
             'mode': mode,
             'stroke_distance': getattr(self, "stroke_distance", 1),
             'outline_morphology': getattr(self, "outline_morphology", False),
+            'outline_double_edges': getattr(self, "outline_double_edges", False),
+            'outline_smoothing': getattr(self, "outline_smoothing", planner.OUTLINE_SMOOTHING),
+            'outline_join_distance': getattr(self, "outline_join_distance", 6.0),
+            'outline_small_area': getattr(self, "outline_small_area", 12),
+            'outline_tiny_area': getattr(self, "outline_tiny_area", 4),
+            'outline_similar_color': getattr(self, "outline_similar_color", 10.0),
             'canvas': self._canvas,
             'image_hash': hashlib.md5(open(image_path, 'rb').read()).hexdigest()[:8],
             'timestamp': time.time(),

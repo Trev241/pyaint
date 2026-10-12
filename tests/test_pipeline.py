@@ -311,6 +311,28 @@ def test_cache_filename_depends_on_stroke_distance(tmp_path, monkeypatch):
     assert fine != coarse
 
 
+def test_cache_filename_depends_on_outline_double_edges(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = write_image(tmp_path, {(0, 0): RED}, (2, 1))
+    bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
+    bot.outline_double_edges = False
+    single = bot.get_cache_filename(path)
+    bot.outline_double_edges = True
+    doubled = bot.get_cache_filename(path)
+    assert single != doubled
+
+
+def test_cache_filename_depends_on_outline_join_distance(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = write_image(tmp_path, {(0, 0): RED}, (2, 1))
+    bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
+    bot.outline_join_distance = 2.0
+    near = bot.get_cache_filename(path)
+    bot.outline_join_distance = 8.0
+    far = bot.get_cache_filename(path)
+    assert near != far
+
+
 def test_process_outline_honours_stroke_distance(tmp_path):
     pixels = {
         (x, y): (RED if (x + y) % 2 == 0 else BLUE)

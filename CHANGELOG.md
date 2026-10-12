@@ -12,6 +12,26 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Outline now cleans the label map before tracing, fixing stroke
+  fragmentation.** A new `plan_outline` pipeline (`INSTRUCTIONS.md`) runs at
+  the source resolution: bilateral smooth → weighted-Lab quantize → selective
+  small-region merge (twice) → full contours → geometric dedupe → simplify →
+  join → drop tiny strokes. A boundary shared by two regions is only cut where
+  a long stretch (≥ `MIN_DROP_RUN` points) overlaps an already-accepted stroke,
+  so strokes stay long while double drawing is thinned to a single line. The
+  same run keeps high-contrast pupils/eyebrows. New **Smoothing** (default 5)
+  and **Join distance** sliders expose the bilateral strength and endpoint-join
+  threshold, and the now-redundant *Despeckle anti-aliased edges* control was
+  removed. `outline_small_area`, `outline_tiny_area` and
+  `outline_similar_color` are stored per target and part of the cache key.
+  `PYAINT_DEBUG_LABELS=1` dumps the cleaned map to `build/debug_labels.png`.
+- **Outline can double-paint shared edges.** The *Double-paint shared edges*
+  checkbox (off by default) opts out of the new geometric dedupe, so every
+  region paints its full border instead of long duplicate stretches being
+  thinned to one clean line. Stored per target and part of the precompute cache
+  key.
+
 ### Fixed
 - **Outline no longer traces a shared edge twice.** When two colour regions
   meet, `cv2.findContours` returns the shared boundary in *both* region masks,

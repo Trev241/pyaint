@@ -132,6 +132,7 @@ dmypy.json
 /cache
 /previews
 /last_image.png
+/INSTRUCTIONS.md
 
 # Python bytecode caches (any level, incl. pyaint/ and pyaint/ui/)
 __pycache__/

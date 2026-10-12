@@ -23,6 +23,8 @@ outvoted before planning instead of being compensated for later.
 
 from __future__ import annotations
 
+import math
+import os
 from typing import Dict, List, Optional, Tuple
 
 from PIL import Image
@@ -55,6 +57,38 @@ STROKE_DISTANCE = 1
 CANVAS_PADDING = 4
 BLACK: Colour = (0, 0, 0)
 OUTLINE_COLOUR = BLACK
+
+# ---------------------------------------------------------------------------
+# Outline cleaner defaults (INSTRUCTIONS.md pipeline). Distances are in canvas
+# pixels and areas in grid cells; the planner scales them to the source
+# resolution before running the label-map pipeline (see :func:`plan_outline`).
+# ---------------------------------------------------------------------------
+#: Bilateral-filter strength used before quantising (0 disables smoothing).
+OUTLINE_SMOOTHING = 5
+#: Max canvas-pixel gap between two open stroke endpoints for them to chain.
+OUTLINE_JOIN_DISTANCE = 6.0
+#: Components up to this many cells may merge into a colour-similar neighbour.
+OUTLINE_SMALL_AREA = 12
+#: Components below this area merge regardless of colour.
+OUTLINE_TINY_AREA = 4
+#: Lab distance below which a ``small_area`` component counts as colour-similar.
+OUTLINE_SIMILAR_COLOR = 10.0
+#: Radius (px) painted as "already drawn" for geometric seam dedupe.
+OUTLINE_COVER_RADIUS = 2
+#: A duplicate stretch shorter than this many points is kept, not cut.
+OUTLINE_MIN_DROP_RUN = 30
+#: Open strokes shorter than this many px are dropped (closed loops survive).
+OUTLINE_MIN_STROKE = 8
+#: Raw contour point floor; shorter contours are ignored.
+OUTLINE_MIN_POINTS = 8
+#: Polygon simplification tolerance in canvas pixels (1.0 - 1.5 recommended).
+OUTLINE_EPSILON = 1.2
+#: Developer flag: ``PYAINT_DEBUG_LABELS=1`` writes the cleaned label map so it
+#: can be eyeballed before tracing. Path overridable with the ``_PATH`` var.
+OUTLINE_DEBUG = bool(os.environ.get("PYAINT_DEBUG_LABELS"))
+OUTLINE_DEBUG_PATH = os.environ.get(
+    "PYAINT_DEBUG_LABELS_PATH", os.path.join("build", "debug_labels.png")
+)
 
 Colour = Tuple[int, int, int]
 Point = Tuple[int, int]
@@ -388,6 +422,7 @@ def plan_regions(
     stroke_distance: int = STROKE_DISTANCE,
     palette=None,
     morphology: bool = False,
+    double_edges: bool = False,
 ) -> Cmap:
     """Plan an outline-and-fill stroke map from the quantised colour grid.
 
@@ -416,15 +451,18 @@ def plan_regions(
         each value a list of :data:`Stroke` (point lists): one polyline
         per traced contour, all in :data:`OUTLINE_COLOUR`.
     """
-    return _outline(grid, xo, yo, step, stroke_distance, palette, morphology)
+    return _outline(
+        grid, xo, yo, step, stroke_distance, palette, morphology, double_edges
+    )
 
 
-# TODO: Remove the per-colour mask morphology once a better anti-aliasing
-# cleanup lands. To delete: drop this kernel, `_despeckle_mask`, the
-# `morphology` args on `plan_regions`/`_outline`/`plan`/`plan_image`/
-# `plan_region_image`, `Bot.outline_morphology`, the `outline_morphology` terms
-# in `cache.py`, the "Despeckle anti-aliased edges" checkbox in
-# `ui/main_window.py`, and the `morphology`/despeckle tests.
+# TODO: Remove the per-colour mask morphology now that the label-map cleaner
+# (``plan_outline``) handles anti-aliasing. The app's OUTLINE mode no longer
+# uses it (the UI control was removed), but the ``morphology`` argument is kept
+# for the grid-only tracer. To delete: drop this kernel, ``_despeckle_mask``,
+# the ``morphology`` args on ``plan_regions``/``_outline``/``plan``/
+# ``plan_image``/``plan_region_image``, ``Bot.outline_morphology``, the
+# ``outline_morphology`` terms in ``cache.py``, and the morphology tests.
 #: 3x3 ellipse used to despeckle each region mask before contour tracing.
 _MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
@@ -448,13 +486,19 @@ def _outline(
     stroke_distance: int = STROKE_DISTANCE,
     palette=None,
     morphology: bool = False,
+    double_edges: bool = False,
 ):
-    """Trace region boundaries into polylines, once per shared edge.
+    """Trace region boundaries into polylines.
 
-    Each region's contour from ``cv2.findContours`` is split into runs wherever
-    it crosses a boundary owned by a lower-numbered region, and each run
-    becomes one :data:`Stroke`. This keeps the executor to one continuous drag
-    per run while never tracing a shared curve twice.
+    By default each region's contour from ``cv2.findContours`` is split into
+    runs wherever it crosses a boundary owned by a lower-numbered region, so a
+    shared curve is traced exactly once (each run becomes one :data:`Stroke`).
+
+    With ``double_edges`` the tracer instead follows every region's boundary
+    along cell *edges* and emits its full closed loop. Shared boundaries are
+    then drawn by both neighbours, but on the same geometric segment, so the
+    doubled line reads as a single line rather than a two-pixel band. This
+    avoids fragmenting a region into a run per shared edge.
 
     ``stroke_distance`` is retained only for API / cache compatibility; it no
     longer affects the result.
@@ -480,6 +524,10 @@ def _outline(
         [[ids[cell] for cell in row] for row in grid],
         dtype=_np.uint8,
     )
+
+    if double_edges:
+        return _outline_double(labels, ordered, xo, yo, step)
+
     padded = _np.pad(labels, 1, constant_values=0)
 
     for region_id in ids.values():
@@ -510,6 +558,95 @@ def _outline(
                     strokes.append(stroke)
 
     return {OUTLINE_COLOUR: strokes} if strokes else {}
+
+
+def _outline_double(labels, ordered, xo, yo, step) -> Cmap:
+    """One closed cell-edge loop per region (shared edges drawn twice)."""
+    strokes: List[Stroke] = []
+    for region_id in range(1, len(ordered) + 1):
+        for loop in _trace_region_boundaries(labels, region_id):
+            simplified = _simplify(loop, closed=True)
+            if len(simplified) < 2:
+                continue
+            stroke = [(xo + c * step, yo + r * step) for r, c in simplified]
+            if stroke[0] != stroke[-1]:
+                stroke.append(stroke[0])
+            if len(stroke) >= 2:
+                strokes.append(stroke)
+    return {OUTLINE_COLOUR: strokes} if strokes else {}
+
+
+def _region_boundary_edges(labels, region_id):
+    """Directed cell-edge boundary of one region, interior kept on the left.
+
+    Corners are ``(row, col)`` on the cell grid. Because each region walks its
+    own edges, a boundary shared by two neighbours lands on the same geometric
+    segment instead of the two parallel cell-centre contours that
+    ``cv2.findContours`` produces.
+    """
+    height, width = labels.shape
+    edges = []
+    for r in range(height):
+        for c in range(width):
+            if int(labels[r][c]) != region_id:
+                continue
+            if r == 0 or int(labels[r - 1][c]) != region_id:
+                edges.append(((r, c + 1), (r, c)))  # top side, west
+            if r == height - 1 or int(labels[r + 1][c]) != region_id:
+                edges.append(((r + 1, c), (r + 1, c + 1)))  # bottom, east
+            if c == 0 or int(labels[r][c - 1]) != region_id:
+                edges.append(((r, c), (r + 1, c)))  # left, south
+            if c == width - 1 or int(labels[r][c + 1]) != region_id:
+                edges.append(((r + 1, c + 1), (r, c + 1)))  # right, north
+    return edges
+
+
+def _turn_angle(in_dir, out_dir):
+    cross = in_dir[0] * out_dir[1] - in_dir[1] * out_dir[0]
+    dot = in_dir[0] * out_dir[0] + in_dir[1] * out_dir[1]
+    return math.atan2(cross, dot)
+
+
+def _trace_region_boundaries(labels, region_id):
+    """Follow a region's directed boundary edges into closed corner loops.
+
+    The directed graph is balanced (every corner has equal in/out degree), so
+    any deterministic choice at a diagonal pinch still decomposes it into
+    closed trails; preferring the straightest turn keeps the paths tidy.
+    """
+    remaining = set(_region_boundary_edges(labels, region_id))
+    outgoing: Dict = {}
+    for start, end in remaining:
+        outgoing.setdefault(start, []).append(end)
+
+    loops = []
+    while remaining:
+        first = next(iter(remaining))
+        remaining.discard(first)
+        path = [first[0], first[1]]
+        current = first
+        while current[1] != path[0]:
+            options = [
+                end
+                for end in outgoing.get(current[1], ())
+                if (current[1], end) in remaining
+            ]
+            if not options:
+                break
+            er, ec = current[1]
+            in_dir = (er - current[0][0], ec - current[0][1])
+            best, best_key = None, None
+            for end in options:
+                out_dir = (end[0] - er, end[1] - ec)
+                angle = _turn_angle(in_dir, out_dir)
+                key = (abs(angle), 0 if angle >= 0 else 1)
+                if best is None or key < best_key:
+                    best, best_key = end, key
+            remaining.discard((current[1], best))
+            path.append(best)
+            current = (current[1], best)
+        loops.append(path)
+    return loops
 
 
 def _touches_lower_region(x, y, region_id, padded_labels):
@@ -556,10 +693,396 @@ def _split_into_runs(points, keep_flags):
     return [(run, False) for run in runs]
 
 
-def _simplify(points, closed):
+def _simplify(points, closed, epsilon=0.5):
     array = _np.array(points, dtype=_np.int32).reshape(-1, 1, 2)
-    simplified = cv2.approxPolyDP(array, epsilon=0.5, closed=closed)
+    simplified = cv2.approxPolyDP(array, epsilon=epsilon, closed=closed)
     return [[int(p[0][0]), int(p[0][1])] for p in simplified]
+
+
+# ---------------------------------------------------------------------------
+# Outline cleaner: source -> label map -> deduped contours (INSTRUCTIONS.md).
+# The helpers below are the label-map pipeline. They operate on integer region
+# ids (0 = ignored/background) and are scaled from canvas units to source
+# pixels by :func:`plan_outline`.
+# ---------------------------------------------------------------------------
+def _build_palette(palette_rgb):
+    """Palette as a Lab array; row 0 is a dummy so index == region id."""
+    rgb = _np.array(list(palette_rgb), dtype=_np.uint8).reshape(-1, 1, 3)
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).reshape(-1, 3).astype(_np.float32)
+    return _np.vstack([_np.zeros((1, 3), _np.float32), lab])
+
+
+def _bilateral_params(level: float):
+    """Map an outline smoothing level to ``cv2.bilateralFilter`` parameters.
+
+    Level ``0`` disables smoothing. Level ``1`` reproduces the recipe's
+    original ``(5, 30, 5)``; higher levels widen the kernel and raise the
+    colour sigma. Returns ``(diameter, sigma_color, sigma_space)`` or ``None``.
+    """
+    level = int(round(level))
+    if level <= 0:
+        return None
+    diameter = min(15, 5 + (level - 1))
+    sigma_color = 30.0 + (level - 1) * 15.0
+    return diameter, sigma_color, float(diameter)
+
+
+def _quantize_labels(
+    source_rgb, palette_lab, alpha, smooth_strength, ignore_transparent
+):
+    """Nearest-palette labels with edge-preserving smoothing and Lab weighting.
+
+    ``source_rgb`` is an ``(H, W, 3)`` uint8 array, ``palette_lab`` a Lab lookup
+    whose row 0 is the dummy background. Lightness counts double so colours that
+    differ mainly in lightness stay distinct. When ``ignore_transparent`` is set
+    and ``alpha`` is given, pixels below :data:`ALPHA_CUTOFF` become label 0.
+    """
+    image = source_rgb
+    params = _bilateral_params(smooth_strength)
+    if params is not None:
+        diameter, sigma_color, sigma_space = params
+        image = cv2.bilateralFilter(
+            _np.ascontiguousarray(image), diameter, sigma_color, sigma_space
+        )
+    image_lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB).astype(_np.float32)
+    colors = palette_lab[1:]
+    weights = _np.array([2.0, 1.0, 1.0], _np.float32)
+    labels = _np.zeros(image_lab.shape[:2], _np.int32)
+    for row in range(image_lab.shape[0]):
+        gaps = (image_lab[row][:, None, :] - colors[None, :, :]) * weights
+        labels[row] = _np.linalg.norm(gaps, axis=2).argmin(axis=1) + 1
+    if ignore_transparent and alpha is not None:
+        labels[alpha < ALPHA_CUTOFF] = 0
+    return labels
+
+
+def _pick_merge_target(component_id, ring_ids, palette_lab, skip_ids=frozenset()):
+    """Closest-colour neighbour among the labels around a component."""
+    candidates = [
+        int(n)
+        for n in set(ring_ids.tolist())
+        if int(n) != component_id and int(n) > 0 and int(n) not in skip_ids
+    ]
+    if not candidates:
+        return None, None
+    own = palette_lab[component_id]
+    best, best_distance = None, None
+    for candidate in candidates:
+        distance = float(_np.linalg.norm(palette_lab[candidate] - own))
+        if best_distance is None or distance < best_distance:
+            best, best_distance = candidate, distance
+    return best, best_distance
+
+
+def _merge_small_regions(
+    labels, palette_lab, small_area, tiny_area, similar_color, skip_ids=frozenset()
+):
+    """Absorb tiny components -- and small colour-close ones -- into a neighbour.
+
+    Selective merging keeps a small high-contrast feature such as a pupil or an
+    eyebrow (colour distance above ``similar_color`` and area above
+    ``tiny_area``) while dropping anti-aliasing slivers. Run it twice so a chain
+    of small regions collapses in one call sequence.
+    """
+    height, width = labels.shape
+    cleaned = labels.copy()
+    kernel = _np.ones((3, 3), _np.uint8)
+
+    for region_id in _np.unique(labels):
+        region_id = int(region_id)
+        if region_id == 0 or region_id in skip_ids:
+            continue
+        mask = (labels == region_id).astype(_np.uint8)
+        count, component_map, stats, _ = cv2.connectedComponentsWithStats(
+            mask, connectivity=8
+        )
+
+        for c in range(1, count):
+            area = stats[c, cv2.CC_STAT_AREA]
+            if area >= small_area:
+                continue
+
+            x0 = max(stats[c, cv2.CC_STAT_LEFT] - 1, 0)
+            y0 = max(stats[c, cv2.CC_STAT_TOP] - 1, 0)
+            x1 = min(
+                stats[c, cv2.CC_STAT_LEFT] + stats[c, cv2.CC_STAT_WIDTH] + 1,
+                width,
+            )
+            y1 = min(
+                stats[c, cv2.CC_STAT_TOP] + stats[c, cv2.CC_STAT_HEIGHT] + 1,
+                height,
+            )
+
+            component = component_map[y0:y1, x0:x1] == c
+            ring = cv2.dilate(component.astype(_np.uint8), kernel) > 0
+            ring &= ~component
+            ring_ids = labels[y0:y1, x0:x1][ring]
+
+            target, distance = _pick_merge_target(
+                region_id, ring_ids, palette_lab, skip_ids
+            )
+            if target is None:
+                continue
+            if area < tiny_area or distance < similar_color:
+                view = cleaned[y0:y1, x0:x1]
+                view[component] = target
+    return cleaned
+
+
+def _collect_contours(labels, min_points=OUTLINE_MIN_POINTS):
+    """All raw contours from every region, as ``(x, y)`` lists, longest first."""
+    contours_out = []
+    for region_id in _np.unique(labels):
+        if region_id == 0:
+            continue
+        mask = (labels == region_id).astype(_np.uint8)
+        contours, _ = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+        for contour in contours:
+            if len(contour) >= min_points:
+                contours_out.append([(int(p[0][0]), int(p[0][1])) for p in contour])
+    contours_out.sort(key=len, reverse=True)
+    return contours_out
+
+
+def _find_covered_points(points, coverage):
+    """True for each point that lies on an already-accepted stroke."""
+    height, width = coverage.shape
+    covered = []
+    for x, y in points:
+        covered.append(0 <= x < width and 0 <= y < height and bool(coverage[y, x]))
+    return covered
+
+
+def _paint_coverage(coverage, points, closed=True, radius=OUTLINE_COVER_RADIUS):
+    """Mark an accepted stroke so later contours can dedupe against it."""
+    if len(points) < 2:
+        return
+    array = _np.array(points, dtype=_np.int32).reshape(-1, 1, 2)
+    cv2.polylines(coverage, [array], closed, 1, thickness=2 * radius + 1)
+
+
+def _keep_short_drops(keep_flags, min_drop_run):
+    """Only drop a stretch if it is at least ``min_drop_run`` points long."""
+    flags = list(keep_flags)
+    count = len(flags)
+    if all(flags) or not any(flags):
+        return flags
+    start = flags.index(True)
+    rotated = flags[start:] + flags[:start]
+    i = 0
+    while i < count:
+        if rotated[i]:
+            i += 1
+            continue
+        j = i
+        while j < count and not rotated[j]:
+            j += 1
+        if j - i < min_drop_run:
+            for k in range(i, j):
+                rotated[k] = True
+        i = j
+    return rotated[count - start:] + rotated[:count - start]
+
+
+def _join_strokes(strokes, max_distance):
+    """Chain open strokes whose endpoints lie within ``max_distance``."""
+    if max_distance <= 0 or len(strokes) < 2:
+        return [list(stroke) for stroke in strokes]
+
+    def cell_of(point):
+        return (int(point[0] // max_distance), int(point[1] // max_distance))
+
+    index = {}
+    for stroke_id, stroke in enumerate(strokes):
+        if stroke[0] == stroke[-1]:
+            continue
+        for end in (0, -1):
+            index.setdefault(cell_of(stroke[end]), []).append((stroke_id, end))
+
+    used = set()
+
+    def nearest_free_endpoint(point):
+        cx, cy = cell_of(point)
+        best, best_distance = None, max_distance
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for stroke_id, end in index.get((cx + dx, cy + dy), []):
+                    if stroke_id in used:
+                        continue
+                    other = strokes[stroke_id][end]
+                    distance = (
+                        (other[0] - point[0]) ** 2 + (other[1] - point[1]) ** 2
+                    ) ** 0.5
+                    if distance <= best_distance:
+                        best, best_distance = (stroke_id, end), distance
+        return best
+
+    def extend_tail(chain):
+        while True:
+            found = nearest_free_endpoint(chain[-1])
+            if found is None:
+                return
+            stroke_id, end = found
+            used.add(stroke_id)
+            addition = strokes[stroke_id]
+            chain.extend(addition if end == 0 else addition[::-1])
+
+    joined = []
+    for stroke_id, stroke in enumerate(strokes):
+        if stroke_id in used:
+            continue
+        used.add(stroke_id)
+        chain = list(stroke)
+        if stroke[0] != stroke[-1]:
+            extend_tail(chain)
+            chain.reverse()
+            extend_tail(chain)
+        joined.append(chain)
+    return joined
+
+
+def _is_closed(stroke):
+    return len(stroke) >= 2 and stroke[0] == stroke[-1]
+
+
+def _path_length(stroke):
+    total = 0.0
+    for (x0, y0), (x1, y1) in zip(stroke, stroke[1:]):
+        total += ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+    return total
+
+
+def _save_debug_labels(labels, ordered_palette, path=OUTLINE_DEBUG_PATH):
+    """Write the cleaned label map as a colour image (OpenCV writes BGR)."""
+    lookup = _np.zeros((len(ordered_palette) + 1, 3), _np.uint8)
+    for i, (r, g, b) in enumerate(ordered_palette, start=1):
+        lookup[i] = (b, g, r)
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    cv2.imwrite(path, lookup[labels])
+
+
+def plan_outline(
+    source,
+    xo: int,
+    yo: int,
+    step: int,
+    size,
+    palette,
+    flags: int,
+    smooth_strength: float = OUTLINE_SMOOTHING,
+    join_distance: float = OUTLINE_JOIN_DISTANCE,
+    small_area: int = OUTLINE_SMALL_AREA,
+    tiny_area: int = OUTLINE_TINY_AREA,
+    similar_color: float = OUTLINE_SIMILAR_COLOR,
+    double_edges: bool = False,
+    debug: Optional[bool] = None,
+    debug_path: Optional[str] = None,
+) -> Cmap:
+    """Trace a cleaned label map into deduped outline polylines.
+
+    INSTRUCTIONS.md pipeline: bilateral smooth -> weighted-Lab quantize ->
+    selective small-region merge (twice) -> full contours -> geometric dedupe ->
+    simplify -> join -> drop tiny strokes. It runs at the source resolution;
+    distances are given in canvas pixels and areas in grid cells, then scaled by
+    the source-to-canvas factor before use.
+
+    With ``double_edges`` the geometric dedupe is skipped, so every region's
+    full contour is drawn (shared edges overlap) rather than thinned to one
+    line. ``debug`` forces/denies the ``debug_labels.png`` dump for this call;
+    ``None`` falls back to the :data:`OUTLINE_DEBUG` environment flag.
+    """
+    if _np is None:
+        return {}
+    tw, th = size
+    canvas_w, canvas_h = tw * step, th * step
+    src_w, src_h = source.size
+    if canvas_w <= 0 or canvas_h <= 0 or src_w <= 0 or src_h <= 0:
+        return {}
+    colors = list(palette.color_list) if palette is not None else []
+    if not colors:
+        return {}
+
+    factor = src_w / canvas_w
+    factor_y = src_h / canvas_h
+
+    rgba = _np.asarray(source)
+    if rgba.ndim == 2:
+        rgb = _np.repeat(rgba[:, :, None], 3, axis=2)
+        alpha = None
+    else:
+        rgb = _np.ascontiguousarray(rgba[:, :, :3])
+        alpha = rgba[:, :, 3] if rgba.shape[2] > 3 else None
+
+    palette_lab = _build_palette(colors)
+    labels = _quantize_labels(
+        rgb,
+        palette_lab,
+        alpha,
+        smooth_strength,
+        bool(flags & IGNORE_TRANSPARENT),
+    )
+
+    # ``small_area``/``tiny_area`` are in grid cells (1 cell = ``step`` canvas
+    # px), so a cell covers ``(factor*step)^2`` source pixels.
+    area_factor = (factor * step) * (factor_y * step)
+    for _ in range(2):
+        labels = _merge_small_regions(
+            labels,
+            palette_lab,
+            max(1, int(round(small_area * area_factor))),
+            max(1, int(round(tiny_area * area_factor))),
+            float(similar_color),
+        )
+
+    if debug is None:
+        debug = OUTLINE_DEBUG
+    if debug:
+        _save_debug_labels(labels, colors, debug_path or OUTLINE_DEBUG_PATH)
+
+    contours = _collect_contours(
+        labels, max(2, int(round(OUTLINE_MIN_POINTS * factor)))
+    )
+    coverage = _np.zeros(labels.shape, _np.uint8)
+    radius = max(1, int(round(OUTLINE_COVER_RADIUS * factor)))
+    min_drop = max(1, int(round(OUTLINE_MIN_DROP_RUN * factor)))
+    epsilon = OUTLINE_EPSILON * factor
+
+    strokes: List[Stroke] = []
+    for contour in contours:
+        if double_edges:
+            keep = [True] * len(contour)
+        else:
+            covered = _find_covered_points(contour, coverage)
+            keep = _keep_short_drops([not value for value in covered], min_drop)
+        for run, closed in _split_into_runs(contour, keep):
+            if len(run) < 2:
+                continue
+            path = _simplify(run, closed, epsilon)
+            if closed and path:
+                path.append(path[0])
+            if len(path) < 2:
+                continue
+            strokes.append(path)
+            if not double_edges:
+                _paint_coverage(coverage, path, closed, radius)
+
+    scale = min(factor, factor_y)
+    joined = _join_strokes(strokes, float(join_distance) * scale)
+    min_length = OUTLINE_MIN_STROKE * scale
+    kept = [
+        stroke
+        for stroke in joined
+        if _is_closed(stroke) or _path_length(stroke) >= min_length
+    ]
+
+    result = [
+        [(int(round(xo + x / factor)), int(round(yo + y / factor_y))) for x, y in stroke]
+        for stroke in kept
+        if len(stroke) >= 2
+    ]
+    return {OUTLINE_COLOUR: result} if result else {}
 
 
 def plan(
@@ -572,16 +1095,18 @@ def plan(
     stroke_distance: int = STROKE_DISTANCE,
     palette=None,
     morphology: bool = False,
+    double_edges: bool = False,
 ) -> Cmap:
     """Plan ``grid`` into a stroke map using the requested ``mode``.
 
     ``stroke_distance`` is accepted for compatibility and ignored by the
-    outline planner; ``palette`` and ``morphology`` are forwarded to
-    :func:`plan_regions`.
+    outline planner; ``palette``, ``morphology`` and ``double_edges`` are
+    forwarded to :func:`plan_regions`.
     """
     if mode == OUTLINE:
         return plan_regions(
-            grid, xo, yo, step, flags, mode, stroke_distance, palette, morphology
+            grid, xo, yo, step, flags, mode, stroke_distance, palette, morphology,
+            double_edges,
         )
     return plan_rows(grid, xo, yo, step, flags, mode)
 
@@ -599,13 +1124,40 @@ def plan_image(
     mode: str,
     stroke_distance: int = STROKE_DISTANCE,
     morphology: bool = False,
+    double_edges: bool = False,
+    smooth_strength: float = OUTLINE_SMOOTHING,
+    join_distance: float = OUTLINE_JOIN_DISTANCE,
+    small_area: int = OUTLINE_SMALL_AREA,
+    tiny_area: int = OUTLINE_TINY_AREA,
+    similar_color: float = OUTLINE_SIMILAR_COLOR,
 ) -> Cmap:
-    """Fit + quantise + plan a full image. Returns a stroke map (``cmap``)."""
+    """Fit + quantise + plan a full image. Returns a stroke map (``cmap``).
+
+    OUTLINE runs the label-map cleaner (:func:`plan_outline`) on the source
+    directly; the row/layer modes still share :func:`quantize_image`.
+    """
     source, (tw, th), xo, yo = fit_to_canvas(image, canvas, step)
-    grid = quantize_image(
-        source, (tw, th), palette, metric, flags, source_quality=mode == OUTLINE
+    if mode == OUTLINE:
+        return plan_outline(
+            source,
+            xo,
+            yo,
+            step,
+            (tw, th),
+            palette,
+            flags,
+            smooth_strength,
+            join_distance,
+            small_area,
+            tiny_area,
+            similar_color,
+            double_edges,
+        )
+    grid = quantize_image(source, (tw, th), palette, metric, flags)
+    return plan(
+        grid, xo, yo, step, flags, mode, stroke_distance, palette, morphology,
+        double_edges,
     )
-    return plan(grid, xo, yo, step, flags, mode, stroke_distance, palette, morphology)
 
 
 def plan_region_image(
@@ -620,10 +1172,37 @@ def plan_region_image(
     canvas_target=None,
     stroke_distance: int = STROKE_DISTANCE,
     morphology: bool = False,
+    double_edges: bool = False,
+    smooth_strength: float = OUTLINE_SMOOTHING,
+    join_distance: float = OUTLINE_JOIN_DISTANCE,
+    small_area: int = OUTLINE_SMALL_AREA,
+    tiny_area: int = OUTLINE_TINY_AREA,
+    similar_color: float = OUTLINE_SIMILAR_COLOR,
 ) -> Cmap:
-    """Fit + quantise + plan a sub-region. Returns a stroke map (``cmap``)."""
+    """Fit + quantise + plan a sub-region. Returns a stroke map (``cmap``).
+
+    OUTLINE runs the label-map cleaner (:func:`plan_outline`) on the source
+    directly; the row/layer modes still share :func:`quantize_image`.
+    """
     source, (tw, th), xo, yo = fit_region(image, region, canvas, step, canvas_target)
-    grid = quantize_image(
-        source, (tw, th), palette, metric, flags, source_quality=mode == OUTLINE
+    if mode == OUTLINE:
+        return plan_outline(
+            source,
+            xo,
+            yo,
+            step,
+            (tw, th),
+            palette,
+            flags,
+            smooth_strength,
+            join_distance,
+            small_area,
+            tiny_area,
+            similar_color,
+            double_edges,
+        )
+    grid = quantize_image(source, (tw, th), palette, metric, flags)
+    return plan(
+        grid, xo, yo, step, flags, mode, stroke_distance, palette, morphology,
+        double_edges,
     )
-    return plan(grid, xo, yo, step, flags, mode, stroke_distance, palette, morphology)

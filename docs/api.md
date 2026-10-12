@@ -118,9 +118,10 @@ and delegate here, so the same functions are headlessly testable and cacheable.
 | `quantize(pix, w, h, palette, metric, flags)` | Pixels → colour grid: `grid[row][col] -> colour \| None` (single-sample) |
 | `quantize_image(image, (tw, th), palette, metric, flags, source_quality=False)` | Palette-aware majority downsample of the full source → colour grid (numpy-accelerated) |
 | `plan_rows(grid, xo, yo, step, flags, mode)` | Colour grid → `cmap` (slotted / layered) |
-| `plan_regions(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE, palette=None, morphology=False)` | Colour grid → `cmap` of polylines (outline mode) |
-| `plan(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE, palette=None, morphology=False)` | Dispatch by mode (`OUTLINE` → `plan_regions`, else `plan_rows`) |
-| `plan_image(...)` / `plan_region_image(...)` | Whole-image / sub-region entry points; both accept `stroke_distance` and `morphology` |
+| `plan_outline(source, xo, yo, step, (tw, th), palette, flags, smooth_strength=OUTLINE_SMOOTHING, join_distance=OUTLINE_JOIN_DISTANCE, small_area=OUTLINE_SMALL_AREA, tiny_area=OUTLINE_TINY_AREA, similar_color=OUTLINE_SIMILAR_COLOR, double_edges=False)` | Source image → cleanup label map → deduped `OUTLINE_COLOUR` polylines (the OUTLINE pipeline) |
+| `plan_regions(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE, palette=None, morphology=False, double_edges=False)` | Colour grid → `cmap` of polylines (legacy outline tracer) |
+| `plan(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE, palette=None, morphology=False, double_edges=False)` | Dispatch by mode (`OUTLINE` → `plan_regions`, else `plan_rows`) |
+| `plan_image(...)` / `plan_region_image(...)` | Whole-image / sub-region entry points; `OUTLINE` runs `plan_outline`, the row/layer modes share `quantize_image` |
 | `SLOTTED` / `LAYERED` / `OUTLINE`, `IGNORE_WHITE`, `IGNORE_TRANSPARENT`, `ALPHA_CUTOFF`, `STROKE_DISTANCE`, `CANVAS_PADDING` | Mode + flag constants (re-exported on `Bot`) |
 
 `stroke_distance` (outline mode) is retained for API / cache compatibility and
@@ -130,18 +131,36 @@ removed from the UI. Outline pacing is tuned with the continuous-stroke knobs
 (`Bot.stroke_speed`, `Bot.frame_interval`, `Bot.travel_delay`) shown only while
 Outline is selected.
 
-`morphology` (outline mode, default off) runs `cv2.morphologyEx` open+close on
-each colour mask before tracing, removing anti-aliasing specks and bridging 1px
-breaks. `Bot` exposes it as `Bot.outline_morphology` (the *Despeckle anti-aliased
-edges* checkbox) and it is part of the precompute cache key.
+`morphology` (legacy outline tracer, default off) runs `cv2.morphologyEx`
+open+close on each colour mask before tracing. The app's OUTLINE mode now uses
+`plan_outline` (below) instead, so this only affects grid-only callers; `Bot`
+still exposes it as `Bot.outline_morphology` and it stays in the cache key.
+
+`double_edges` (outline mode, default off) is forwarded to `plan_outline` and
+skips the geometric dedupe, so every region's full contour is drawn instead of
+being banded to a single line. `Bot` exposes it as `Bot.outline_double_edges`
+(the *Double-paint shared edges* checkbox), and it is part of the precompute
+cache key.
+
+`plan_image` / `plan_region_image` route `OUTLINE` to `plan_outline`, the
+label-map cleaner from `INSTRUCTIONS.md`, at the source resolution: bilateral
+smooth → weighted-Lab quantize → selective `merge_small_regions` (twice) →
+`collect_contours` → geometric dedupe → `simplify` → `join_strokes` → drop tiny
+strokes. Duplicate boundaries are thinned only where a long stretch overlaps an
+already-accepted stroke, so strokes stay long. Its knobs are `smooth_strength`,
+`join_distance`, `small_area`, `tiny_area` and `similar_color` (mirrored on
+`Bot` as `outline_smoothing`, `outline_join_distance`, `outline_small_area`,
+`outline_tiny_area`, `outline_similar_color`) and are all part of the precompute
+cache key. Distances are in canvas pixels, areas in grid cells. The grid entry
+points (`plan` / `plan_regions`) keep the seam-ownership tracer for callers that
+only hold a colour grid.
 
 `quantize_image` supersamples each output cell and takes the modal palette
 colour, which votes out isolated compression / anti-aliasing artifacts at the
 source. It uses numpy when available and falls back to single-sample
 `quantize` otherwise. With `source_quality=True`, the sample grid is scaled to
-the source resolution so every source pixel votes; `plan_image` /
-`plan_region_image` enable it for `OUTLINE` only, because a thin anti-aliased
-outline otherwise fragments across cells.
+the source resolution so every source pixel votes; the row/layer modes use the
+default sample grid, while `OUTLINE` runs the separate `plan_outline` cleaner.
 
 `cmap` is `{(r, g, b): [((x1, y1), (x2, y2)), ...]}`.
 

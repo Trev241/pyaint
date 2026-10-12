@@ -66,11 +66,22 @@ Legacy keys from older versions (`Custom Colors`, `color_preview_spot`,
 | `stroke_speed` | 200–5000 px/s | 1500 | Cursor travel speed while tracing an outline |
 | `frame_interval` | 0.002–0.05 s | 0.0167 | Seconds between cursor move events while tracing |
 | `travel_delay` | 0.0–1.0 s | 0.05 | Pause when moving between separate outline strokes |
+| `outline_smoothing` | 0–5 | 5 | Edge-preserving bilateral smoothing level before tracing (0 = off) |
+| `outline_join_distance` | 0.0–20.0 px | 6.0 | Chain open stroke endpoints within this many canvas pixels |
+| `outline_small_area` | cells | 12 | Components up to this area may merge into a colour-similar neighbour |
+| `outline_tiny_area` | cells | 4 | Components below this area merge regardless of colour |
+| `outline_similar_color` | Lab distance | 10.0 | Colour distance below which a `small_area` component may merge |
 
-The outline-only keys (`stroke_speed`, `frame_interval`, `travel_delay`) are
-shown in the inspector only while **Outline (experimental)** is selected. The
-legacy `stroke_distance` key is no longer written or read; the outline planner
-emits one polyline per contour regardless of its value.
+The outline-only keys (`stroke_speed`, `frame_interval`, `travel_delay`,
+`outline_smoothing`, `outline_join_distance`) are shown in the inspector only
+while **Outline** is selected. The legacy `stroke_distance` key
+is no longer written or read; the outline planner emits one polyline per contour
+regardless of its value.
+
+The `outline_double_edges` preference (the *Double-paint shared edges*
+checkbox, off by default) skips the geometric dedupe, so every region's full
+contour is drawn instead of long duplicate stretches being banded to a single
+line.
 
 ## Drawing options
 

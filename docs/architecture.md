@@ -80,21 +80,24 @@ that opens the image, reads the canvas, and hands the rest over:
    colour, and take the **majority**. Voting in palette space removes isolated
    compression / anti-aliasing artifacts without inventing blend colours,
    producing the colour grid; transparent cells become `None` when
-   `IGNORE_TRANSPARENT` is set. Outline passes `source_quality=True`, which
-   samples at the source resolution so a thin anti-aliased contour votes
-   consistently instead of fragmenting. This is the **shared boundary**: every
-   planning mode consumes the same grid. (`quantize()` remains the single-sample
-   fallback.)
+   `IGNORE_TRANSPARENT` is set. (The OUTLINE mode no longer uses this grid: it
+   runs its own source-resolution label-map cleaner, `plan_outline`, below.)
+   This is the **shared boundary** for the Slotted/Layered planners.
+   (`quantize()` remains the single-sample fallback.)
 3. `plan(grid, xo, yo, step, flags, mode)` — dispatch to the mode planner:
    - **Slotted** / **Layered** (`plan_rows`): run-length encode the grid.
      Slotted appends every run directly; Layered accumulates per-row tables and
      then `_merge_layers()` sorts colours by frequency and merges lower-layer
      runs into fewer strokes.
-   - **Outline** (`plan_regions`): traces region boundaries as polylines in
-     `OUTLINE_COLOUR`, one per run (an edge shared by two colours is drawn
-     once, owned by the darker region). An opt-in `morphology` pass can
-     open/close each mask to remove anti-aliasing specks. `stroke_distance` is kept
-     for API/cache compatibility but no longer affects the plan.
+   - **Outline** (`plan_outline`, default): runs the label-map cleaner on the
+     source at its native resolution (bilateral smooth → weighted-Lab quantize
+     → selective small-region merge → full contours → geometric dedupe →
+     simplify → join), thinning long duplicate boundary stretches while keeping
+     `OUTLINE_COLOUR` strokes long. The grid-only entry points still use the
+     legacy `plan_regions` seam-ownership tracer, where `double_edges` follows
+     each region's full boundary and `morphology` can despeckle the masks.
+     `stroke_distance` is kept for API/cache compatibility but no longer
+     affects the plan.
 
 `process_region()` uses `fit_region()` + the same quantize/plan steps for
 partial redraws.

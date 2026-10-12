@@ -76,13 +76,11 @@ def test_mode_specific_controls_switch_with_stroke_mode(app, tmp_path, monkeypat
         window._mode_combo.setCurrentIndex(layered)
         assert window._runs_controls.isVisibleTo(window)
         assert not window._outline_controls.isVisibleTo(window)
-        assert window._mode_hint.property("experimental") != "true"
 
         window._mode_combo.setCurrentIndex(outline)
         assert window._outline_controls.isVisibleTo(window)
         assert not window._runs_controls.isVisibleTo(window)
-        assert window._mode_hint.property("experimental") == "true"
-        assert "Experimental" in window._mode_hint.text()
+        assert "continuous" in window._mode_hint.text()
 
         window._stroke_speed.set_value(2000, emit=True)
         assert bot.stroke_speed == pytest.approx(2000)
@@ -102,6 +100,8 @@ def test_outline_settings_persist(app, tmp_path, monkeypatch):
         window._stroke_speed.set_value(2000, emit=True)
         window._event_interval.set_value(25, emit=True)
         window._travel_delay.set_value(0.2, emit=True)
+        window._outline_smoothing.set_value(3, emit=True)
+        window._outline_join_distance.set_value(8.0, emit=True)
         window._save_config()
     finally:
         window.close()
@@ -111,6 +111,8 @@ def test_outline_settings_persist(app, tmp_path, monkeypatch):
         assert restored.bot.stroke_speed == pytest.approx(2000)
         assert restored.bot.frame_interval == pytest.approx(0.025)
         assert restored.bot.travel_delay == pytest.approx(0.2)
+        assert restored.bot.outline_smoothing == pytest.approx(3)
+        assert restored.bot.outline_join_distance == pytest.approx(8.0)
         assert restored._mode == Bot.OUTLINE
     finally:
         restored.close()
@@ -139,21 +141,24 @@ def test_last_selected_image_restores_on_restart(app, tmp_path, monkeypatch):
         restored.close()
 
 
-def test_outline_despeckle_toggle_persists(app, tmp_path, monkeypatch):
+def test_outline_double_edges_toggle_persists(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     window = MainWindow(Bot())
     try:
-        assert window._chk_despeckle.isChecked() is False
-        window._chk_despeckle.setChecked(True)
-        assert window.bot.outline_morphology is True
+        # Doubled edges are the opt-in; the clean single line is the default.
+        assert window.bot.outline_double_edges is False
+        assert window._chk_double_edges.isChecked() is False
+        assert window.bot.outline_smoothing == pytest.approx(5)
+        window._chk_double_edges.setChecked(True)
+        assert window.bot.outline_double_edges is True
         window._save_config()
     finally:
         window.close()
 
     restored = MainWindow(Bot())
     try:
-        assert restored.bot.outline_morphology is True
-        assert restored._chk_despeckle.isChecked() is True
+        assert restored.bot.outline_double_edges is True
+        assert restored._chk_double_edges.isChecked() is True
     finally:
         restored.close()
 

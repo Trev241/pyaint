@@ -341,7 +341,7 @@ class MainWindow(QMainWindow):
         self._mode_combo = QComboBox()
         self._mode_combo.addItem("Layered (fewer strokes)", Bot.LAYERED)
         self._mode_combo.addItem("Slotted (exact runs)", Bot.SLOTTED)
-        self._mode_combo.addItem("Outline (experimental)", Bot.OUTLINE)
+        self._mode_combo.addItem("Outline (continuous lines)", Bot.OUTLINE)
         self._mode_combo.setItemData(
             0,
             "Merges a colour's runs where later colours paint over them: fewer "
@@ -355,8 +355,8 @@ class MainWindow(QMainWindow):
         )
         self._mode_combo.setItemData(
             2,
-            "Default: traces region outlines as continuous strokes. "
-            "Results vary by target and the pacing controls are still being tuned.",
+            "Default: traces region outlines as continuous strokes and thins "
+            "shared borders to one clean line.",
             Qt.ToolTipRole,
         )
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
@@ -404,7 +404,27 @@ class MainWindow(QMainWindow):
         self._travel_delay.setToolTip(
             "Pause inserted when moving between separate outline strokes."
         )
-        for field in (self._stroke_speed, self._event_interval, self._travel_delay):
+        # Label-map cleaner thresholds, exposed so more aggressive values can be
+        # trialled against fragmentation.
+        self._outline_smoothing = SliderField("Smoothing", 0, 5, 5, 1)
+        self._outline_smoothing.setToolTip(
+            "Outline only: edge-preserving bilateral smoothing before tracing. "
+            "Higher values remove more anti-aliasing specks but round fine detail."
+        )
+        self._outline_join_distance = SliderField(
+            "Join distance (px)", 0.0, 20.0, 6.0, 0.5
+        )
+        self._outline_join_distance.setToolTip(
+            "Outline only: chain open stroke endpoints within this many pixels "
+            "into one longer stroke. Raise it to remove fragmentation."
+        )
+        for field in (
+            self._stroke_speed,
+            self._event_interval,
+            self._travel_delay,
+            self._outline_smoothing,
+            self._outline_join_distance,
+        ):
             field.changed.connect(self._on_outline_settings_changed)
 
         # Two plain containers toggled by visibility: a hidden widget takes no
@@ -423,19 +443,24 @@ class MainWindow(QMainWindow):
         outline_layout.setSpacing(4)
         self._outline_notice = NoticeBanner()
         self._outline_notice.show_notice(
-            "Experimental: outline tracing is still being calibrated per target. "
-            "Start with the defaults and adjust the pacing below.",
-            "warning",
+            "Smoothing and Join distance remove fragmented lines; the defaults "
+            "suit most images.",
+            "info",
         )
         outline_layout.addWidget(self._outline_notice)
-        self._chk_despeckle = CheckBox("Despeckle anti-aliased edges")
-        self._chk_despeckle.setToolTip(
-            "Outline only: clean each colour's mask before tracing, removing "
-            "single-pixel anti-aliasing specks and bridging 1px breaks so they "
-            "do not each become a tiny stroke fragment."
+        self._chk_double_edges = CheckBox("Double-paint shared edges")
+        self._chk_double_edges.setToolTip(
+            "Outline only. Off (recommended): a border shared by two regions is "
+            "thinned to one clean line. On: every region paints its whole "
+            "border, so shared edges are drawn twice and look heavier."
         )
-        self._chk_despeckle.toggled.connect(self._on_outline_despeckle_changed)
-        outline_layout.addWidget(self._chk_despeckle)
+        self._chk_double_edges.toggled.connect(
+            self._on_outline_double_edges_changed
+        )
+        # Cleanup knobs first, then the pacing controls.
+        outline_layout.addWidget(self._outline_smoothing)
+        outline_layout.addWidget(self._outline_join_distance)
+        outline_layout.addWidget(self._chk_double_edges)
         outline_layout.addWidget(self._stroke_speed)
         outline_layout.addWidget(self._event_interval)
         outline_layout.addWidget(self._travel_delay)
@@ -895,6 +920,12 @@ class MainWindow(QMainWindow):
         self.bot.frame_interval = 1.0 / 60.0
         self.bot.travel_delay = 0.05
         self.bot.outline_morphology = False
+        self.bot.outline_double_edges = False
+        self.bot.outline_smoothing = 5
+        self.bot.outline_join_distance = 6.0
+        self.bot.outline_small_area = 12
+        self.bot.outline_tiny_area = 4
+        self.bot.outline_similar_color = 10.0
         self.draw_options = merge_drawing_options(
             self.draw_options,
             recipe.drawing_options or {},
@@ -964,6 +995,20 @@ class MainWindow(QMainWindow):
         )
         self.bot.travel_delay = max(0.0, float(settings.get("travel_delay", 0.05)))
         self.bot.outline_morphology = bool(settings.get("outline_morphology", False))
+        self.bot.outline_double_edges = bool(
+            settings.get("outline_double_edges", False)
+        )
+        self.bot.outline_smoothing = float(
+            settings.get("outline_smoothing", 5)
+        )
+        self.bot.outline_join_distance = float(
+            settings.get("outline_join_distance", 6.0)
+        )
+        self.bot.outline_small_area = int(settings.get("outline_small_area", 12))
+        self.bot.outline_tiny_area = int(settings.get("outline_tiny_area", 4))
+        self.bot.outline_similar_color = float(
+            settings.get("outline_similar_color", 10.0)
+        )
 
         metric = self.tools.get("color_metric", DEFAULT_METRIC)
         if metric not in METRICS:
@@ -1077,6 +1122,12 @@ class MainWindow(QMainWindow):
             "frame_interval": float(self.bot.frame_interval),
             "travel_delay": float(self.bot.travel_delay),
             "outline_morphology": bool(self.bot.outline_morphology),
+            "outline_double_edges": bool(self.bot.outline_double_edges),
+            "outline_smoothing": float(self.bot.outline_smoothing),
+            "outline_join_distance": float(self.bot.outline_join_distance),
+            "outline_small_area": int(self.bot.outline_small_area),
+            "outline_tiny_area": int(self.bot.outline_tiny_area),
+            "outline_similar_color": float(self.bot.outline_similar_color),
             "drawing_options": {
                 "ignore_white_pixels": bool(self.draw_options & Bot.IGNORE_WHITE),
                 "ignore_transparent_pixels": bool(
@@ -1108,6 +1159,22 @@ class MainWindow(QMainWindow):
             self.bot.travel_delay = max(0.0, float(data["travel_delay"]))
         if "outline_morphology" in data:
             self.bot.outline_morphology = bool(data["outline_morphology"])
+        if "outline_double_edges" in data:
+            self.bot.outline_double_edges = bool(data["outline_double_edges"])
+        if "outline_smoothing" in data:
+            self.bot.outline_smoothing = max(0.0, float(data["outline_smoothing"]))
+        if "outline_join_distance" in data:
+            self.bot.outline_join_distance = max(
+                0.0, float(data["outline_join_distance"])
+            )
+        if "outline_small_area" in data:
+            self.bot.outline_small_area = int(data["outline_small_area"])
+        if "outline_tiny_area" in data:
+            self.bot.outline_tiny_area = int(data["outline_tiny_area"])
+        if "outline_similar_color" in data:
+            self.bot.outline_similar_color = max(
+                0.0, float(data["outline_similar_color"])
+            )
         options = data.get("drawing_options") or {}
         self.draw_options = 0
         if options.get("ignore_white_pixels", True):
@@ -1133,6 +1200,12 @@ class MainWindow(QMainWindow):
         settings["frame_interval"] = float(self.bot.frame_interval)
         settings["travel_delay"] = float(self.bot.travel_delay)
         settings["outline_morphology"] = bool(self.bot.outline_morphology)
+        settings["outline_double_edges"] = bool(self.bot.outline_double_edges)
+        settings["outline_smoothing"] = float(self.bot.outline_smoothing)
+        settings["outline_join_distance"] = float(self.bot.outline_join_distance)
+        settings["outline_small_area"] = int(self.bot.outline_small_area)
+        settings["outline_tiny_area"] = int(self.bot.outline_tiny_area)
+        settings["outline_similar_color"] = float(self.bot.outline_similar_color)
 
     def _store_drawing_options(self) -> None:
         options = self.tools.setdefault("drawing_options", {})
@@ -1179,8 +1252,8 @@ class MainWindow(QMainWindow):
             "Draws every run exactly as-is \u2014 no overdraw, but more strokes."
         ),
         Bot.OUTLINE: (
-            "Experimental \u2014 traces region outlines as continuous, "
-            "human-shaped strokes."
+            "Traces region outlines as continuous, human-shaped strokes and "
+            "thins shared borders to one clean line."
         ),
     }
 
@@ -1190,9 +1263,11 @@ class MainWindow(QMainWindow):
         self._stroke_speed.set_value(float(self.bot.stroke_speed))
         self._event_interval.set_value(round(self.bot.frame_interval * 1000))
         self._travel_delay.set_value(float(self.bot.travel_delay))
-        self._chk_despeckle.blockSignals(True)
-        self._chk_despeckle.setChecked(bool(self.bot.outline_morphology))
-        self._chk_despeckle.blockSignals(False)
+        self._outline_smoothing.set_value(float(self.bot.outline_smoothing))
+        self._outline_join_distance.set_value(float(self.bot.outline_join_distance))
+        self._chk_double_edges.blockSignals(True)
+        self._chk_double_edges.setChecked(bool(self.bot.outline_double_edges))
+        self._chk_double_edges.blockSignals(False)
         mode_index = self._mode_combo.findData(self._mode)
         if mode_index >= 0:
             self._mode_combo.blockSignals(True)
@@ -1206,9 +1281,6 @@ class MainWindow(QMainWindow):
         self._runs_controls.setVisible(not outline)
         self._outline_controls.setVisible(outline)
         self._mode_hint.setText(self._MODE_HINTS.get(self._mode, ""))
-        self._mode_hint.setProperty("experimental", "true" if outline else "false")
-        self._mode_hint.style().unpolish(self._mode_hint)
-        self._mode_hint.style().polish(self._mode_hint)
 
     def _refresh_option_widgets(self) -> None:
         self._chk_ignore.setChecked(bool(self.draw_options & Bot.IGNORE_WHITE))
@@ -1337,13 +1409,19 @@ class MainWindow(QMainWindow):
             0.001, float(self._event_interval.value()) / 1000.0
         )
         self.bot.travel_delay = max(0.0, float(self._travel_delay.value()))
+        self.bot.outline_smoothing = max(
+            0.0, float(self._outline_smoothing.value())
+        )
+        self.bot.outline_join_distance = max(
+            0.0, float(self._outline_join_distance.value())
+        )
         self._store_drawing_settings()
         self._save_config()
 
-    def _on_outline_despeckle_changed(self, checked: bool) -> None:
+    def _on_outline_double_edges_changed(self, checked: bool) -> None:
         if self._initializing:
             return
-        self.bot.outline_morphology = bool(checked)
+        self.bot.outline_double_edges = bool(checked)
         self._store_drawing_settings()
         self._save_config()
 

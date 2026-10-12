@@ -594,9 +594,6 @@ def stylesheet(tokens: dict | None = None) -> str:
         font-size: 11px;
         padding: 0 2px;
     }}
-    #ModeHint[experimental="true"] {{
-        color: {t['warning']};
-    }}
     #StageHint {{
         color: {t['fg_dim']};
         font-size: 11px;

@@ -113,18 +113,23 @@ environment and delegates. `fit_to_canvas()` insets the canvas by
 `CANVAS_PADDING` px, then fits and centres the image,
 `quantize_image()` supersamples each cell and majority-votes in palette space to
 produce the shared colour grid (removing isolated compression / anti-aliasing
-artifacts at the source), and `plan()` turns that grid into a stroke map.
-Outline asks for `source_quality=True`, sampling at the source resolution so a
-thin anti-aliased contour is resolved consistently rather than fragmented.
+artifacts at the source), and `plan()` turns that grid into a stroke map. The
+row/layer modes use this shared grid; `OUTLINE` runs its own source-resolution
+label-map cleaner instead.
 
 - **Layered**: builds per-row colour tables, then `_merge_layers()`
   sorts colours by frequency and repaints lower layers, yielding fewer strokes.
 - **Slotted**: a direct colour → list-of-runs map.
-- **Outline** (default, `plan_regions`): traces region boundaries as polylines
-  in `OUTLINE_COLOUR`, drawing each edge shared by two colours once (dark
-  colours own the shared edge). An opt-in *Despeckle* pass can open/close each
-  mask first to remove anti-aliasing specks. `stroke_distance` is retained for
-  compatibility and no longer changes the plan.
+- **Outline** (default, `plan_outline`): runs the label-map cleaner on the
+  source at native resolution — bilateral smooth, weighted-Lab quantize,
+  selective small-region merge (twice), full contours, geometric dedupe,
+  simplify, join — and emits `OUTLINE_COLOUR` polylines. Long duplicate
+  stretches where two regions share a boundary are thinned to one line, while
+  short overlaps are kept so strokes stay long. The *Double-paint shared
+  edges* option skips the dedupe so every region's full contour is drawn. The legacy
+  `plan_regions` seam-ownership tracer remains for grid-only callers.
+  `stroke_distance` is retained for compatibility and no longer changes the
+  plan.
 
 `process_region()` reuses `fit_region()` + the same quantize/plan steps for
 partial redraws.
