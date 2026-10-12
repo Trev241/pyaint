@@ -29,8 +29,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   `outline_smoothing` defaults to 2 and `outline_step_threshold` to 10.0 (a
   mean-Lab-distance). `OUTLINE_PIPELINE_VERSION` is part of the precompute cache
   key so an old cached plan is never replayed. `scripts/debug_outline.py`
-  renders the per-stage images, the removed-boundary overlay and a black
-  line-art overlay for any image without launching the GUI.
+  renders the per-stage images, a `<stage>_contours.png` overlay that draws the
+  traced strokes over the debug-coloured regions (plus a `contours_sheet.png`),
+  the removed-boundary overlay and a black line-art overlay for any image
+  without launching the GUI.
 - **Outline now cleans the label map before tracing, fixing stroke
   fragmentation and tonal clutter.** A new `plan_outline` pipeline
   (`INSTRUCTIONS.md`) runs at the source resolution: bilateral smooth →

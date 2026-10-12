@@ -149,6 +149,21 @@ def main() -> None:
     if sheet is not None:
         cv2.imwrite(os.path.join(args.outdir, "contact_sheet.png"), sheet)
 
+    # Regions + strokes at each stage, side by side: this is the image that
+    # makes the merge's effect on the traced contours easy to read.
+    contour_sources = [
+        f"{base}_{name}_contours.png"
+        for name in ("quantized", "soft_merged", "final")
+    ]
+    contour_tiles = [
+        cv2.imread(path) for path in contour_sources if os.path.exists(path)
+    ]
+    contour_sheet = _tile(
+        [tile for tile in contour_tiles if tile is not None], columns=3
+    )
+    if contour_sheet is not None:
+        cv2.imwrite(os.path.join(args.outdir, "contours_sheet.png"), contour_sheet)
+
 
 if __name__ == "__main__":
     main()

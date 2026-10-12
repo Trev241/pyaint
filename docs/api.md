@@ -170,8 +170,10 @@ change never replays an old cached plan. The grid entry points
 hold a colour grid. With `PYAINT_DEBUG_LABELS=1`, each stage is written next to
 `debug_labels.png` (quantized / soft_merged / final), plus a removed-boundary
 overlay and a random-colour stroke view; the run prints the new/removed boundary
-pixel counts. `scripts/debug_outline.py` renders the same set (plus a black
-line-art overlay and a contact sheet) for one image without launching the GUI.
+pixel counts. `scripts/debug_outline.py` renders the same set (plus, for each
+stage, a `*_contours.png` that draws the traced strokes over the debug-coloured
+regions, a black line-art overlay, and contact/`contours_sheet.png` sheets) for
+one image without launching the GUI.
 Lab is computed with `cv2` on float RGB so `L` is on the 0–100 scale and
 matches `skimage.color.rgb2lab` without the heavier dependency.
 

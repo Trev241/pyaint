@@ -1202,20 +1202,37 @@ def _save_debug_labels(labels, ordered_palette, path=OUTLINE_DEBUG_PATH):
     cv2.imwrite(path, _label_debug_image(labels, ordered_palette))
 
 
+def _draw_debug_strokes(view, strokes):
+    """Draw traced strokes with a white halo so they read on any label colour."""
+    for thickness, colour in ((3, (255, 255, 255)), (1, (0, 0, 0))):
+        for stroke in strokes:
+            points = _np.array(stroke, _np.int32).reshape(-1, 1, 2)
+            if len(points) >= 2:
+                cv2.polylines(view, [points], False, colour, thickness)
+
+
 def _save_debug_stages(source_rgb, colors, stages, strokes, path):
     """Developer dump: one image per stage, a removed-boundary overlay, and
     every traced stroke in a random colour over a white field.
 
-    Gated by ``PYAINT_DEBUG_LABELS``; writes next to ``debug_labels.png``. Also
-    prints the boundary-preservation check from ``INSTRUCTIONS.md`` so a run
-    that added (rather than deleted) boundaries is obvious.
+    Also writes ``<stage>_contours.png`` for every stage: the stage's
+    debug-coloured regions with the final traced strokes drawn on top, so it is
+    obvious which boundaries became strokes. Gated by ``PYAINT_DEBUG_LABELS``;
+    writes next to ``debug_labels.png``. Also prints the boundary-preservation
+    check from ``INSTRUCTIONS.md`` so a run that added (rather than deleted)
+    boundaries is obvious.
     """
     base = os.path.splitext(path)[0]
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
     for name, labels in stages.items():
-        cv2.imwrite(f"{base}_{name}.png", _label_debug_image(labels, colors))
+        image = _label_debug_image(labels, colors)
+        cv2.imwrite(f"{base}_{name}.png", image)
+        if strokes:
+            contoured = image.copy()
+            _draw_debug_strokes(contoured, strokes)
+            cv2.imwrite(f"{base}_{name}_contours.png", contoured)
 
     if "quantized" in stages and "final" in stages:
         before = _boundary_pixels(stages["quantized"])
