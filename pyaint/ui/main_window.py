@@ -418,12 +418,21 @@ class MainWindow(QMainWindow):
             "Outline only: chain open stroke endpoints within this many pixels "
             "into one longer stroke. Raise it to remove fragmentation."
         )
+        self._outline_step_threshold = SliderField(
+            "Shading cleanup", 0.0, 10.0, 4.0, 0.5
+        )
+        self._outline_step_threshold.setToolTip(
+            "Outline only: merge boundaries whose colour step is below this, so "
+            "soft shading, gradients and soft shadows are not traced. 0 keeps "
+            "every tonal boundary."
+        )
         for field in (
             self._stroke_speed,
             self._event_interval,
             self._travel_delay,
             self._outline_smoothing,
             self._outline_join_distance,
+            self._outline_step_threshold,
         ):
             field.changed.connect(self._on_outline_settings_changed)
 
@@ -443,8 +452,8 @@ class MainWindow(QMainWindow):
         outline_layout.setSpacing(4)
         self._outline_notice = NoticeBanner()
         self._outline_notice.show_notice(
-            "Smoothing and Join distance remove fragmented lines; the defaults "
-            "suit most images.",
+            "Shading cleanup drops soft tonal contours; Smoothing and Join "
+            "distance remove fragmented lines. The defaults suit most images.",
             "info",
         )
         outline_layout.addWidget(self._outline_notice)
@@ -459,6 +468,7 @@ class MainWindow(QMainWindow):
         )
         # Cleanup knobs first, then the pacing controls.
         outline_layout.addWidget(self._outline_smoothing)
+        outline_layout.addWidget(self._outline_step_threshold)
         outline_layout.addWidget(self._outline_join_distance)
         outline_layout.addWidget(self._chk_double_edges)
         outline_layout.addWidget(self._stroke_speed)
@@ -926,6 +936,7 @@ class MainWindow(QMainWindow):
         self.bot.outline_small_area = 12
         self.bot.outline_tiny_area = 4
         self.bot.outline_similar_color = 10.0
+        self.bot.outline_step_threshold = 4.0
         self.draw_options = merge_drawing_options(
             self.draw_options,
             recipe.drawing_options or {},
@@ -1008,6 +1019,9 @@ class MainWindow(QMainWindow):
         self.bot.outline_tiny_area = int(settings.get("outline_tiny_area", 4))
         self.bot.outline_similar_color = float(
             settings.get("outline_similar_color", 10.0)
+        )
+        self.bot.outline_step_threshold = float(
+            settings.get("outline_step_threshold", 4.0)
         )
 
         metric = self.tools.get("color_metric", DEFAULT_METRIC)
@@ -1128,6 +1142,7 @@ class MainWindow(QMainWindow):
             "outline_small_area": int(self.bot.outline_small_area),
             "outline_tiny_area": int(self.bot.outline_tiny_area),
             "outline_similar_color": float(self.bot.outline_similar_color),
+            "outline_step_threshold": float(self.bot.outline_step_threshold),
             "drawing_options": {
                 "ignore_white_pixels": bool(self.draw_options & Bot.IGNORE_WHITE),
                 "ignore_transparent_pixels": bool(
@@ -1175,6 +1190,10 @@ class MainWindow(QMainWindow):
             self.bot.outline_similar_color = max(
                 0.0, float(data["outline_similar_color"])
             )
+        if "outline_step_threshold" in data:
+            self.bot.outline_step_threshold = max(
+                0.0, float(data["outline_step_threshold"])
+            )
         options = data.get("drawing_options") or {}
         self.draw_options = 0
         if options.get("ignore_white_pixels", True):
@@ -1206,6 +1225,7 @@ class MainWindow(QMainWindow):
         settings["outline_small_area"] = int(self.bot.outline_small_area)
         settings["outline_tiny_area"] = int(self.bot.outline_tiny_area)
         settings["outline_similar_color"] = float(self.bot.outline_similar_color)
+        settings["outline_step_threshold"] = float(self.bot.outline_step_threshold)
 
     def _store_drawing_options(self) -> None:
         options = self.tools.setdefault("drawing_options", {})
@@ -1265,6 +1285,9 @@ class MainWindow(QMainWindow):
         self._travel_delay.set_value(float(self.bot.travel_delay))
         self._outline_smoothing.set_value(float(self.bot.outline_smoothing))
         self._outline_join_distance.set_value(float(self.bot.outline_join_distance))
+        self._outline_step_threshold.set_value(
+            float(self.bot.outline_step_threshold)
+        )
         self._chk_double_edges.blockSignals(True)
         self._chk_double_edges.setChecked(bool(self.bot.outline_double_edges))
         self._chk_double_edges.blockSignals(False)
@@ -1414,6 +1437,9 @@ class MainWindow(QMainWindow):
         )
         self.bot.outline_join_distance = max(
             0.0, float(self._outline_join_distance.value())
+        )
+        self.bot.outline_step_threshold = max(
+            0.0, float(self._outline_step_threshold.value())
         )
         self._store_drawing_settings()
         self._save_config()

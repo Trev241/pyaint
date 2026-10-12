@@ -102,6 +102,7 @@ def test_outline_settings_persist(app, tmp_path, monkeypatch):
         window._travel_delay.set_value(0.2, emit=True)
         window._outline_smoothing.set_value(3, emit=True)
         window._outline_join_distance.set_value(8.0, emit=True)
+        window._outline_step_threshold.set_value(7.0, emit=True)
         window._save_config()
     finally:
         window.close()
@@ -113,6 +114,7 @@ def test_outline_settings_persist(app, tmp_path, monkeypatch):
         assert restored.bot.travel_delay == pytest.approx(0.2)
         assert restored.bot.outline_smoothing == pytest.approx(3)
         assert restored.bot.outline_join_distance == pytest.approx(8.0)
+        assert restored.bot.outline_step_threshold == pytest.approx(7.0)
         assert restored._mode == Bot.OUTLINE
     finally:
         restored.close()

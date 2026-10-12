@@ -65,6 +65,15 @@ OUTLINE_COLOUR = BLACK
 # ---------------------------------------------------------------------------
 #: Bilateral-filter strength used before quantising (0 disables smoothing).
 OUTLINE_SMOOTHING = 5
+#: Lightness weight when matching a pixel to the palette (higher favours
+#: matching brightness over hue).
+OUTLINE_LIGHTNESS_WEIGHT = 2.0
+#: Mean Lab step below which two touching components merge. ``0`` disables the
+#: soft-boundary merge. ~2-3 keeps subtle shading, 4-6 keeps only clear steps.
+OUTLINE_STEP_THRESHOLD = 4.0
+#: Inscribed radius (canvas px) below which a component is "thin" (outlines,
+#: lashes) and protected from the soft-boundary merge.
+OUTLINE_THIN_WIDTH = 2.0
 #: Max canvas-pixel gap between two open stroke endpoints for them to chain.
 OUTLINE_JOIN_DISTANCE = 6.0
 #: Components up to this many cells may merge into a colour-similar neighbour.
@@ -83,8 +92,9 @@ OUTLINE_MIN_STROKE = 8
 OUTLINE_MIN_POINTS = 8
 #: Polygon simplification tolerance in canvas pixels (1.0 - 1.5 recommended).
 OUTLINE_EPSILON = 1.2
-#: Developer flag: ``PYAINT_DEBUG_LABELS=1`` writes the cleaned label map so it
-#: can be eyeballed before tracing. Path overridable with the ``_PATH`` var.
+#: Developer flag: ``PYAINT_DEBUG_LABELS=1`` writes each label-map stage, a
+#: removed-boundary overlay and a stroke view so the pipeline can be eyeballed.
+#: Path overridable with the ``_PATH`` var (stages share its stem).
 OUTLINE_DEBUG = bool(os.environ.get("PYAINT_DEBUG_LABELS"))
 OUTLINE_DEBUG_PATH = os.environ.get(
     "PYAINT_DEBUG_LABELS_PATH", os.path.join("build", "debug_labels.png")
@@ -706,8 +716,13 @@ def _simplify(points, closed, epsilon=0.5):
 # pixels by :func:`plan_outline`.
 # ---------------------------------------------------------------------------
 def _build_palette(palette_rgb):
-    """Palette as a Lab array; row 0 is a dummy so index == region id."""
-    rgb = _np.array(list(palette_rgb), dtype=_np.uint8).reshape(-1, 1, 3)
+    """Palette as a true-scale Lab array; row 0 is a dummy so index == id.
+
+    Uses ``cv2`` on float RGB so ``L`` is in 0-100 and ``a``/``b`` on the
+    standard CIELAB scale, matching ``skimage.color.rgb2lab`` (and therefore the
+    thresholds in ``INSTRUCTIONS.md``) without the heavier dependency.
+    """
+    rgb = _np.array(list(palette_rgb), dtype=_np.float32).reshape(-1, 1, 3) / 255.0
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).reshape(-1, 3).astype(_np.float32)
     return _np.vstack([_np.zeros((1, 3), _np.float32), lab])
 
@@ -732,10 +747,12 @@ def _quantize_labels(
 ):
     """Nearest-palette labels with edge-preserving smoothing and Lab weighting.
 
-    ``source_rgb`` is an ``(H, W, 3)`` uint8 array, ``palette_lab`` a Lab lookup
-    whose row 0 is the dummy background. Lightness counts double so colours that
-    differ mainly in lightness stay distinct. When ``ignore_transparent`` is set
-    and ``alpha`` is given, pixels below :data:`ALPHA_CUTOFF` become label 0.
+    ``source_rgb`` is an ``(H, W, 3)`` uint8 array, ``palette_lab`` a true-scale
+    Lab lookup whose row 0 is the dummy background. Returns ``(labels, lab)``,
+    where ``lab`` is the smoothed source in Lab (needed by the soft-boundary
+    merge). Lightness is weighted up so colours that differ mainly in lightness
+    stay distinct. When ``ignore_transparent`` is set and ``alpha`` is given,
+    pixels below :data:`ALPHA_CUTOFF` become label 0.
     """
     image = source_rgb
     params = _bilateral_params(smooth_strength)
@@ -744,16 +761,141 @@ def _quantize_labels(
         image = cv2.bilateralFilter(
             _np.ascontiguousarray(image), diameter, sigma_color, sigma_space
         )
-    image_lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB).astype(_np.float32)
+    image_lab = cv2.cvtColor(
+        image.astype(_np.float32) / 255.0, cv2.COLOR_RGB2LAB
+    ).astype(_np.float32)
     colors = palette_lab[1:]
-    weights = _np.array([2.0, 1.0, 1.0], _np.float32)
+    weights = _np.array(
+        [OUTLINE_LIGHTNESS_WEIGHT, 1.0, 1.0], _np.float32
+    )
     labels = _np.zeros(image_lab.shape[:2], _np.int32)
     for row in range(image_lab.shape[0]):
         gaps = (image_lab[row][:, None, :] - colors[None, :, :]) * weights
         labels[row] = _np.linalg.norm(gaps, axis=2).argmin(axis=1) + 1
     if ignore_transparent and alpha is not None:
         labels[alpha < ALPHA_CUTOFF] = 0
-    return labels
+    return labels, image_lab
+
+
+def _label_components(labels):
+    """Split each label into 4-connected components.
+
+    Returns ``(comp, total)`` where ``comp`` is an ``int32`` map (0 =
+    background/ignored) and ``total`` is the number of foreground components.
+    """
+    comp = _np.zeros(labels.shape, _np.int32)
+    total = 0
+    for region_id in _np.unique(labels):
+        if region_id == 0:
+            continue
+        count, component_map = cv2.connectedComponents(
+            (labels == region_id).astype(_np.uint8), connectivity=4
+        )
+        inside = component_map > 0
+        comp[inside] = component_map[inside] + total
+        total += count - 1
+    return comp, total
+
+
+def _component_thickness(labels, comp, total):
+    """Max inscribed radius (px) of every component, indexed by component id."""
+    thickness = _np.zeros(total + 1, _np.float32)
+    for region_id in _np.unique(labels):
+        if region_id == 0:
+            continue
+        mask = (labels == region_id).astype(_np.uint8)
+        distance = cv2.distanceTransform(mask, cv2.DIST_L2, 3)
+        inside = mask > 0
+        _np.maximum.at(thickness, comp[inside], distance[inside])
+    return thickness
+
+
+def _merge_soft_boundaries(
+    labels, lab, palette_lab, step_threshold, protect_thin=True, thin_width=2.0
+):
+    """Remove soft tonal boundaries by merging touching low-contrast components.
+
+    For every pair of touching components the mean Lab step across their shared
+    boundary is measured; pairs below ``step_threshold`` merge (union-find, so
+    a gradient chains into one region). Thin components -- whose inscribed
+    radius is below ``thin_width``, such as outlines and lashes -- are protected
+    when ``protect_thin`` is set. Each merged group takes the palette colour
+    nearest its mean source colour. Runs at the source resolution and is the
+    stage that stops shading, gradients and a soft shadow from being traced.
+    """
+    if step_threshold <= 0:
+        return labels
+    comp, total = _label_components(labels)
+    if total == 0:
+        return labels
+
+    protected = _np.zeros(total + 1, bool)
+    if protect_thin:
+        protected = _component_thickness(labels, comp, total) < float(thin_width)
+        protected[0] = True
+
+    # Lab step across every 4-connected boundary between two components.
+    first, second, steps = [], [], []
+    pairs = (
+        (comp[:, :-1], comp[:, 1:], lab[:, :-1], lab[:, 1:]),
+        (comp[:-1, :], comp[1:, :], lab[:-1, :], lab[1:, :]),
+    )
+    for comp_a, comp_b, lab_a, lab_b in pairs:
+        differs = (comp_a != comp_b) & (comp_a > 0) & (comp_b > 0)
+        if not differs.any():
+            continue
+        first.append(_np.minimum(comp_a, comp_b)[differs])
+        second.append(_np.maximum(comp_a, comp_b)[differs])
+        steps.append(_np.linalg.norm(lab_a[differs] - lab_b[differs], axis=1))
+    if not first:
+        return labels
+    first = _np.concatenate(first).astype(_np.int64)
+    second = _np.concatenate(second).astype(_np.int64)
+    steps = _np.concatenate(steps)
+
+    # Mean step per touching pair.
+    keys = first * _np.int64(total + 1) + second
+    unique_keys, inverse = _np.unique(keys, return_inverse=True)
+    mean_step = _np.bincount(inverse, weights=steps) / _np.bincount(inverse)
+
+    parent = list(range(total + 1))
+
+    def find(item):
+        while parent[item] != item:
+            parent[item] = parent[parent[item]]
+            item = parent[item]
+        return item
+
+    for key, step in zip(unique_keys.tolist(), mean_step.tolist()):
+        a, b = divmod(key, total + 1)
+        if step < step_threshold and not (protected[a] or protected[b]):
+            root_a, root_b = find(a), find(b)
+            if root_a != root_b:
+                parent[root_b] = root_a
+
+    roots = _np.fromiter(
+        (find(i) for i in range(total + 1)), dtype=_np.int64, count=total + 1
+    )
+    group = roots[comp]
+
+    # One palette colour per merged group, from its mean source colour.
+    flat = group.ravel()
+    counts = _np.maximum(_np.bincount(flat, minlength=total + 1), 1)
+    means = _np.stack(
+        [
+            _np.bincount(flat, weights=lab[..., c].ravel(), minlength=total + 1)
+            / counts
+            for c in range(3)
+        ],
+        axis=1,
+    )
+    # Compare against the real palette rows only (row 0 of ``palette_lab`` is
+    # the dummy background), so the result is a valid 1..K region id.
+    real = palette_lab[1:]
+    gaps = _np.linalg.norm(means[:, None, :] - real[None, :, :], axis=2)
+    result = (gaps.argmin(axis=1) + 1)[group].astype(_np.uint8)
+    result[comp == 0] = 0
+    return result
 
 
 def _pick_merge_target(component_id, ring_ids, palette_lab, skip_ids=frozenset()):
@@ -842,6 +984,18 @@ def _collect_contours(labels, min_points=OUTLINE_MIN_POINTS):
                 contours_out.append([(int(p[0][0]), int(p[0][1])) for p in contour])
     contours_out.sort(key=len, reverse=True)
     return contours_out
+
+
+def _boundary_pixels(labels):
+    """Boolean map of pixels on a label boundary (used by the debug overlay)."""
+    edge = _np.zeros(labels.shape, bool)
+    dx = labels[:, 1:] != labels[:, :-1]
+    dy = labels[1:, :] != labels[:-1, :]
+    edge[:, 1:] |= dx
+    edge[:, :-1] |= dx
+    edge[1:, :] |= dy
+    edge[:-1, :] |= dy
+    return edge
 
 
 def _find_covered_points(points, coverage):
@@ -952,15 +1106,71 @@ def _path_length(stroke):
     return total
 
 
-def _save_debug_labels(labels, ordered_palette, path=OUTLINE_DEBUG_PATH):
-    """Write the cleaned label map as a colour image (OpenCV writes BGR)."""
+def _label_debug_image(labels, ordered_palette):
+    """Render a label map with its palette colours (BGR, for cv2)."""
     lookup = _np.zeros((len(ordered_palette) + 1, 3), _np.uint8)
     for i, (r, g, b) in enumerate(ordered_palette, start=1):
         lookup[i] = (b, g, r)
+    return lookup[labels]
+
+
+def _save_debug_labels(labels, ordered_palette, path=OUTLINE_DEBUG_PATH):
+    """Write the cleaned label map as a colour image (OpenCV writes BGR)."""
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    cv2.imwrite(path, lookup[labels])
+    cv2.imwrite(path, _label_debug_image(labels, ordered_palette))
+
+
+def _save_debug_stages(source_rgb, colors, stages, strokes, path):
+    """Developer dump: one image per stage, a removed-boundary overlay, and
+    every traced stroke in a random colour over a white field.
+
+    Gated by ``PYAINT_DEBUG_LABELS``; writes next to ``debug_labels.png``. Also
+    prints the boundary-preservation check from ``INSTRUCTIONS.md`` so a run
+    that added (rather than deleted) boundaries is obvious.
+    """
+    base = os.path.splitext(path)[0]
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    for name, labels in stages.items():
+        cv2.imwrite(f"{base}_{name}.png", _label_debug_image(labels, colors))
+
+    if "quantized" in stages and "final" in stages:
+        before = _boundary_pixels(stages["quantized"])
+        after = _boundary_pixels(stages["final"])
+        removed = before & ~after
+        overlay = _np.ascontiguousarray(source_rgb[:, :, :3]).copy()
+        overlay[removed] = (255, 0, 0)
+        cv2.imwrite(
+            f"{base}_removed.png", cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR)
+        )
+        print(
+            "outline cleaner: new boundary pixels:",
+            int((after & ~before).sum()),
+        )
+        print("outline cleaner: removed boundary pixels:", int(removed.sum()))
+
+    if strokes:
+        width = int(max(x for stroke in strokes for x, _ in stroke)) + 4
+        height = int(max(y for stroke in strokes for _, y in stroke)) + 4
+        view = _np.full((height, width, 3), 255, _np.uint8)
+        rng = _np.random.default_rng(0)
+        for stroke in strokes:
+            colour = tuple(int(v) for v in rng.integers(0, 200, size=3))
+            points = _np.array(stroke, _np.int32).reshape(-1, 1, 2)
+            cv2.polylines(view, [points], False, colour, 1)
+        # Zoom for legibility, but cap the output so a full-resolution debug
+        # run on a large screenshot cannot allocate a huge image.
+        zoom = max(1, min(4, 4000 // max(width, height, 1)))
+        if zoom > 1:
+            view = cv2.resize(
+                view,
+                (width * zoom, height * zoom),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        cv2.imwrite(f"{base}_strokes.png", view)
 
 
 def plan_outline(
@@ -979,19 +1189,25 @@ def plan_outline(
     double_edges: bool = False,
     debug: Optional[bool] = None,
     debug_path: Optional[str] = None,
+    step_threshold: float = OUTLINE_STEP_THRESHOLD,
 ) -> Cmap:
     """Trace a cleaned label map into deduped outline polylines.
 
     INSTRUCTIONS.md pipeline: bilateral smooth -> weighted-Lab quantize ->
-    selective small-region merge (twice) -> full contours -> geometric dedupe ->
-    simplify -> join -> drop tiny strokes. It runs at the source resolution;
-    distances are given in canvas pixels and areas in grid cells, then scaled by
-    the source-to-canvas factor before use.
+    soft-boundary merge -> selective small-region merge (twice) -> full
+    contours -> geometric dedupe -> simplify -> join -> drop tiny strokes. It
+    runs at the source resolution; distances are given in canvas pixels and
+    areas in grid cells, then scaled by the source-to-canvas factor before use.
+
+    The soft-boundary merge (``step_threshold``) is what keeps shading,
+    gradients and soft shadows from being traced: touching components whose mean
+    Lab step is below the threshold merge, while thin components (outlines,
+    lashes) are protected. Set ``step_threshold`` to 0 to disable it.
 
     With ``double_edges`` the geometric dedupe is skipped, so every region's
     full contour is drawn (shared edges overlap) rather than thinned to one
-    line. ``debug`` forces/denies the ``debug_labels.png`` dump for this call;
-    ``None`` falls back to the :data:`OUTLINE_DEBUG` environment flag.
+    line. ``debug`` forces/denies the stage dumps for this call; ``None`` falls
+    back to the :data:`OUTLINE_DEBUG` environment flag.
     """
     if _np is None:
         return {}
@@ -1006,6 +1222,7 @@ def plan_outline(
 
     factor = src_w / canvas_w
     factor_y = src_h / canvas_h
+    scale = min(factor, factor_y)
 
     rgba = _np.asarray(source)
     if rgba.ndim == 2:
@@ -1016,16 +1233,28 @@ def plan_outline(
         alpha = rgba[:, :, 3] if rgba.shape[2] > 3 else None
 
     palette_lab = _build_palette(colors)
-    labels = _quantize_labels(
+    labels, lab = _quantize_labels(
         rgb,
         palette_lab,
         alpha,
         smooth_strength,
         bool(flags & IGNORE_TRANSPARENT),
     )
+    stages = {"quantized": labels.copy()}
 
-    # ``small_area``/``tiny_area`` are in grid cells (1 cell = ``step`` canvas
-    # px), so a cell covers ``(factor*step)^2`` source pixels.
+    # Stage 3: delete soft tonal boundaries so shading does not get its own
+    # contour. Thin components (outlines, lashes) are protected.
+    labels = _merge_soft_boundaries(
+        labels,
+        lab,
+        palette_lab,
+        float(step_threshold),
+        protect_thin=True,
+        thin_width=OUTLINE_THIN_WIDTH * scale,
+    )
+    stages["soft_merged"] = labels.copy()
+
+    # Stage 4: absorb slivers and specks, twice, so a chain collapses.
     area_factor = (factor * step) * (factor_y * step)
     for _ in range(2):
         labels = _merge_small_regions(
@@ -1035,11 +1264,10 @@ def plan_outline(
             max(1, int(round(tiny_area * area_factor))),
             float(similar_color),
         )
+    stages["final"] = labels.copy()
 
     if debug is None:
         debug = OUTLINE_DEBUG
-    if debug:
-        _save_debug_labels(labels, colors, debug_path or OUTLINE_DEBUG_PATH)
 
     contours = _collect_contours(
         labels, max(2, int(round(OUTLINE_MIN_POINTS * factor)))
@@ -1068,7 +1296,6 @@ def plan_outline(
             if not double_edges:
                 _paint_coverage(coverage, path, closed, radius)
 
-    scale = min(factor, factor_y)
     joined = _join_strokes(strokes, float(join_distance) * scale)
     min_length = OUTLINE_MIN_STROKE * scale
     kept = [
@@ -1076,6 +1303,11 @@ def plan_outline(
         for stroke in joined
         if _is_closed(stroke) or _path_length(stroke) >= min_length
     ]
+
+    if debug:
+        _save_debug_stages(
+            rgb, colors, stages, kept, debug_path or OUTLINE_DEBUG_PATH
+        )
 
     result = [
         [(int(round(xo + x / factor)), int(round(yo + y / factor_y))) for x, y in stroke]
@@ -1130,6 +1362,7 @@ def plan_image(
     small_area: int = OUTLINE_SMALL_AREA,
     tiny_area: int = OUTLINE_TINY_AREA,
     similar_color: float = OUTLINE_SIMILAR_COLOR,
+    step_threshold: float = OUTLINE_STEP_THRESHOLD,
 ) -> Cmap:
     """Fit + quantise + plan a full image. Returns a stroke map (``cmap``).
 
@@ -1152,6 +1385,7 @@ def plan_image(
             tiny_area,
             similar_color,
             double_edges,
+            step_threshold=step_threshold,
         )
     grid = quantize_image(source, (tw, th), palette, metric, flags)
     return plan(
@@ -1178,6 +1412,7 @@ def plan_region_image(
     small_area: int = OUTLINE_SMALL_AREA,
     tiny_area: int = OUTLINE_TINY_AREA,
     similar_color: float = OUTLINE_SIMILAR_COLOR,
+    step_threshold: float = OUTLINE_STEP_THRESHOLD,
 ) -> Cmap:
     """Fit + quantise + plan a sub-region. Returns a stroke map (``cmap``).
 
@@ -1200,6 +1435,7 @@ def plan_region_image(
             tiny_area,
             similar_color,
             double_edges,
+            step_threshold=step_threshold,
         )
     grid = quantize_image(source, (tw, th), palette, metric, flags)
     return plan(

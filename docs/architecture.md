@@ -91,9 +91,12 @@ that opens the image, reads the canvas, and hands the rest over:
      runs into fewer strokes.
    - **Outline** (`plan_outline`, default): runs the label-map cleaner on the
      source at its native resolution (bilateral smooth → weighted-Lab quantize
-     → selective small-region merge → full contours → geometric dedupe →
-     simplify → join), thinning long duplicate boundary stretches while keeping
-     `OUTLINE_COLOUR` strokes long. The grid-only entry points still use the
+     → soft-boundary merge → selective small-region merge → full contours →
+     geometric dedupe → simplify → join), thinning long duplicate boundary
+     stretches while keeping `OUTLINE_COLOUR` strokes long. The soft-boundary
+     merge drops touching boundaries whose mean Lab step is below
+     `step_threshold`, so soft shading and gradients are not traced while thin
+     features (outlines, lashes) are protected. The grid-only entry points still use the
      legacy `plan_regions` seam-ownership tracer, where `double_edges` follows
      each region's full boundary and `morphology` can despeckle the masks.
      `stroke_distance` is kept for API/cache compatibility but no longer

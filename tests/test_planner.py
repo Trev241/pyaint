@@ -271,6 +271,89 @@ def test_merge_small_regions_absorbs_tiny_specks():
     assert (merged == 2).sum() == 0
 
 
+def _soft_lab_palette():
+    # True-scale Lab rows for the synthetic tones below (row 0 = dummy).
+    return np.array(
+        [[0, 0, 0], [50, 0, 0], [53, 0, 0], [90, 0, 0]], dtype=np.float32
+    )
+
+
+def test_merge_soft_boundaries_drops_soft_step_keeps_hard():
+    labels = np.ones((40, 40), dtype=np.int32)
+    labels[:, 20:30] = 2  # L=53 vs L=50: a soft step
+    labels[:, 30:] = 3  # L=90: a hard step
+    lab = np.zeros((40, 40, 3), dtype=np.float32)
+    lab[labels == 1] = [50, 0, 0]
+    lab[labels == 2] = [53, 0, 0]
+    lab[labels == 3] = [90, 0, 0]
+
+    merged = planner._merge_soft_boundaries(
+        labels, lab, _soft_lab_palette(), 4.0, protect_thin=False, thin_width=0.0
+    )
+
+    # The soft pair becomes one region; the hard edge is preserved.
+    assert merged[0, 0] == merged[0, 25]
+    assert (merged[:, 30:] == 3).all()
+    before = planner._boundary_pixels(labels)
+    after = planner._boundary_pixels(merged)
+    assert int((after & ~before).sum()) == 0
+    assert int((before & ~after).sum()) == 80
+
+
+def test_merge_soft_boundaries_protects_thin_components():
+    labels = np.ones((40, 40), dtype=np.int32)
+    labels[:, 20] = 2  # a 1px soft line (an outline / lash)
+    lab = np.zeros((40, 40, 3), dtype=np.float32)
+    lab[labels == 1] = [50, 0, 0]
+    lab[labels == 2] = [53, 0, 0]
+
+    merged = planner._merge_soft_boundaries(
+        labels, lab, _soft_lab_palette(), 4.0, protect_thin=True, thin_width=2.0
+    )
+    assert (merged == 2).sum() == 40  # the thin line survives
+
+
+def test_merge_soft_boundaries_disabled_returns_labels():
+    labels = np.ones((4, 4), dtype=np.int32)
+    labels[0, 0] = 2
+    lab = np.zeros((4, 4, 3), dtype=np.float32)
+    merged = planner._merge_soft_boundaries(
+        labels, lab, _soft_lab_palette(), 0.0
+    )
+    assert (merged == labels).all()
+
+
+def test_plan_outline_shading_cleanup_reduces_tonal_strokes():
+    # A smooth grey ramp quantises into several close tonal bands. With shading
+    # cleanup on, they collapse into one region; a hard red block still traces.
+    width, height = 60, 24
+    image = Image.new("RGB", (width, height))
+    for x in range(width):
+        value = 90 + 2 * x  # 90..208 grey ramp
+        for y in range(height):
+            image.putpixel((x, y), (value, value, value))
+    for x in range(44, 60):
+        for y in range(height):
+            image.putpixel((x, y), RED)
+    palette = Palette(
+        colors_pos={
+            (100, 100, 100): (0, 0),
+            (130, 130, 130): (1, 0),
+            (160, 160, 160): (2, 0),
+            (190, 190, 190): (3, 0),
+            RED: (4, 0),
+        }
+    )
+
+    off = planner.plan_outline(
+        image, 0, 0, 1, (width, height), palette, 0, step_threshold=0.0
+    )
+    on = planner.plan_outline(
+        image, 0, 0, 1, (width, height), palette, 0, step_threshold=12.0
+    )
+    assert len(on[planner.OUTLINE_COLOUR]) < len(off[planner.OUTLINE_COLOUR])
+
+
 def test_collect_contours_skips_background_and_sorts_longest_first():
     labels = np.zeros((12, 12), dtype=np.int32)
     labels[1:4, 1:4] = 1

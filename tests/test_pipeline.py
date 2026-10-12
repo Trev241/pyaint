@@ -333,6 +333,17 @@ def test_cache_filename_depends_on_outline_join_distance(tmp_path, monkeypatch):
     assert near != far
 
 
+def test_cache_filename_depends_on_outline_step_threshold(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = write_image(tmp_path, {(0, 0): RED}, (2, 1))
+    bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
+    bot.outline_step_threshold = 0.0
+    off = bot.get_cache_filename(path)
+    bot.outline_step_threshold = 6.0
+    on = bot.get_cache_filename(path)
+    assert off != on
+
+
 def test_process_outline_honours_stroke_distance(tmp_path):
     pixels = {
         (x, y): (RED if (x + y) % 2 == 0 else BLUE)

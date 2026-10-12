@@ -73,6 +73,9 @@ class Bot(CacheMixin):
         self.outline_small_area = planner.OUTLINE_SMALL_AREA
         self.outline_tiny_area = planner.OUTLINE_TINY_AREA
         self.outline_similar_color = planner.OUTLINE_SIMILAR_COLOR
+        # Lab step below which soft tonal boundaries merge (0 disables); this is
+        # the knob that stops shading and gradients from being traced.
+        self.outline_step_threshold = planner.OUTLINE_STEP_THRESHOLD
         self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
 
         # The taught environment lives in one shared Profile (pyaint/profile.py).
@@ -286,6 +289,7 @@ class Bot(CacheMixin):
             self.outline_small_area,
             self.outline_tiny_area,
             self.outline_similar_color,
+            self.outline_step_threshold,
         )
 
     def draw(self, cmap):
@@ -666,6 +670,7 @@ class Bot(CacheMixin):
             self.outline_small_area,
             self.outline_tiny_area,
             self.outline_similar_color,
+            self.outline_step_threshold,
         )
 
     def simple_test_draw(self):

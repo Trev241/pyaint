@@ -37,11 +37,15 @@ class CacheMixin:
         outline_small_area = getattr(self, "outline_small_area", 12)
         outline_tiny_area = getattr(self, "outline_tiny_area", 4)
         outline_similar_color = getattr(self, "outline_similar_color", 10.0)
+        outline_step_threshold = getattr(
+            self, "outline_step_threshold", planner.OUTLINE_STEP_THRESHOLD
+        )
         settings_str = (
             f"{self.settings}_{flags}_{mode}_{canvas_info}_{metric}_"
             f"{stroke_distance}_{outline_morphology}_{double_edges}_"
             f"{outline_smoothing}_{outline_join_distance}_{outline_small_area}_"
-            f"{outline_tiny_area}_{outline_similar_color}_{planner.CANVAS_PADDING}"
+            f"{outline_tiny_area}_{outline_similar_color}_{outline_step_threshold}_"
+            f"{planner.CANVAS_PADDING}"
         )
         settings_hash = hashlib.md5(settings_str.encode()).hexdigest()[:8]
 
@@ -79,6 +83,9 @@ class CacheMixin:
             'outline_small_area': getattr(self, "outline_small_area", 12),
             'outline_tiny_area': getattr(self, "outline_tiny_area", 4),
             'outline_similar_color': getattr(self, "outline_similar_color", 10.0),
+            'outline_step_threshold': getattr(
+                self, "outline_step_threshold", planner.OUTLINE_STEP_THRESHOLD
+            ),
             'canvas': self._canvas,
             'image_hash': hashlib.md5(open(image_path, 'rb').read()).hexdigest()[:8],
             'timestamp': time.time(),
