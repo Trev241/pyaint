@@ -140,8 +140,8 @@ def test_outline_double_edges_toggle_persists(app, tmp_path, monkeypatch):
         # Doubled edges are the opt-in; the clean single line is the default.
         assert window.bot.outline_double_edges is False
         assert window._chk_double_edges.isChecked() is False
-        assert window.bot.outline_smoothing == pytest.approx(5)
-        assert window.bot.outline_step_threshold == pytest.approx(4.0)
+        assert window.bot.outline_smoothing == pytest.approx(2)
+        assert window.bot.outline_step_threshold == pytest.approx(10.0)
         window._chk_double_edges.setChecked(True)
         assert window.bot.outline_double_edges is True
         window._save_config()

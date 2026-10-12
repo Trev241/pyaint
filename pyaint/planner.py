@@ -64,13 +64,22 @@ OUTLINE_COLOUR = BLACK
 # resolution before running the label-map pipeline (see :func:`plan_outline`).
 # ---------------------------------------------------------------------------
 #: Bilateral-filter strength used before quantising (0 disables smoothing).
-OUTLINE_SMOOTHING = 5
+#: Level 1 is ~(diameter 5, sigma_colour 30); level 2 ~(7, 40); level 5 is the
+#: strongest. Keep this gentle: a strong bilateral pass blurs real edges and
+#: makes the merge over-absorb them.
+OUTLINE_SMOOTHING = 2
 #: Lightness weight when matching a pixel to the palette (higher favours
 #: matching brightness over hue).
 OUTLINE_LIGHTNESS_WEIGHT = 2.0
-#: Mean Lab step below which two touching components merge. ``0`` disables the
-#: soft-boundary merge. ~2-3 keeps subtle shading, 4-6 keeps only clear steps.
-OUTLINE_STEP_THRESHOLD = 4.0
+#: Number of adaptive Lab colours used to segment the source for OUTLINE.
+#: Outline draws only black, so this is deliberately decoupled from the
+#: target's drawing palette (which is far too small for good boundaries).
+OUTLINE_SEGMENTATION_COLORS = 48
+#: Maximum mean Lab distance between two touching components for them to merge.
+#: Uses the *component means*, not the local boundary step, so a soft edge
+#: between two genuinely different colours is kept while a smooth gradient
+#: collapses. ``0`` disables the soft-boundary merge.
+OUTLINE_STEP_THRESHOLD = 10.0
 #: Inscribed radius (canvas px) below which a component is "thin" (outlines,
 #: lashes) and protected from the soft-boundary merge.
 OUTLINE_THIN_WIDTH = 2.0
@@ -92,6 +101,10 @@ OUTLINE_MIN_STROKE = 8
 OUTLINE_MIN_POINTS = 8
 #: Polygon simplification tolerance in canvas pixels (1.0 - 1.5 recommended).
 OUTLINE_EPSILON = 1.2
+#: Bump when the label-map pipeline changes shape. It is part of the
+#: precompute cache key so an old cached plan is never replayed by a new
+#: algorithm (defaults may otherwise match).
+OUTLINE_PIPELINE_VERSION = 2
 #: Developer flag: ``PYAINT_DEBUG_LABELS=1`` writes each label-map stage, a
 #: removed-boundary overlay and a stroke view so the pipeline can be eyeballed.
 #: Path overridable with the ``_PATH`` var (stages share its stem).
@@ -730,29 +743,24 @@ def _build_palette(palette_rgb):
 def _bilateral_params(level: float):
     """Map an outline smoothing level to ``cv2.bilateralFilter`` parameters.
 
-    Level ``0`` disables smoothing. Level ``1`` reproduces the recipe's
-    original ``(5, 30, 5)``; higher levels widen the kernel and raise the
-    colour sigma. Returns ``(diameter, sigma_color, sigma_space)`` or ``None``.
+    Level ``0`` disables smoothing. Level ``1`` is ``(5, 30, 5)`` and level 2
+    (the default) is the spec's ``(7, 40, 7)``; higher levels widen the kernel
+    and raise the colour sigma, but the ceiling is kept modest so real edges
+    survive. Returns ``(diameter, sigma_color, sigma_space)`` or ``None``.
     """
     level = int(round(level))
     if level <= 0:
         return None
-    diameter = min(15, 5 + (level - 1))
-    sigma_color = 30.0 + (level - 1) * 15.0
+    diameter = min(15, 5 + (level - 1) * 2)
+    sigma_color = min(70.0, 30.0 + (level - 1) * 10.0)
     return diameter, sigma_color, float(diameter)
 
 
-def _quantize_labels(
-    source_rgb, palette_lab, alpha, smooth_strength, ignore_transparent
-):
-    """Nearest-palette labels with edge-preserving smoothing and Lab weighting.
+def _smooth_to_lab(source_rgb, smooth_strength):
+    """Bilateral-smooth ``source_rgb`` and return ``(rgb, lab)``.
 
-    ``source_rgb`` is an ``(H, W, 3)`` uint8 array, ``palette_lab`` a true-scale
-    Lab lookup whose row 0 is the dummy background. Returns ``(labels, lab)``,
-    where ``lab`` is the smoothed source in Lab (needed by the soft-boundary
-    merge). Lightness is weighted up so colours that differ mainly in lightness
-    stay distinct. When ``ignore_transparent`` is set and ``alpha`` is given,
-    pixels below :data:`ALPHA_CUTOFF` become label 0.
+    ``lab`` is true-scale CIELAB (``L`` 0-100); both the adaptive segmentation
+    and the soft-boundary merge read it.
     """
     image = source_rgb
     params = _bilateral_params(smooth_strength)
@@ -764,17 +772,67 @@ def _quantize_labels(
     image_lab = cv2.cvtColor(
         image.astype(_np.float32) / 255.0, cv2.COLOR_RGB2LAB
     ).astype(_np.float32)
+    return image, image_lab
+
+
+def _quantize_to_palette(image_lab, palette_lab, alpha, ignore_transparent):
+    """Nearest-palette labels for an already-smoothed Lab image.
+
+    Lightness is weighted up so colours that differ mainly in lightness stay
+    distinct. When ``ignore_transparent`` is set and ``alpha`` is given, pixels
+    below :data:`ALPHA_CUTOFF` become label 0.
+    """
     colors = palette_lab[1:]
-    weights = _np.array(
-        [OUTLINE_LIGHTNESS_WEIGHT, 1.0, 1.0], _np.float32
-    )
+    weights = _np.array([OUTLINE_LIGHTNESS_WEIGHT, 1.0, 1.0], _np.float32)
     labels = _np.zeros(image_lab.shape[:2], _np.int32)
     for row in range(image_lab.shape[0]):
         gaps = (image_lab[row][:, None, :] - colors[None, :, :]) * weights
         labels[row] = _np.linalg.norm(gaps, axis=2).argmin(axis=1) + 1
     if ignore_transparent and alpha is not None:
         labels[alpha < ALPHA_CUTOFF] = 0
-    return labels, image_lab
+    return labels
+
+
+def _distinct_color_count(image_rgb):
+    """Rough distinct-colour count (5 bits/channel) used to cap k-means.
+
+    Without this, a flat image (or a synthetic test) would be split into K
+    arbitrary labels even though it has only a handful of real colours.
+    """
+    quantised = (image_rgb >> 3).astype(_np.int32)
+    packed = (
+        (quantised[..., 0] << 10) | (quantised[..., 1] << 5) | quantised[..., 2]
+    )
+    return int(_np.unique(packed).size)
+
+
+def _adaptive_segmentation(image_rgb, image_lab, max_colors):
+    """K-means segmentation of a Lab image into at most ``max_colors`` regions.
+
+    OUTLINE draws only black, so the target's drawing palette adds nothing here;
+    an adaptive palette keeps the boundaries a small fixed palette would erase.
+    Returns ``(palette_lab, labels, palette_rgb)``; ``palette_lab`` keeps the
+    dummy row 0 so it can be reused by the merge and the debug renderer.
+    """
+    pixels = image_lab.reshape(-1, 3).astype(_np.float32)
+    distinct = _distinct_color_count(image_rgb)
+    k = int(max(2, min(int(max_colors), distinct, pixels.shape[0])))
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 0.5)
+    # Deterministic seeding: k-means++ otherwise varies run to run, which would
+    # make tuning non-reproducible and churn the content cache.
+    cv2.setRNGSeed(0)
+    _, kmeans_labels, centers = cv2.kmeans(
+        pixels, k, None, criteria, 3, cv2.KMEANS_PP_CENTERS
+    )
+    labels = kmeans_labels.reshape(image_lab.shape[:2]).astype(_np.int32) + 1
+    centers = centers.astype(_np.float32)
+    palette_lab = _np.vstack([_np.zeros((1, 3), _np.float32), centers])
+    rgb = cv2.cvtColor(centers.reshape(-1, 1, 3), cv2.COLOR_LAB2RGB).reshape(-1, 3)
+    palette_rgb = [
+        tuple(int(round(v * 255.0)) for v in _np.clip(colour, 0.0, 1.0))
+        for colour in rgb
+    ]
+    return palette_lab, labels, palette_rgb
 
 
 def _label_components(labels):
@@ -813,15 +871,19 @@ def _component_thickness(labels, comp, total):
 def _merge_soft_boundaries(
     labels, lab, palette_lab, step_threshold, protect_thin=True, thin_width=2.0
 ):
-    """Remove soft tonal boundaries by merging touching low-contrast components.
+    """Remove soft tonal boundaries by merging colour-close components.
 
-    For every pair of touching components the mean Lab step across their shared
-    boundary is measured; pairs below ``step_threshold`` merge (union-find, so
-    a gradient chains into one region). Thin components -- whose inscribed
-    radius is below ``thin_width``, such as outlines and lashes -- are protected
-    when ``protect_thin`` is set. Each merged group takes the palette colour
-    nearest its mean source colour. Runs at the source resolution and is the
-    stage that stops shading, gradients and a soft shadow from being traced.
+    Each component's area-weighted mean source colour is computed; every
+    touching pair whose two means are within ``step_threshold`` merges
+    (union-find, so a smooth gradient chains into one region). Thin components
+    -- whose inscribed radius is below ``thin_width``, such as outlines and
+    lashes -- are protected when ``protect_thin`` is set. Each merged group
+    takes the palette colour nearest its mean source colour. Runs at source
+    resolution.
+
+    Using the component *means* rather than the local step across the shared
+    boundary is what stops a soft airbrushed edge between two genuinely
+    different colours from chaining the whole image into one region.
     """
     if step_threshold <= 0:
         return labels
@@ -834,29 +896,38 @@ def _merge_soft_boundaries(
         protected = _component_thickness(labels, comp, total) < float(thin_width)
         protected[0] = True
 
-    # Lab step across every 4-connected boundary between two components.
-    first, second, steps = [], [], []
-    pairs = (
-        (comp[:, :-1], comp[:, 1:], lab[:, :-1], lab[:, 1:]),
-        (comp[:-1, :], comp[1:, :], lab[:-1, :], lab[1:, :]),
+    # Area-weighted mean Lab colour of every component.
+    area = _np.bincount(comp.ravel(), minlength=total + 1).astype(_np.float64)
+    means = _np.stack(
+        [
+            _np.bincount(
+                comp.ravel(), weights=lab[..., c].ravel(), minlength=total + 1
+            )
+            / _np.maximum(area, 1.0)
+            for c in range(3)
+        ],
+        axis=1,
     )
-    for comp_a, comp_b, lab_a, lab_b in pairs:
+
+    # Unique 4-connected touching pairs (order-independent).
+    first, second = [], []
+    for comp_a, comp_b in (
+        (comp[:, :-1], comp[:, 1:]),
+        (comp[:-1, :], comp[1:, :]),
+    ):
         differs = (comp_a != comp_b) & (comp_a > 0) & (comp_b > 0)
         if not differs.any():
             continue
         first.append(_np.minimum(comp_a, comp_b)[differs])
         second.append(_np.maximum(comp_a, comp_b)[differs])
-        steps.append(_np.linalg.norm(lab_a[differs] - lab_b[differs], axis=1))
     if not first:
         return labels
     first = _np.concatenate(first).astype(_np.int64)
     second = _np.concatenate(second).astype(_np.int64)
-    steps = _np.concatenate(steps)
-
-    # Mean step per touching pair.
-    keys = first * _np.int64(total + 1) + second
-    unique_keys, inverse = _np.unique(keys, return_inverse=True)
-    mean_step = _np.bincount(inverse, weights=steps) / _np.bincount(inverse)
+    unique_keys = _np.unique(first * _np.int64(total + 1) + second)
+    pair_a = unique_keys // (total + 1)
+    pair_b = unique_keys % (total + 1)
+    pair_distance = _np.linalg.norm(means[pair_a] - means[pair_b], axis=1)
 
     parent = list(range(total + 1))
 
@@ -866,9 +937,10 @@ def _merge_soft_boundaries(
             item = parent[item]
         return item
 
-    for key, step in zip(unique_keys.tolist(), mean_step.tolist()):
-        a, b = divmod(key, total + 1)
-        if step < step_threshold and not (protected[a] or protected[b]):
+    for a, b, distance in zip(
+        pair_a.tolist(), pair_b.tolist(), pair_distance.tolist()
+    ):
+        if distance < step_threshold and not (protected[a] or protected[b]):
             root_a, root_b = find(a), find(b)
             if root_a != root_b:
                 parent[root_b] = root_a
@@ -881,7 +953,7 @@ def _merge_soft_boundaries(
     # One palette colour per merged group, from its mean source colour.
     flat = group.ravel()
     counts = _np.maximum(_np.bincount(flat, minlength=total + 1), 1)
-    means = _np.stack(
+    group_means = _np.stack(
         [
             _np.bincount(flat, weights=lab[..., c].ravel(), minlength=total + 1)
             / counts
@@ -892,7 +964,7 @@ def _merge_soft_boundaries(
     # Compare against the real palette rows only (row 0 of ``palette_lab`` is
     # the dummy background), so the result is a valid 1..K region id.
     real = palette_lab[1:]
-    gaps = _np.linalg.norm(means[:, None, :] - real[None, :, :], axis=2)
+    gaps = _np.linalg.norm(group_means[:, None, :] - real[None, :, :], axis=2)
     result = (gaps.argmin(axis=1) + 1)[group].astype(_np.uint8)
 
     # A component that merged with nothing keeps its original label, so the soft
@@ -1198,19 +1270,25 @@ def plan_outline(
     debug: Optional[bool] = None,
     debug_path: Optional[str] = None,
     step_threshold: float = OUTLINE_STEP_THRESHOLD,
+    segmentation_colors: int = OUTLINE_SEGMENTATION_COLORS,
 ) -> Cmap:
     """Trace a cleaned label map into deduped outline polylines.
 
-    INSTRUCTIONS.md pipeline: bilateral smooth -> weighted-Lab quantize ->
+    INSTRUCTIONS.md pipeline: bilateral smooth -> adaptive Lab segmentation ->
     soft-boundary merge -> selective small-region merge (twice) -> full
     contours -> geometric dedupe -> simplify -> join -> drop tiny strokes. It
     runs at the source resolution; distances are given in canvas pixels and
     areas in grid cells, then scaled by the source-to-canvas factor before use.
 
+    Outline draws every contour in black, so segmentation is decoupled from the
+    target's drawing palette: ``segmentation_colors`` k-means colours are
+    derived from the image itself. Set it to 0 to fall back to the supplied
+    ``palette`` (used by tests and grid-only callers).
+
     The soft-boundary merge (``step_threshold``) is what keeps shading,
-    gradients and soft shadows from being traced: touching components whose mean
-    Lab step is below the threshold merge, while thin components (outlines,
-    lashes) are protected. Set ``step_threshold`` to 0 to disable it.
+    gradients and soft shadows from being traced: touching components whose
+    *mean* Lab colours are within the threshold merge, while thin components
+    (outlines, lashes) are protected. Set ``step_threshold`` to 0 to disable it.
 
     With ``double_edges`` the geometric dedupe is skipped, so every region's
     full contour is drawn (shared edges overlap) rather than thinned to one
@@ -1225,7 +1303,8 @@ def plan_outline(
     if canvas_w <= 0 or canvas_h <= 0 or src_w <= 0 or src_h <= 0:
         return {}
     colors = list(palette.color_list) if palette is not None else []
-    if not colors:
+    use_adaptive = int(segmentation_colors) > 0
+    if not use_adaptive and not colors:
         return {}
 
     factor = src_w / canvas_w
@@ -1240,14 +1319,21 @@ def plan_outline(
         rgb = _np.ascontiguousarray(rgba[:, :, :3])
         alpha = rgba[:, :, 3] if rgba.shape[2] > 3 else None
 
-    palette_lab = _build_palette(colors)
-    labels, lab = _quantize_labels(
-        rgb,
-        palette_lab,
-        alpha,
-        smooth_strength,
-        bool(flags & IGNORE_TRANSPARENT),
-    )
+    ignore_transparent = bool(flags & IGNORE_TRANSPARENT)
+    image_rgb, lab = _smooth_to_lab(rgb, smooth_strength)
+    if use_adaptive:
+        # Outline only ever draws black, so segment on the image's own colours
+        # rather than the target's small drawing palette (which erases real
+        # boundaries before they can be traced).
+        palette_lab, labels, seg_colors = _adaptive_segmentation(
+            image_rgb, lab, segmentation_colors
+        )
+        if ignore_transparent and alpha is not None:
+            labels[alpha < ALPHA_CUTOFF] = 0
+    else:
+        palette_lab = _build_palette(colors)
+        labels = _quantize_to_palette(lab, palette_lab, alpha, ignore_transparent)
+        seg_colors = colors
     stages = {"quantized": labels.copy()}
 
     # Stage 3: delete soft tonal boundaries so shading does not get its own
@@ -1314,7 +1400,7 @@ def plan_outline(
 
     if debug:
         _save_debug_stages(
-            rgb, colors, stages, kept, debug_path or OUTLINE_DEBUG_PATH
+            rgb, seg_colors, stages, kept, debug_path or OUTLINE_DEBUG_PATH
         )
 
     result = [

@@ -66,8 +66,8 @@ Legacy keys from older versions (`Custom Colors`, `color_preview_spot`,
 | `stroke_speed` | 200–5000 px/s | 1500 | Cursor travel speed while tracing an outline |
 | `frame_interval` | 0.002–0.05 s | 0.0167 | Seconds between cursor move events while tracing |
 | `travel_delay` | 0.0–1.0 s | 0.05 | Pause when moving between separate outline strokes |
-| `outline_smoothing` | 0–5 | 5 | Edge-preserving bilateral smoothing level before tracing (0 = off) |
-| `outline_step_threshold` | 0.0–10.0 Lab | 4.0 | Merge touching regions whose colour step is below this, so soft shading / gradients are not traced (0 = keep every tonal boundary) |
+| `outline_smoothing` | 0–5 | 2 | Edge-preserving bilateral smoothing level before tracing (0 = off; level 1 ≈ diameter 5/σ 30, level 2 ≈ 7/40, level 5 ≈ 13/70) |
+| `outline_step_threshold` | 0.0–30.0 Lab | 10.0 | Merge touching regions whose **mean colours** are within this Lab distance, so soft shading / gradients are not traced. Raise for cleaner lines, lower for more detail (0 = keep every region boundary) |
 | `outline_join_distance` | 0.0–20.0 px | 6.0 | Chain open stroke endpoints within this many canvas pixels |
 | `outline_small_area` | cells | 12 | Components up to this area may merge into a colour-similar neighbour |
 | `outline_tiny_area` | cells | 4 | Components below this area merge regardless of colour |
@@ -83,6 +83,11 @@ The `outline_double_edges` preference (the *Double-paint shared edges*
 checkbox, off by default) skips the geometric dedupe, so every region's full
 contour is drawn instead of long duplicate stretches being banded to a single
 line.
+
+Outline segments the image with an internal adaptive palette (48 Lab colours
+via k-means), **not** the target's drawing palette: Outline always draws black,
+so a small palette would only erase boundaries before they can be traced. The
+number of colours is a planner constant, not a user setting.
 
 ## Drawing options
 

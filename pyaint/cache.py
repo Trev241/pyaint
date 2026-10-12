@@ -45,7 +45,7 @@ class CacheMixin:
             f"{stroke_distance}_{outline_morphology}_{double_edges}_"
             f"{outline_smoothing}_{outline_join_distance}_{outline_small_area}_"
             f"{outline_tiny_area}_{outline_similar_color}_{outline_step_threshold}_"
-            f"{planner.CANVAS_PADDING}"
+            f"{planner.OUTLINE_PIPELINE_VERSION}_{planner.CANVAS_PADDING}"
         )
         settings_hash = hashlib.md5(settings_str.encode()).hexdigest()[:8]
 

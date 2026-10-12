@@ -121,13 +121,16 @@ label-map cleaner instead.
   sorts colours by frequency and repaints lower layers, yielding fewer strokes.
 - **Slotted**: a direct colour → list-of-runs map.
 - **Outline** (default, `plan_outline`): runs the label-map cleaner on the
-  source at native resolution — bilateral smooth, weighted-Lab quantize,
-  soft-boundary merge, selective small-region merge (twice), full contours,
-  geometric dedupe, simplify, join — and emits `OUTLINE_COLOUR` polylines. The
-  soft-boundary merge drops soft tonal steps (shading, gradients) so they are
-  not traced. Long duplicate stretches where two regions share a boundary are
-  thinned to one line, while short overlaps are kept so strokes stay long. The *Double-paint shared
-  edges* option skips the dedupe so every region's full contour is drawn. The legacy
+  source at native resolution — bilateral smooth, **adaptive-Lab
+  segmentation** (48 colours, decoupled from the target palette because
+  Outline only draws black), soft-boundary merge, selective small-region merge
+  (twice), full contours, geometric dedupe, simplify, join — and emits
+  `OUTLINE_COLOUR` polylines. The soft-boundary merge drops regions whose mean
+  colours are close (shading, gradients) so they are not traced, while keeping
+  soft edges between genuinely different colours. Long duplicate stretches
+  where two regions share a boundary are thinned to one line, while short
+  overlaps are kept so strokes stay long. The *Double-paint shared edges*
+  option skips the dedupe so every region's full contour is drawn. The legacy
   `plan_regions` seam-ownership tracer remains for grid-only callers.
   `stroke_distance` is retained for compatibility and no longer changes the
   plan.

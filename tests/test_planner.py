@@ -323,6 +323,64 @@ def test_merge_soft_boundaries_disabled_returns_labels():
     assert (merged == labels).all()
 
 
+def test_merge_soft_boundaries_uses_component_means():
+    # The two regions touch with a tiny local step (col 19 -> 20 is 49 -> 51)
+    # but their means are ~21 and ~79. Comparing means (not the local step)
+    # keeps them apart, which is the anti-chaining fix.
+    labels = np.ones((10, 40), dtype=np.int32)
+    labels[:, 20:] = 2
+    lab = np.zeros((10, 40, 3), dtype=np.float32)
+    lab[:, :20] = [20.0, 0.0, 0.0]
+    lab[:, 20:] = [80.0, 0.0, 0.0]
+    lab[:, 19] = [49.0, 0.0, 0.0]
+    lab[:, 20] = [51.0, 0.0, 0.0]
+    palette = np.array(
+        [[0, 0, 0], [20, 0, 0], [80, 0, 0]], dtype=np.float32
+    )
+    kept = planner._merge_soft_boundaries(
+        labels, lab, palette, 10.0, protect_thin=False, thin_width=0.0
+    )
+    assert (kept == labels).all()
+
+
+def test_merge_soft_boundaries_merges_close_component_means():
+    labels = np.ones((10, 40), dtype=np.int32)
+    labels[:, 20:] = 2
+    lab = np.zeros((10, 40, 3), dtype=np.float32)
+    lab[:, :20] = [50.0, 0.0, 0.0]
+    lab[:, 20:] = [54.0, 0.0, 0.0]
+    palette = np.array(
+        [[0, 0, 0], [50, 0, 0], [54, 0, 0]], dtype=np.float32
+    )
+    merged = planner._merge_soft_boundaries(
+        labels, lab, palette, 10.0, protect_thin=False, thin_width=0.0
+    )
+    assert (merged == merged[0, 0]).all()
+
+
+def test_adaptive_segmentation_splits_distinct_colours():
+    image = np.zeros((12, 12, 3), dtype=np.uint8)
+    image[:, :4] = (200, 30, 30)
+    image[:, 4:8] = (30, 200, 30)
+    image[:, 8:] = (30, 30, 200)
+    _, lab = planner._smooth_to_lab(image, 0)
+    palette_lab, labels, palette_rgb = planner._adaptive_segmentation(
+        image, lab, 48
+    )
+    assert len(np.unique(labels)) == 3
+    assert palette_lab.shape == (4, 3)
+    assert len(palette_rgb) == 3
+
+
+def test_adaptive_segmentation_is_deterministic():
+    rng = np.random.default_rng(0)
+    image = rng.integers(0, 256, size=(20, 20, 3), dtype=np.uint8)
+    _, lab = planner._smooth_to_lab(image, 0)
+    first = planner._adaptive_segmentation(image, lab, 8)[1]
+    second = planner._adaptive_segmentation(image, lab, 8)[1]
+    assert np.array_equal(first, second)
+
+
 def test_plan_outline_shading_cleanup_reduces_tonal_strokes():
     # A smooth grey ramp quantises into several close tonal bands. With shading
     # cleanup on, they collapse into one region; a hard red block still traces.
@@ -346,10 +404,26 @@ def test_plan_outline_shading_cleanup_reduces_tonal_strokes():
     )
 
     off = planner.plan_outline(
-        image, 0, 0, 1, (width, height), palette, 0, step_threshold=0.0
+        image,
+        0,
+        0,
+        1,
+        (width, height),
+        palette,
+        0,
+        step_threshold=0.0,
+        segmentation_colors=0,
     )
     on = planner.plan_outline(
-        image, 0, 0, 1, (width, height), palette, 0, step_threshold=12.0
+        image,
+        0,
+        0,
+        1,
+        (width, height),
+        palette,
+        0,
+        step_threshold=12.0,
+        segmentation_colors=0,
     )
     assert len(on[planner.OUTLINE_COLOUR]) < len(off[planner.OUTLINE_COLOUR])
 

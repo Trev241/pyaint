@@ -13,6 +13,24 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Outline segments with its own adaptive palette and merges on region
+  means.** Outline draws only black, so the target's drawing palette was
+  erasing real boundaries before tracing (on a sample image, 64 adaptive
+  colours collapsed to 9 MS Paint swatches). The label-map cleaner now
+  k-means-clusters the smoothed source into `OUTLINE_SEGMENTATION_COLORS` (48)
+  Lab colours (`_adaptive_segmentation`), decoupled from the target palette.
+  The soft-boundary merge now compares the two components' **mean colours**
+  instead of the local step across their shared edge: the old local-step
+  union-find chained through soft edges and fused distinct regions (face,
+  clothes, arms, background) into one blob. Merging on means keeps a soft edge
+  between two different colours while still collapsing a smooth gradient. The
+  bilateral level mapping was gentled as well (level 5 was `sigma_colour` 90;
+  level 2 is now the spec's `(7, 40, 7)` and the ceiling is 70), so
+  `outline_smoothing` defaults to 2 and `outline_step_threshold` to 10.0 (a
+  mean-Lab-distance). `OUTLINE_PIPELINE_VERSION` is part of the precompute cache
+  key so an old cached plan is never replayed. `scripts/debug_outline.py`
+  renders the per-stage images, the removed-boundary overlay and a black
+  line-art overlay for any image without launching the GUI.
 - **Outline now cleans the label map before tracing, fixing stroke
   fragmentation and tonal clutter.** A new `plan_outline` pipeline
   (`INSTRUCTIONS.md`) runs at the source resolution: bilateral smooth →

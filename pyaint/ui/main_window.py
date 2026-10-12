@@ -404,7 +404,7 @@ class MainWindow(QMainWindow):
         )
         # Label-map cleaner thresholds, exposed so more aggressive values can be
         # trialled against fragmentation.
-        self._outline_smoothing = SliderField("Smoothing", 0, 5, 5, 1)
+        self._outline_smoothing = SliderField("Smoothing", 0, 5, 2, 1)
         self._outline_smoothing.setToolTip(
             "Outline only: edge-preserving bilateral smoothing before tracing. "
             "Higher values remove more anti-aliasing specks but round fine detail."
@@ -417,12 +417,13 @@ class MainWindow(QMainWindow):
             "into one longer stroke. Raise it to remove fragmentation."
         )
         self._outline_step_threshold = SliderField(
-            "Shading cleanup", 0.0, 10.0, 4.0, 0.5
+            "Shading cleanup", 0.0, 30.0, 10.0, 1.0
         )
         self._outline_step_threshold.setToolTip(
-            "Outline only: merge boundaries whose colour step is below this, so "
-            "soft shading, gradients and soft shadows are not traced. 0 keeps "
-            "every tonal boundary."
+            "Outline only: merge touching regions whose mean colours are within "
+            "this Lab distance, so soft shading and gradients are not traced. "
+            "Raise it for cleaner lines, lower it for more detail; 0 keeps "
+            "every region boundary."
         )
         for field in (
             self._stroke_speed,
@@ -878,12 +879,12 @@ class MainWindow(QMainWindow):
         self.bot.travel_delay = 0.05
         self.bot.outline_morphology = False
         self.bot.outline_double_edges = False
-        self.bot.outline_smoothing = 5
+        self.bot.outline_smoothing = 2
         self.bot.outline_join_distance = 6.0
         self.bot.outline_small_area = 12
         self.bot.outline_tiny_area = 4
         self.bot.outline_similar_color = 10.0
-        self.bot.outline_step_threshold = 4.0
+        self.bot.outline_step_threshold = 10.0
         self.draw_options = Bot.IGNORE_WHITE | Bot.IGNORE_TRANSPARENT
         self.bot.skip_first_color = bool(recipe.skip_first_color)
         self._refresh_drawing_widgets()
@@ -947,7 +948,7 @@ class MainWindow(QMainWindow):
             settings.get("outline_double_edges", False)
         )
         self.bot.outline_smoothing = float(
-            settings.get("outline_smoothing", 5)
+            settings.get("outline_smoothing", 2)
         )
         self.bot.outline_join_distance = float(
             settings.get("outline_join_distance", 6.0)
@@ -958,7 +959,7 @@ class MainWindow(QMainWindow):
             settings.get("outline_similar_color", 10.0)
         )
         self.bot.outline_step_threshold = float(
-            settings.get("outline_step_threshold", 4.0)
+            settings.get("outline_step_threshold", 10.0)
         )
 
         metric = self.tools.get("color_metric", DEFAULT_METRIC)

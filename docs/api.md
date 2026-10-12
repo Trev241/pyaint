@@ -118,7 +118,7 @@ and delegate here, so the same functions are headlessly testable and cacheable.
 | `quantize(pix, w, h, palette, metric, flags)` | Pixels → colour grid: `grid[row][col] -> colour \| None` (single-sample) |
 | `quantize_image(image, (tw, th), palette, metric, flags, source_quality=False)` | Palette-aware majority downsample of the full source → colour grid (numpy-accelerated) |
 | `plan_rows(grid, xo, yo, step, flags, mode)` | Colour grid → `cmap` (slotted / layered) |
-| `plan_outline(source, xo, yo, step, (tw, th), palette, flags, smooth_strength=OUTLINE_SMOOTHING, join_distance=OUTLINE_JOIN_DISTANCE, small_area=OUTLINE_SMALL_AREA, tiny_area=OUTLINE_TINY_AREA, similar_color=OUTLINE_SIMILAR_COLOR, double_edges=False, step_threshold=OUTLINE_STEP_THRESHOLD)` | Source image → cleanup label map → deduped `OUTLINE_COLOUR` polylines (the OUTLINE pipeline) |
+| `plan_outline(source, xo, yo, step, (tw, th), palette, flags, smooth_strength=OUTLINE_SMOOTHING, join_distance=OUTLINE_JOIN_DISTANCE, small_area=OUTLINE_SMALL_AREA, tiny_area=OUTLINE_TINY_AREA, similar_color=OUTLINE_SIMILAR_COLOR, double_edges=False, step_threshold=OUTLINE_STEP_THRESHOLD, segmentation_colors=OUTLINE_SEGMENTATION_COLORS)` | Source image → cleanup label map → deduped `OUTLINE_COLOUR` polylines (the OUTLINE pipeline) |
 | `plan_regions(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE, palette=None, morphology=False, double_edges=False)` | Colour grid → `cmap` of polylines (legacy outline tracer) |
 | `plan(grid, xo, yo, step, flags, mode, stroke_distance=STROKE_DISTANCE, palette=None, morphology=False, double_edges=False)` | Dispatch by mode (`OUTLINE` → `plan_regions`, else `plan_rows`) |
 | `plan_image(...)` / `plan_region_image(...)` | Whole-image / sub-region entry points; `OUTLINE` runs `plan_outline`, the row/layer modes share `quantize_image` |
@@ -144,24 +144,36 @@ cache key.
 
 `plan_image` / `plan_region_image` route `OUTLINE` to `plan_outline`, the
 label-map cleaner from `INSTRUCTIONS.md`, at the source resolution: bilateral
-smooth → weighted-Lab quantize → `merge_soft_boundaries` → selective
+smooth → adaptive-Lab segmentation → `merge_soft_boundaries` → selective
 `merge_small_regions` (twice) → `collect_contours` → geometric dedupe →
-`simplify` → `join_strokes` → drop tiny strokes. `merge_soft_boundaries`
-(controlled by `step_threshold`) deletes touching boundaries whose mean Lab step
-is soft, so shading and gradients are not traced; thin components (outlines,
-lashes) are protected. Duplicate boundaries are thinned only where a long
-stretch overlaps an already-accepted stroke, so strokes stay long. Its knobs are
-`smooth_strength`, `step_threshold`, `join_distance`, `small_area`, `tiny_area`
-and `similar_color` (mirrored on `Bot` as `outline_smoothing`,
-`outline_step_threshold`, `outline_join_distance`, `outline_small_area`,
-`outline_tiny_area`, `outline_similar_color`) and are all part of the precompute
-cache key. Distances are in canvas pixels, areas in grid cells. The grid entry
-points (`plan` / `plan_regions`) keep the seam-ownership tracer for callers that
-only hold a colour grid. With `PYAINT_DEBUG_LABELS=1`, each stage is written next
-to `debug_labels.png` (quantized / soft_merged / final), plus a removed-boundary
+`simplify` → `join_strokes` → drop tiny strokes.
+
+Outline draws only black, so segmentation is decoupled from the target's
+drawing palette: by default `_adaptive_segmentation` k-means-clusters the
+smoothed source into `OUTLINE_SEGMENTATION_COLORS` (48) Lab colours. Set
+`segmentation_colors=0` to fall back to the supplied `palette` (used by tests
+and grid-only callers). `merge_soft_boundaries` (controlled by
+`step_threshold`) deletes touching boundaries whose **component mean colours**
+are within the threshold, so shading and gradients are not traced; using means
+instead of the local boundary step is what stops a soft edge between two
+different colours from chaining the whole image into one region. Thin
+components (outlines, lashes) are protected. Duplicate boundaries are thinned
+only where a long stretch overlaps an already-accepted stroke, so strokes stay
+long. Its knobs are `smooth_strength`, `step_threshold`, `join_distance`,
+`small_area`, `tiny_area` and `similar_color` (mirrored on `Bot` as
+`outline_smoothing`, `outline_step_threshold`, `outline_join_distance`,
+`outline_small_area`, `outline_tiny_area`, `outline_similar_color`) and are all
+part of the precompute cache key. Distances are in canvas pixels, areas in grid
+cells. `OUTLINE_PIPELINE_VERSION` is also in the cache key so an algorithm
+change never replays an old cached plan. The grid entry points
+(`plan` / `plan_regions`) keep the seam-ownership tracer for callers that only
+hold a colour grid. With `PYAINT_DEBUG_LABELS=1`, each stage is written next to
+`debug_labels.png` (quantized / soft_merged / final), plus a removed-boundary
 overlay and a random-colour stroke view; the run prints the new/removed boundary
-pixel counts. Lab is computed with `cv2` on float RGB so `L` is on the 0–100
-scale and matches `skimage.color.rgb2lab` without the heavier dependency.
+pixel counts. `scripts/debug_outline.py` renders the same set (plus a black
+line-art overlay and a contact sheet) for one image without launching the GUI.
+Lab is computed with `cv2` on float RGB so `L` is on the 0–100 scale and
+matches `skimage.color.rgb2lab` without the heavier dependency.
 
 `quantize_image` supersamples each output cell and takes the modal palette
 colour, which votes out isolated compression / anti-aliasing artifacts at the
