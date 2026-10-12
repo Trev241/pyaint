@@ -41,6 +41,20 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   thinned to one clean line. Stored per target and part of the precompute cache
   key.
 
+### Changed
+- **Simpler inspector.** Removed the **App behaviour** section: the
+  New Layer / Color Button / Okay toggles duplicated Setup and recipe defaults,
+  so teach and enable tools in Setup instead. The now-unused `ToolControls`
+  widget and its handlers were deleted. The target-specific
+  **MS Paint double-click** checkbox moved to the (now compact) Options section,
+  where it is hidden unless the chosen recipe supports it.
+- **The Options section is just Colour matching.** *Ignore white pixels* and
+  *Ignore transparent pixels* are now always on (the latter was already the
+  safe default), and *Skip first color* is recipe-driven with no UI toggle.
+  Legacy `ignore_white_pixels` / `ignore_transparent_pixels` config keys are
+  still read but the planner always receives both ignore flags; a target can
+  still set `skip_first_color` in its recipe.
+
 ### Fixed
 - **Outline no longer traces a shared edge twice.** When two colour regions
   meet, `cv2.findContours` returns the shared boundary in *both* region masks,

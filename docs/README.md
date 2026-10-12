@@ -97,7 +97,7 @@ holds a reference to the same instance, so there is nothing to merge back.
 - **Environment** (owned by `Profile`): the tool entries, `MSPaint Mode`,
   `target`.
 - **Preferences** (owned by `MainWindow`): `pause_key`, `drawing_settings`,
-  `drawing_options`, `drawing_by_target`, `environments`, `skip_first_color`,
+  `drawing_by_target`, `environments`, `skip_first_color`,
   `last_image_url`, `theme`, `draw_mode`, `color_metric`,
   `image_search_provider`.
 

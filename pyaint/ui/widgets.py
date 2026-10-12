@@ -7,7 +7,7 @@ import re
 from typing import Optional
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QImage, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
-    QSpinBox,
     QStyle,
     QStyleOptionButton,
     QToolButton,
@@ -336,111 +335,6 @@ class SliderField(QWidget):
         self._slider.setValue(round(value / self._resolution))
         self._update_label(value)
         self._block = False
-
-
-class ToolControls(QFrame):
-    """Enable + modifier (+ optional delay) controls for one taught tool.
-
-    Mutates the tool's entry dict in place and emits ``changed`` so the window
-    can persist. The enable/modifier controls are disabled until the tool has
-    been taught (``entry["status"]`` is true).
-    """
-
-    changed = Signal()
-
-    def __init__(self, title: str, get_entry, supports_delay: bool = False, parent=None):
-        super().__init__(parent)
-        self.name = title
-        self._get_entry = get_entry
-        self._loading = True
-        self.setObjectName("ToolControls")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.setSpacing(2)
-
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        label = QLabel(title)
-        label.setObjectName("FieldHint")
-        self._enable = CheckBox("Enable")
-        self._enable.toggled.connect(self._on_enable)
-        header.addWidget(label)
-        header.addStretch(1)
-        header.addWidget(self._enable)
-        layout.addLayout(header)
-
-        mods = QHBoxLayout()
-        mods.setContentsMargins(0, 0, 0, 0)
-        mods_label = QLabel("Modifiers")
-        mods_label.setObjectName("FieldHint")
-        mods.addWidget(mods_label)
-        self._mods = {}
-        for key in ("ctrl", "alt", "shift"):
-            box = CheckBox(key.capitalize())
-            box.toggled.connect(self._on_modifiers)
-            self._mods[key] = box
-            mods.addWidget(box)
-        mods.addStretch(1)
-        layout.addLayout(mods)
-
-        self._delay = None
-        if supports_delay:
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            delay_label = QLabel("Delay")
-            delay_label.setObjectName("FieldHint")
-            self._delay = QSpinBox()
-            self._delay.setRange(0, 5000)
-            self._delay.setSingleStep(50)
-            self._delay.setSuffix(" ms")
-            self._delay.valueChanged.connect(self._on_delay)
-            row.addWidget(delay_label)
-            row.addStretch(1)
-            row.addWidget(self._delay)
-            layout.addLayout(row)
-
-        self._status = QLabel("Not configured — teach it in Setup to enable.")
-        self._status.setObjectName("FieldHint")
-        self._status.setWordWrap(True)
-        layout.addWidget(self._status)
-
-        self._loading = False
-        self.refresh()
-
-    def _on_enable(self, checked: bool) -> None:
-        if self._loading:
-            return
-        self._get_entry()["enabled"] = bool(checked)
-        self.changed.emit()
-
-    def _on_modifiers(self) -> None:
-        if self._loading:
-            return
-        self._get_entry()["modifiers"] = {k: b.isChecked() for k, b in self._mods.items()}
-        self.changed.emit()
-
-    def _on_delay(self, milliseconds: int) -> None:
-        if self._loading:
-            return
-        self._get_entry()["delay"] = milliseconds / 1000.0
-        self.changed.emit()
-
-    def refresh(self) -> None:
-        entry = self._get_entry()
-        self._loading = True
-        status = bool(entry.get("status"))
-        self._enable.setChecked(bool(entry.get("enabled")))
-        self._enable.setEnabled(status)
-        modifiers = entry.get("modifiers", {}) or {}
-        for key, box in self._mods.items():
-            box.setChecked(bool(modifiers.get(key, False)))
-            box.setEnabled(status)
-        if self._delay is not None:
-            self._delay.setValue(int(float(entry.get("delay", 0.1)) * 1000))
-            self._delay.setEnabled(status)
-        self._status.setVisible(not status)
-        self._loading = False
 
 
 # ---------------------------------------------------------------------------

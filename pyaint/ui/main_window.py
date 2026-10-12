@@ -58,7 +58,6 @@ from pyaint.targets import (
     get_recipe,
     list_recipes,
     load_user_recipes,
-    merge_drawing_options,
     merge_drawing_settings,
 )
 from pyaint.ui import theme
@@ -75,7 +74,6 @@ from pyaint.ui.widgets import (
     ReadinessStrip,
     Section,
     SliderField,
-    ToolControls,
     accepts_image_drop,
     local_path_from_mime,
     pil_to_qpixmap,
@@ -515,65 +513,15 @@ class MainWindow(QMainWindow):
         metric_row.addStretch(1)
         metric_row.addWidget(self._metric_combo)
         options.add_layout(metric_row)
-        self._chk_ignore = CheckBox("Ignore white pixels")
-        self._chk_ignore.setToolTip("Skip pure-white areas, e.g. a blank background")
-        self._chk_transparent = CheckBox("Ignore transparent pixels")
-        self._chk_transparent.setToolTip(
-            "Skip see-through areas of a PNG instead of painting them black."
-        )
-        self._chk_skip = CheckBox("Skip first color")
-        self._chk_skip.setToolTip(
-            "Don't paint the first colour — useful when it is already on the canvas."
-        )
-        self._chk_ignore.toggled.connect(self._on_options_changed)
-        self._chk_transparent.toggled.connect(self._on_options_changed)
-        self._chk_skip.toggled.connect(self._on_skip_changed)
-        for box in (self._chk_ignore, self._chk_transparent, self._chk_skip):
-            options.add(box)
-        layout.insertWidget(layout.count() - 1, options)
-
-        tools = Section(
-            "App behaviour",
-            "Optional actions Pyaint performs in your app. Tools are hidden unless "
-            "the chosen target uses them, and stay disabled until taught in Setup.",
-        )
-        self._tool_controls = []
-        for name, supports_delay in (
-            ("New Layer", False),
-            ("Color Button", True),
-            ("Color Button Okay", True),
-        ):
-            control = ToolControls(
-                name, lambda n=name: self.profile[n], supports_delay=supports_delay
-            )
-            control.changed.connect(self._on_tool_controls_changed)
-            tools.add(control)
-            self._tool_controls.append(control)
-        self._mspaint_box = QWidget()
-        mspaint_layout = QVBoxLayout(self._mspaint_box)
-        mspaint_layout.setContentsMargins(0, 0, 0, 0)
-        mspaint_layout.setSpacing(2)
+        # The only remaining target-specific action: some desktop palettes need
+        # a double-click to select a colour. Hidden unless the recipe uses it.
         self._chk_mspaint = CheckBox("MS Paint double-click")
         self._chk_mspaint.setToolTip(
-            "Some palettes need a double-click to select a colour"
+            "Some palettes need a double-click to select a colour."
         )
         self._chk_mspaint.toggled.connect(self._on_mspaint_toggled)
-        mspaint_layout.addWidget(self._chk_mspaint)
-        mspaint_delay_row = QHBoxLayout()
-        mspaint_delay_label = QLabel("Double-click delay")
-        mspaint_delay_label.setObjectName("FieldHint")
-        self._mspaint_delay = QSpinBox()
-        self._mspaint_delay.setRange(0, 3000)
-        self._mspaint_delay.setSuffix(" ms")
-        self._mspaint_delay.setValue(500)
-        self._mspaint_delay.valueChanged.connect(self._on_mspaint_delay)
-        mspaint_delay_row.addWidget(mspaint_delay_label)
-        mspaint_delay_row.addStretch(1)
-        mspaint_delay_row.addWidget(self._mspaint_delay)
-        mspaint_layout.addLayout(mspaint_delay_row)
-        tools.add(self._mspaint_box)
-        self._tools_section = tools
-        layout.insertWidget(layout.count() - 1, tools)
+        options.add(self._chk_mspaint)
+        layout.insertWidget(layout.count() - 1, options)
 
         diagnostics = CollapsibleSection("Diagnostics")
         diag_note = QLabel(
@@ -900,7 +848,6 @@ class MainWindow(QMainWindow):
             self._drawing_by_target[recipe.id] = self._drawing_snapshot()
         self._restore_environment()
         self._store_drawing_settings()
-        self._store_drawing_options()
         self._save_config()
         self._refresh_detection_status()
         self._sync_env_ui()
@@ -937,15 +884,9 @@ class MainWindow(QMainWindow):
         self.bot.outline_tiny_area = 4
         self.bot.outline_similar_color = 10.0
         self.bot.outline_step_threshold = 4.0
-        self.draw_options = merge_drawing_options(
-            self.draw_options,
-            recipe.drawing_options or {},
-            Bot.IGNORE_WHITE,
-            Bot.IGNORE_TRANSPARENT,
-        )
+        self.draw_options = Bot.IGNORE_WHITE | Bot.IGNORE_TRANSPARENT
         self.bot.skip_first_color = bool(recipe.skip_first_color)
         self._refresh_drawing_widgets()
-        self._refresh_option_widgets()
         self._sync_env_ui()
 
     def _select_target_id(self, recipe_id: str) -> None:
@@ -988,13 +929,9 @@ class MainWindow(QMainWindow):
         self.bot.jump_threshold = int(settings.get("jump_threshold", 5))
         self._jump_threshold.setValue(self.bot.jump_threshold)
 
-        options = self.tools.get("drawing_options", {})
-        self.draw_options = 0
-        if options.get("ignore_white_pixels", True):
-            self.draw_options |= Bot.IGNORE_WHITE
-        if options.get("ignore_transparent_pixels", True):
-            self.draw_options |= Bot.IGNORE_TRANSPARENT
-
+        # White and transparent pixels are always skipped; the old toggles are
+        # gone so the flags are fixed at their documented defaults.
+        self.draw_options = Bot.IGNORE_WHITE | Bot.IGNORE_TRANSPARENT
         self.bot.skip_first_color = bool(self.tools.get("skip_first_color", False))
         mode = self.tools.get("draw_mode", Bot.OUTLINE)
         self._mode = (
@@ -1071,7 +1008,6 @@ class MainWindow(QMainWindow):
 
         self._restore_environment()
         self._refresh_drawing_widgets()
-        self._refresh_option_widgets()
         self._sync_env_ui()
         self._refresh_detection_status()
         self._apply_theme()
@@ -1143,12 +1079,6 @@ class MainWindow(QMainWindow):
             "outline_tiny_area": int(self.bot.outline_tiny_area),
             "outline_similar_color": float(self.bot.outline_similar_color),
             "outline_step_threshold": float(self.bot.outline_step_threshold),
-            "drawing_options": {
-                "ignore_white_pixels": bool(self.draw_options & Bot.IGNORE_WHITE),
-                "ignore_transparent_pixels": bool(
-                    self.draw_options & Bot.IGNORE_TRANSPARENT
-                ),
-            },
             "draw_mode": self._mode,
             "skip_first_color": bool(self.bot.skip_first_color),
         }
@@ -1194,12 +1124,7 @@ class MainWindow(QMainWindow):
             self.bot.outline_step_threshold = max(
                 0.0, float(data["outline_step_threshold"])
             )
-        options = data.get("drawing_options") or {}
-        self.draw_options = 0
-        if options.get("ignore_white_pixels", True):
-            self.draw_options |= Bot.IGNORE_WHITE
-        if options.get("ignore_transparent_pixels", True):
-            self.draw_options |= Bot.IGNORE_TRANSPARENT
+        self.draw_options = Bot.IGNORE_WHITE | Bot.IGNORE_TRANSPARENT
         mode = data.get("draw_mode", Bot.OUTLINE)
         self._mode = (
             mode if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE) else Bot.OUTLINE
@@ -1207,7 +1132,6 @@ class MainWindow(QMainWindow):
         self.bot.skip_first_color = bool(data.get("skip_first_color", False))
         self._jump_threshold.setValue(self.bot.jump_threshold)
         self._refresh_drawing_widgets()
-        self._refresh_option_widgets()
 
     def _store_drawing_settings(self) -> None:
         settings = self.tools.setdefault("drawing_settings", {})
@@ -1226,13 +1150,6 @@ class MainWindow(QMainWindow):
         settings["outline_tiny_area"] = int(self.bot.outline_tiny_area)
         settings["outline_similar_color"] = float(self.bot.outline_similar_color)
         settings["outline_step_threshold"] = float(self.bot.outline_step_threshold)
-
-    def _store_drawing_options(self) -> None:
-        options = self.tools.setdefault("drawing_options", {})
-        options["ignore_white_pixels"] = bool(self.draw_options & Bot.IGNORE_WHITE)
-        options["ignore_transparent_pixels"] = bool(
-            self.draw_options & Bot.IGNORE_TRANSPARENT
-        )
 
     def _save_config(self) -> None:
         if self._initializing:
@@ -1305,30 +1222,12 @@ class MainWindow(QMainWindow):
         self._outline_controls.setVisible(outline)
         self._mode_hint.setText(self._MODE_HINTS.get(self._mode, ""))
 
-    def _refresh_option_widgets(self) -> None:
-        self._chk_ignore.setChecked(bool(self.draw_options & Bot.IGNORE_WHITE))
-        self._chk_transparent.setChecked(
-            bool(self.draw_options & Bot.IGNORE_TRANSPARENT)
-        )
-        self._chk_skip.setChecked(bool(self.bot.skip_first_color))
-
     def _sync_env_ui(self) -> None:
         recipe = get_recipe(self.profile.target)
-        used = set(recipe.tools)
-        any_visible = False
-        for control in self._tool_controls:
-            visible = control.name in used
-            control.setVisible(visible)
-            control.refresh()
-            any_visible = any_visible or visible
-        self._mspaint_box.setVisible(bool(recipe.supports_mspaint_mode))
-        any_visible = any_visible or bool(recipe.supports_mspaint_mode)
-        self._tools_section.setVisible(any_visible)
+        self._chk_mspaint.setVisible(bool(recipe.supports_mspaint_mode))
+        self._chk_mspaint.blockSignals(True)
         self._chk_mspaint.setChecked(bool(self.profile.mspaint_mode.get("enabled")))
-        self._mspaint_delay.setValue(
-            int(float(self.profile.mspaint_mode.get("delay", 0.5)) * 1000)
-        )
-        self._mspaint_delay.setEnabled(self._chk_mspaint.isChecked())
+        self._chk_mspaint.blockSignals(False)
         self._refresh_readiness()
 
     def _refresh_detection_status(self) -> None:
@@ -1457,38 +1356,10 @@ class MainWindow(QMainWindow):
         self.bot.color_metric = self._metric_combo.currentData() or DEFAULT_METRIC
         self._save_config()
 
-    def _on_options_changed(self) -> None:
-        if self._initializing:
-            return
-        self.draw_options = 0
-        if self._chk_ignore.isChecked():
-            self.draw_options |= Bot.IGNORE_WHITE
-        if self._chk_transparent.isChecked():
-            self.draw_options |= Bot.IGNORE_TRANSPARENT
-        self._store_drawing_options()
-        self._save_config()
-
-    def _on_skip_changed(self, checked: bool) -> None:
-        if self._initializing:
-            return
-        self.bot.skip_first_color = bool(checked)
-        self._save_config()
-
-    def _on_tool_controls_changed(self) -> None:
-        if not self._initializing:
-            self._save_config()
-
     def _on_mspaint_toggled(self, checked: bool) -> None:
         if self._initializing:
             return
         self.profile.mspaint_mode["enabled"] = bool(checked)
-        self._mspaint_delay.setEnabled(bool(checked))
-        self._save_config()
-
-    def _on_mspaint_delay(self, milliseconds: int) -> None:
-        if self._initializing:
-            return
-        self.profile.mspaint_mode["delay"] = milliseconds / 1000.0
         self._save_config()
 
     def _on_pause_key_changed(self, text: str) -> None:
@@ -2050,7 +1921,6 @@ class MainWindow(QMainWindow):
         self._sync_env_ui()
         self._refresh_detection_status()
         self._store_drawing_settings()
-        self._store_drawing_options()
         self._save_config()
         self._refresh_readiness()
         palette = getattr(self.bot, "_palette", None)
@@ -2449,7 +2319,6 @@ class MainWindow(QMainWindow):
             self._sync_env_ui()
             self._refresh_detection_status()
             self._store_drawing_settings()
-            self._store_drawing_options()
             self._save_config()
             self._set_status("Setup saved.")
 

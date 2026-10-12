@@ -55,16 +55,6 @@ def test_main_window_builds(app, tmp_path, monkeypatch):
         window.close()
 
 
-def test_main_window_has_tool_controls(app, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    bot = Bot()
-    window = MainWindow(bot)
-    try:
-        assert len(window._tool_controls) == 3  # New Layer / Color Button / Okay
-    finally:
-        window.close()
-
-
 def test_mode_specific_controls_switch_with_stroke_mode(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     bot = Bot()
@@ -185,27 +175,6 @@ def test_progress_overlay_updates(app):
         assert "PAUSED" in overlay._hint.text()
     finally:
         overlay.close()
-
-
-def test_tool_controls_mutate_profile(app):
-    from pyaint.ui.widgets import ToolControls
-
-    entry = {
-        "status": True,
-        "enabled": False,
-        "modifiers": {"ctrl": False, "alt": False, "shift": False},
-        "delay": 0.1,
-    }
-    control = ToolControls("Color Button", lambda: entry, supports_delay=True)
-    try:
-        control._enable.setChecked(True)
-        control._mods["shift"].setChecked(True)
-        control._delay.setValue(250)
-        assert entry["enabled"] is True
-        assert entry["modifiers"]["shift"] is True
-        assert entry["delay"] == 0.25
-    finally:
-        control.close()
 
 
 def test_countdown_banner_counts_down_and_captures(app):
@@ -1022,22 +991,54 @@ def test_color_metric_option_defaults_and_persists(app):
         window.close()
 
 
-def test_transparent_option_defaults_on_and_persists(app):
-    import json
+def test_mspaint_double_click_toggle_persists(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        # Desktop recipes expose it; browser recipes hide it.
+        assert window._chk_mspaint.isVisibleTo(window)
+        window.profile.target = "skribbl"
+        window._sync_env_ui()
+        assert not window._chk_mspaint.isVisibleTo(window)
+        window.profile.target = "mspaint"
+        window._sync_env_ui()
+        assert window._chk_mspaint.isVisibleTo(window)
 
-    from pyaint import paths
+        window._chk_mspaint.setChecked(True)
+        assert window.profile.mspaint_mode["enabled"] is True
+        window._save_config()
+    finally:
+        window.close()
 
+    restored = MainWindow(Bot())
+    try:
+        assert restored.profile.mspaint_mode["enabled"] is True
+    finally:
+        restored.close()
+
+
+def test_ignore_white_and_transparent_are_always_on(app):
     bot = Bot()
     window = MainWindow(bot)
     try:
-        assert window._chk_transparent.isChecked()
+        assert window.draw_options & Bot.IGNORE_WHITE
         assert window.draw_options & Bot.IGNORE_TRANSPARENT
+        # The old overrides are gone from the inspector.
+        assert not hasattr(window, "_chk_ignore")
+        assert not hasattr(window, "_chk_transparent")
+        assert not hasattr(window, "_chk_skip")
 
-        window._chk_transparent.setChecked(False)
-        assert not (window.draw_options & Bot.IGNORE_TRANSPARENT)
-        with open(paths.CONFIG_PATH, encoding="utf-8") as handle:
-            options = json.load(handle)["drawing_options"]
-        assert options["ignore_transparent_pixels"] is False
+        # A legacy snapshot that disables them is ignored (always on).
+        window._apply_drawing(
+            {
+                "drawing_options": {
+                    "ignore_white_pixels": False,
+                    "ignore_transparent_pixels": False,
+                }
+            }
+        )
+        assert window.draw_options & Bot.IGNORE_WHITE
+        assert window.draw_options & Bot.IGNORE_TRANSPARENT
     finally:
         window.close()
 

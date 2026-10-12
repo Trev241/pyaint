@@ -88,20 +88,23 @@ line.
 
 | Option | Default | Meaning |
 |--------|---------|---------|
-| `ignore_white_pixels` | true | Skip pure-white runs |
-| `ignore_transparent_pixels` | true | Skip pixels with alpha below the cutoff (128), so transparent PNG areas aren't painted black |
-| `skip_first_color` | false | Don't draw the first colour in the map |
 | `draw_mode` | `outline` | `outline` (default, continuous outline tracing), `layered` (fewer strokes), or `slotted` (exact runs) |
 | `color_metric` | `ciede2000` | `ciede2000` (perceptual) or `rgb` (legacy squared Euclidean) |
 
+White and transparent pixels are always skipped, and `skip_first_color` is
+recipe-driven only. The old `ignore_white_pixels`, `ignore_transparent_pixels`
+and `skip_first_color` inspector controls were removed to keep the settings
+simple; the config keys are still read for backward compatibility but the
+planner always receives both ignore flags.
+
 ### Per-target drawing settings
 
-`drawing_settings`, `drawing_options`, `draw_mode`, and `skip_first_color` are
-remembered **per target** under `drawing_by_target`, keyed by target id. On
-switching targets the current values are saved and the new target's are
-restored; a target with no saved values uses its recipe's defaults. The
-top-level keys above remain as the fallback and always record the active
-target's values (for older configs and recipes).
+`drawing_settings`, `draw_mode`, and `skip_first_color` are remembered **per
+target** under `drawing_by_target`, keyed by target id. On switching targets the
+current values are saved and the new target's are restored; a target with no
+saved values uses its recipe's defaults. The top-level keys above remain as the
+fallback and always record the active target's values (for older configs and
+recipes).
 
 ## Environment tools
 
@@ -125,8 +128,8 @@ position).
 
 A fresh profile has an unconfigured `Palette`/`Canvas`, `delay` 0.1,
 `pixel_size` 12, `jump_delay` 0.5, `jump_threshold` 5, `stroke_speed` 1500,
-`frame_interval` 1/60 s, `travel_delay` 0.05, `ignore_white_pixels` true,
-`ignore_transparent_pixels` true, `theme` `auto`, and `target` `generic`.
+`frame_interval` 1/60 s, `travel_delay` 0.05, `theme` `auto`, and
+`target` `generic`. White and transparent pixels are always ignored.
 
 ## Resetting
 
