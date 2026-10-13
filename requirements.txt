@@ -3,5 +3,5 @@ pyscreeze
 PyAutoGUI
 pynput
 numpy
-opencv-python
+opencv-contrib-python
 PySide6>=6.5

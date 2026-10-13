@@ -28,14 +28,17 @@ from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThreadPool, QTimer, Sign
 from PySide6.QtGui import QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QComboBox,
     QFileDialog,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -64,6 +67,7 @@ from pyaint.ui import theme
 from pyaint.ui.countdown import CountdownBanner
 from pyaint.ui.icons import icon
 from pyaint.ui.overlay import DetectionOverlay, ProgressOverlay
+from pyaint.ui.plan_tasks import PlanPreviewTask
 from pyaint.ui.previews import store_box_preview
 from pyaint.ui.widgets import (
     CheckBox,
@@ -187,6 +191,18 @@ class MainWindow(QMainWindow):
         # Per-target drawing settings/options, so each app keeps its own tuning.
         self._drawing_by_target = {}
         self._last_error = None
+
+        # Live preview state. ``_preview_generation`` drops stale worker
+        # results; the timer debounces planning while sliders move.
+        self._preview_view = "source"
+        self._preview_generation = 0
+        self._preview_busy = False
+        self._source_pixmap = None
+        self._source_meta = ""
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(300)
+        self._preview_timer.timeout.connect(self._run_preview)
 
         self.signals = UiSignals()
         self.signals.progress.connect(self._on_progress)
@@ -340,6 +356,7 @@ class MainWindow(QMainWindow):
         self._mode_combo.addItem("Layered (fewer strokes)", Bot.LAYERED)
         self._mode_combo.addItem("Slotted (exact runs)", Bot.SLOTTED)
         self._mode_combo.addItem("Outline (continuous lines)", Bot.OUTLINE)
+        self._mode_combo.addItem("Sketch (edge trace)", Bot.SKETCH)
         self._mode_combo.setItemData(
             0,
             "Merges a colour's runs where later colours paint over them: fewer "
@@ -355,6 +372,13 @@ class MainWindow(QMainWindow):
             2,
             "Default: traces region outlines as continuous strokes and thins "
             "shared borders to one clean line.",
+            Qt.ToolTipRole,
+        )
+        self._mode_combo.setItemData(
+            3,
+            "Sketches the image's edges into black line art. Choose the edge "
+            "source (Edge drawing or Canny) and merge by colour to drop "
+            "shading.",
             Qt.ToolTipRole,
         )
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
@@ -435,7 +459,98 @@ class MainWindow(QMainWindow):
         ):
             field.changed.connect(self._on_outline_settings_changed)
 
-        # Two plain containers toggled by visibility: a hidden widget takes no
+        # Sketch (edge trace) controls. The edge source is selectable; the
+        # rest of the cleanup is shared.
+        self._sketch_source = QComboBox()
+        self._sketch_source.addItem(
+            "Edge drawing (connected lines)", Bot.EDGE_EDGEDRAWING
+        )
+        self._sketch_source.addItem("Canny (classic)", Bot.EDGE_CANNY)
+        self._sketch_source.setToolTip(
+            "Sketch only: which edge detector finds the lines. Edge drawing "
+            "returns long connected strokes; Canny is the lighter classic."
+        )
+        self._sketch_hue_merge = CheckBox("Merge by colour (drop shading)")
+        self._sketch_hue_merge.setToolTip(
+            "Sketch only: drop strokes whose two sides share a hue, so shading "
+            "and tonal edges are not drawn while colour boundaries stay."
+        )
+        self._sketch_hue_threshold = SliderField("Colour difference", 0, 60, 15, 1)
+        self._sketch_hue_threshold.setToolTip(
+            "Sketch only: minimum hue difference (degrees) across a stroke to "
+            "keep it. Higher = more shading edges dropped."
+        )
+        self._sketch_smoothing = SliderField("Smoothing", 0, 5, 3, 1)
+        self._sketch_smoothing.setToolTip(
+            "Sketch only: edge-preserving smoothing before detection. Higher "
+            "values remove texture but round fine detail."
+        )
+        self._sketch_join_distance = SliderField(
+            "Join distance (px)", 0.0, 20.0, 10.0, 0.5
+        )
+        self._sketch_join_distance.setToolTip(
+            "Sketch only: chain open stroke endpoints within this many pixels."
+        )
+        self._sketch_min_stroke = SliderField("Min stroke (px)", 0, 60, 8, 1)
+        self._sketch_min_stroke.setToolTip(
+            "Sketch only: drop open strokes shorter than this many pixels."
+        )
+        self._sketch_epsilon = SliderField("Simplify (px)", 0.0, 5.0, 1.2, 0.1)
+        self._sketch_epsilon.setToolTip(
+            "Sketch only: polygon simplification tolerance. Higher = fewer, "
+            "straighter points per stroke."
+        )
+        self._sketch_gradient_gate = CheckBox("Drop weak edges")
+        self._sketch_gradient_gate.setToolTip(
+            "Sketch only: keep only the strokes with the strongest gradient."
+        )
+        self._sketch_gradient_keep = SliderField("Keep strongest %", 10, 100, 60, 5)
+        self._sketch_gradient_keep.setToolTip(
+            "Sketch only: percentage of strokes kept when dropping weak edges."
+        )
+        # Canny-only thresholds.
+        self._canny_auto_toggle = CheckBox("Auto Canny thresholds (Otsu)")
+        self._canny_auto_toggle.setToolTip(
+            "Canny source only: derive the hysteresis thresholds from the "
+            "image's gradient. Turn off to set Low/High by hand."
+        )
+        self._canny_low = SliderField("Canny low", 0, 255, 50, 1)
+        self._canny_low.setToolTip(
+            "Canny source only: weaker edges below this gradient are discarded."
+        )
+        self._canny_high = SliderField("Canny high", 0, 255, 150, 1)
+        self._canny_high.setToolTip(
+            "Canny source only: strong edges above this gradient seed the trace."
+        )
+        self._canny_color_edges_toggle = CheckBox("Also trace colour edges")
+        self._canny_color_edges_toggle.setToolTip(
+            "Canny source only: also detect edges on colour (Lab chroma) so "
+            "boundaries between equally bright colours are sketched."
+        )
+        for field in (
+            self._sketch_hue_threshold,
+            self._sketch_smoothing,
+            self._sketch_join_distance,
+            self._sketch_min_stroke,
+            self._sketch_epsilon,
+            self._sketch_gradient_keep,
+            self._canny_low,
+            self._canny_high,
+        ):
+            field.changed.connect(self._on_sketch_settings_changed)
+        self._sketch_source.currentIndexChanged.connect(
+            self._on_sketch_source_changed
+        )
+        self._sketch_hue_merge.toggled.connect(self._on_sketch_settings_changed)
+        self._sketch_gradient_gate.toggled.connect(
+            self._on_sketch_settings_changed
+        )
+        self._canny_auto_toggle.toggled.connect(self._on_sketch_settings_changed)
+        self._canny_color_edges_toggle.toggled.connect(
+            self._on_sketch_settings_changed
+        )
+
+        # Plain containers toggled by visibility: a hidden widget takes no
         # layout space, so each mode shows only its own controls.
         self._runs_controls = QWidget()
         runs_layout = QVBoxLayout(self._runs_controls)
@@ -465,15 +580,50 @@ class MainWindow(QMainWindow):
         self._chk_double_edges.toggled.connect(
             self._on_outline_double_edges_changed
         )
-        # Cleanup knobs first, then the pacing controls.
         outline_layout.addWidget(self._outline_smoothing)
         outline_layout.addWidget(self._outline_step_threshold)
         outline_layout.addWidget(self._outline_join_distance)
         outline_layout.addWidget(self._chk_double_edges)
-        outline_layout.addWidget(self._stroke_speed)
-        outline_layout.addWidget(self._event_interval)
-        outline_layout.addWidget(self._travel_delay)
         drawing.add(self._outline_controls)
+
+        self._sketch_controls = QWidget()
+        sketch_layout = QVBoxLayout(self._sketch_controls)
+        sketch_layout.setContentsMargins(0, 0, 0, 0)
+        sketch_layout.setSpacing(4)
+        self._sketch_notice = NoticeBanner()
+        self._sketch_notice.show_notice(
+            "Sketch traces the image's edges into black line art. Edge drawing "
+            "gives connected strokes; Merge by colour drops shading.",
+            "info",
+        )
+        sketch_layout.addWidget(self._sketch_notice)
+        for widget in (
+            self._sketch_source,
+            self._sketch_hue_merge,
+            self._sketch_hue_threshold,
+            self._sketch_smoothing,
+            self._sketch_join_distance,
+            self._sketch_min_stroke,
+            self._sketch_epsilon,
+            self._sketch_gradient_gate,
+            self._sketch_gradient_keep,
+            self._canny_auto_toggle,
+            self._canny_low,
+            self._canny_high,
+            self._canny_color_edges_toggle,
+        ):
+            sketch_layout.addWidget(widget)
+        drawing.add(self._sketch_controls)
+
+        # Pacing controls are shared by the continuous-stroke modes.
+        self._continuous_controls = QWidget()
+        continuous_layout = QVBoxLayout(self._continuous_controls)
+        continuous_layout.setContentsMargins(0, 0, 0, 0)
+        continuous_layout.setSpacing(4)
+        continuous_layout.addWidget(self._stroke_speed)
+        continuous_layout.addWidget(self._event_interval)
+        continuous_layout.addWidget(self._travel_delay)
+        drawing.add(self._continuous_controls)
 
         trigger_row = QHBoxLayout()
         trigger_label = QLabel("Trigger distance (px)")
@@ -735,6 +885,37 @@ class MainWindow(QMainWindow):
         stage_title.setObjectName("StageHeader")
         stage_header.addWidget(stage_title)
         stage_header.addStretch(1)
+
+        # Source / Preview view switch.
+        self._view_source_btn = QPushButton("Source")
+        self._view_preview_btn = QPushButton("Preview")
+        self._view_group = QButtonGroup(self)
+        self._view_group.setExclusive(True)
+        for view_id, button in enumerate(
+            (self._view_source_btn, self._view_preview_btn)
+        ):
+            button.setObjectName("ViewToggle")
+            button.setCheckable(True)
+            self._view_group.addButton(button, view_id)
+        self._view_source_btn.setChecked(True)
+        self._view_group.idClicked.connect(self._on_view_changed)
+        toggle = QWidget()
+        toggle.setObjectName("ViewToggleGroup")
+        toggle_layout = QHBoxLayout(toggle)
+        toggle_layout.setContentsMargins(0, 0, 0, 0)
+        toggle_layout.setSpacing(0)
+        toggle_layout.addWidget(self._view_source_btn)
+        toggle_layout.addWidget(self._view_preview_btn)
+        stage_header.addWidget(toggle)
+
+        self._preview_spinner = QProgressBar()
+        self._preview_spinner.setRange(0, 0)
+        self._preview_spinner.setTextVisible(False)
+        self._preview_spinner.setFixedWidth(64)
+        self._preview_spinner.setFixedHeight(6)
+        self._preview_spinner.setVisible(False)
+        stage_header.addWidget(self._preview_spinner)
+
         self._preview_meta = QLabel("No image")
         self._preview_meta.setObjectName("StageMeta")
         stage_header.addWidget(self._preview_meta)
@@ -745,6 +926,12 @@ class MainWindow(QMainWindow):
         self._preview.remoteDropped.connect(self._load_dropped_url)
         self._preview.rawDropped.connect(self._load_dropped_bytes)
         stage_layout.addWidget(self._preview, 1)
+
+        # Dim the frame (rather than blanking it) while planning.
+        self._preview_opacity = QGraphicsOpacityEffect(self._preview)
+        self._preview_opacity.setOpacity(1.0)
+        self._preview.setGraphicsEffect(self._preview_opacity)
+
         layout.addWidget(stage, 1)
 
         hint = QLabel(
@@ -757,6 +944,121 @@ class MainWindow(QMainWindow):
         layout.addWidget(hint)
         self._preview_page = page
         return page
+
+    # ------------------------------------------------------------------
+    # Live preview
+    # ------------------------------------------------------------------
+    def _plan_kwargs(self) -> dict:
+        """Snapshot every planner knob the preview needs (thread-safe)."""
+        return {
+            "stroke_distance": self.bot.stroke_distance,
+            "morphology": self.bot.outline_morphology,
+            "double_edges": self.bot.outline_double_edges,
+            "smooth_strength": self.bot.outline_smoothing,
+            "join_distance": self.bot.outline_join_distance,
+            "small_area": self.bot.outline_small_area,
+            "tiny_area": self.bot.outline_tiny_area,
+            "similar_color": self.bot.outline_similar_color,
+            "step_threshold": self.bot.outline_step_threshold,
+            "sketch_edge_source": self.bot.sketch_edge_source,
+            "sketch_smoothing": self.bot.sketch_smoothing,
+            "sketch_join_distance": self.bot.sketch_join_distance,
+            "sketch_join_turn": self.bot.sketch_join_turn,
+            "sketch_min_stroke": self.bot.sketch_min_stroke,
+            "sketch_epsilon": self.bot.sketch_epsilon,
+            "sketch_hue_merge": self.bot.sketch_hue_merge,
+            "sketch_hue_threshold": self.bot.sketch_hue_threshold,
+            "sketch_gradient_gate": self.bot.sketch_gradient_gate,
+            "canny_low": self.bot.canny_low,
+            "canny_high": self.bot.canny_high,
+            "canny_auto": self.bot.canny_auto,
+            "canny_aperture": self.bot.canny_aperture,
+            "canny_l2": self.bot.canny_l2,
+            "canny_color_edges": self.bot.canny_color_edges,
+        }
+
+    def _preview_usable(self) -> bool:
+        canvas = getattr(self.bot, "_canvas", None)
+        palette = getattr(self.bot, "_palette", None)
+        return bool(
+            self._has_image()
+            and canvas is not None
+            and palette is not None
+            and len(palette.colors) > 1
+        )
+
+    def _schedule_preview(self, immediate: bool = False) -> None:
+        """Debounce (or immediately run) a preview when one is being shown."""
+        if self._preview_view != "preview":
+            return
+        if not self._preview_usable():
+            if not self._initializing:
+                self._preview_meta.setText("Set up the canvas and palette first")
+            return
+        if immediate:
+            self._preview_timer.stop()
+            self._run_preview()
+        else:
+            self._preview_timer.start()
+
+    def _run_preview(self) -> None:
+        if self._preview_view != "preview" or not self._preview_usable():
+            return
+        self._preview_generation += 1
+        generation = self._preview_generation
+        self._set_preview_busy(True)
+        self._preview_meta.setText("Updating\u2026")
+        task = PlanPreviewTask(
+            generation,
+            self._imname,
+            tuple(self.bot._canvas),
+            int(self.bot.settings[Bot.STEP]),
+            self.bot._palette,
+            self.bot.color_metric,
+            self.draw_options,
+            self._mode,
+            self._plan_kwargs(),
+        )
+        task.signals.ready.connect(self._on_preview_ready)
+        task.signals.failed.connect(self._on_preview_failed)
+        QThreadPool.globalInstance().start(task)
+
+    def _set_preview_busy(self, busy: bool) -> None:
+        if busy == self._preview_busy:
+            return
+        self._preview_busy = busy
+        self._preview_spinner.setVisible(busy)
+        self._preview_opacity.setOpacity(0.55 if busy else 1.0)
+
+    def _on_preview_ready(self, generation: int, qimage, meta: str) -> None:
+        if generation != self._preview_generation or self._preview_view != "preview":
+            return
+        self._set_preview_busy(False)
+        self._preview.set_pixmap(QPixmap.fromImage(qimage))
+        self._preview_meta.setText(f"Preview \u00b7 {meta}")
+
+    def _on_preview_failed(self, generation: int, message: str) -> None:
+        if generation != self._preview_generation or self._preview_view != "preview":
+            return
+        self._set_preview_busy(False)
+        self._preview_meta.setText(f"Preview failed: {message}")
+
+    def _on_view_changed(self, view_id: int) -> None:
+        self._preview_view = "preview" if view_id == 1 else "source"
+        self._view_source_btn.setChecked(view_id == 0)
+        self._view_preview_btn.setChecked(view_id == 1)
+        self.tools["preview_view"] = self._preview_view
+        if self._preview_view == "preview":
+            self._schedule_preview(immediate=True)
+        else:
+            self._preview_generation += 1  # drop any in-flight result
+            self._set_preview_busy(False)
+            self._restore_source_preview()
+
+    def _restore_source_preview(self) -> None:
+        if self._source_pixmap is not None:
+            self._preview.set_pixmap(self._source_pixmap)
+        self._preview_meta.setText(self._source_meta or "No image")
 
     def _tool_button(
         self, text: str, icon_name: str, slot, tooltip: str = ""
@@ -936,7 +1238,9 @@ class MainWindow(QMainWindow):
         self.bot.skip_first_color = bool(self.tools.get("skip_first_color", False))
         mode = self.tools.get("draw_mode", Bot.OUTLINE)
         self._mode = (
-            mode if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE) else Bot.OUTLINE
+            mode
+            if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE, Bot.SKETCH)
+            else Bot.OUTLINE
         )
         self.bot.stroke_speed = float(settings.get("stroke_speed", 1500.0))
         self.bot.frame_interval = max(
@@ -961,6 +1265,29 @@ class MainWindow(QMainWindow):
         self.bot.outline_step_threshold = float(
             settings.get("outline_step_threshold", 10.0)
         )
+        self.bot.sketch_edge_source = str(
+            settings.get("sketch_edge_source", Bot.EDGE_EDGEDRAWING)
+        )
+        self.bot.sketch_smoothing = float(settings.get("sketch_smoothing", 3))
+        self.bot.sketch_join_distance = float(
+            settings.get("sketch_join_distance", 10.0)
+        )
+        self.bot.sketch_join_turn = float(settings.get("sketch_join_turn", 60.0))
+        self.bot.sketch_min_stroke = int(settings.get("sketch_min_stroke", 8))
+        self.bot.sketch_epsilon = float(settings.get("sketch_epsilon", 1.2))
+        self.bot.sketch_hue_merge = bool(settings.get("sketch_hue_merge", True))
+        self.bot.sketch_hue_threshold = float(
+            settings.get("sketch_hue_threshold", 15.0)
+        )
+        self.bot.sketch_gradient_gate = float(
+            settings.get("sketch_gradient_gate", 0.0)
+        )
+        self.bot.canny_low = float(settings.get("canny_low", 50))
+        self.bot.canny_high = float(settings.get("canny_high", 150))
+        self.bot.canny_auto = bool(settings.get("canny_auto", True))
+        self.bot.canny_aperture = int(settings.get("canny_aperture", 3))
+        self.bot.canny_l2 = bool(settings.get("canny_l2", True))
+        self.bot.canny_color_edges = bool(settings.get("canny_color_edges", False))
 
         metric = self.tools.get("color_metric", DEFAULT_METRIC)
         if metric not in METRICS:
@@ -1011,6 +1338,12 @@ class MainWindow(QMainWindow):
         self._refresh_drawing_widgets()
         self._sync_env_ui()
         self._refresh_detection_status()
+        preview_view = str(self.tools.get("preview_view", "source"))
+        self._preview_view = (
+            preview_view if preview_view in ("source", "preview") else "source"
+        )
+        self._view_source_btn.setChecked(self._preview_view == "source")
+        self._view_preview_btn.setChecked(self._preview_view == "preview")
         self._apply_theme()
 
     def _restore_environment(self) -> None:
@@ -1080,6 +1413,21 @@ class MainWindow(QMainWindow):
             "outline_tiny_area": int(self.bot.outline_tiny_area),
             "outline_similar_color": float(self.bot.outline_similar_color),
             "outline_step_threshold": float(self.bot.outline_step_threshold),
+            "sketch_edge_source": str(self.bot.sketch_edge_source),
+            "sketch_smoothing": float(self.bot.sketch_smoothing),
+            "sketch_join_distance": float(self.bot.sketch_join_distance),
+            "sketch_join_turn": float(self.bot.sketch_join_turn),
+            "sketch_min_stroke": int(self.bot.sketch_min_stroke),
+            "sketch_epsilon": float(self.bot.sketch_epsilon),
+            "sketch_hue_merge": bool(self.bot.sketch_hue_merge),
+            "sketch_hue_threshold": float(self.bot.sketch_hue_threshold),
+            "sketch_gradient_gate": float(self.bot.sketch_gradient_gate),
+            "canny_low": float(self.bot.canny_low),
+            "canny_high": float(self.bot.canny_high),
+            "canny_auto": bool(self.bot.canny_auto),
+            "canny_aperture": int(self.bot.canny_aperture),
+            "canny_l2": bool(self.bot.canny_l2),
+            "canny_color_edges": bool(self.bot.canny_color_edges),
             "draw_mode": self._mode,
             "skip_first_color": bool(self.bot.skip_first_color),
         }
@@ -1125,10 +1473,50 @@ class MainWindow(QMainWindow):
             self.bot.outline_step_threshold = max(
                 0.0, float(data["outline_step_threshold"])
             )
+        if "sketch_edge_source" in data:
+            self.bot.sketch_edge_source = str(data["sketch_edge_source"])
+        if "sketch_smoothing" in data:
+            self.bot.sketch_smoothing = max(0.0, float(data["sketch_smoothing"]))
+        if "sketch_join_distance" in data:
+            self.bot.sketch_join_distance = max(
+                0.0, float(data["sketch_join_distance"])
+            )
+        if "sketch_join_turn" in data:
+            self.bot.sketch_join_turn = max(
+                0.0, float(data["sketch_join_turn"])
+            )
+        if "sketch_min_stroke" in data:
+            self.bot.sketch_min_stroke = max(0.0, float(data["sketch_min_stroke"]))
+        if "sketch_epsilon" in data:
+            self.bot.sketch_epsilon = max(0.0, float(data["sketch_epsilon"]))
+        if "sketch_hue_merge" in data:
+            self.bot.sketch_hue_merge = bool(data["sketch_hue_merge"])
+        if "sketch_hue_threshold" in data:
+            self.bot.sketch_hue_threshold = max(
+                0.0, float(data["sketch_hue_threshold"])
+            )
+        if "sketch_gradient_gate" in data:
+            self.bot.sketch_gradient_gate = max(
+                0.0, float(data["sketch_gradient_gate"])
+            )
+        if "canny_low" in data:
+            self.bot.canny_low = max(0.0, float(data["canny_low"]))
+        if "canny_high" in data:
+            self.bot.canny_high = max(0.0, float(data["canny_high"]))
+        if "canny_auto" in data:
+            self.bot.canny_auto = bool(data["canny_auto"])
+        if "canny_aperture" in data:
+            self.bot.canny_aperture = int(data["canny_aperture"])
+        if "canny_l2" in data:
+            self.bot.canny_l2 = bool(data["canny_l2"])
+        if "canny_color_edges" in data:
+            self.bot.canny_color_edges = bool(data["canny_color_edges"])
         self.draw_options = Bot.IGNORE_WHITE | Bot.IGNORE_TRANSPARENT
         mode = data.get("draw_mode", Bot.OUTLINE)
         self._mode = (
-            mode if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE) else Bot.OUTLINE
+            mode
+            if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE, Bot.SKETCH)
+            else Bot.OUTLINE
         )
         self.bot.skip_first_color = bool(data.get("skip_first_color", False))
         self._jump_threshold.setValue(self.bot.jump_threshold)
@@ -1151,6 +1539,21 @@ class MainWindow(QMainWindow):
         settings["outline_tiny_area"] = int(self.bot.outline_tiny_area)
         settings["outline_similar_color"] = float(self.bot.outline_similar_color)
         settings["outline_step_threshold"] = float(self.bot.outline_step_threshold)
+        settings["sketch_edge_source"] = str(self.bot.sketch_edge_source)
+        settings["sketch_smoothing"] = float(self.bot.sketch_smoothing)
+        settings["sketch_join_distance"] = float(self.bot.sketch_join_distance)
+        settings["sketch_join_turn"] = float(self.bot.sketch_join_turn)
+        settings["sketch_min_stroke"] = int(self.bot.sketch_min_stroke)
+        settings["sketch_epsilon"] = float(self.bot.sketch_epsilon)
+        settings["sketch_hue_merge"] = bool(self.bot.sketch_hue_merge)
+        settings["sketch_hue_threshold"] = float(self.bot.sketch_hue_threshold)
+        settings["sketch_gradient_gate"] = float(self.bot.sketch_gradient_gate)
+        settings["canny_low"] = float(self.bot.canny_low)
+        settings["canny_high"] = float(self.bot.canny_high)
+        settings["canny_auto"] = bool(self.bot.canny_auto)
+        settings["canny_aperture"] = int(self.bot.canny_aperture)
+        settings["canny_l2"] = bool(self.bot.canny_l2)
+        settings["canny_color_edges"] = bool(self.bot.canny_color_edges)
 
     def _save_config(self) -> None:
         if self._initializing:
@@ -1158,6 +1561,7 @@ class MainWindow(QMainWindow):
         self.tools["pause_key"] = self.bot.pause_key
         self.tools["skip_first_color"] = bool(self.bot.skip_first_color)
         self.tools["draw_mode"] = self._mode
+        self.tools["preview_view"] = self._preview_view
         self.tools["color_metric"] = self.bot.color_metric
         self.tools["theme"] = self._theme_mode
         self.tools["image_search_provider"] = self._provider
@@ -1193,6 +1597,10 @@ class MainWindow(QMainWindow):
             "Traces region outlines as continuous, human-shaped strokes and "
             "thins shared borders to one clean line."
         ),
+        Bot.SKETCH: (
+            "Sketches the image's edges into black line art. Pick the edge "
+            "source and merge by colour to drop shading."
+        ),
     }
 
     def _refresh_drawing_widgets(self) -> None:
@@ -1206,6 +1614,38 @@ class MainWindow(QMainWindow):
         self._outline_step_threshold.set_value(
             float(self.bot.outline_step_threshold)
         )
+        source_index = self._sketch_source.findData(self.bot.sketch_edge_source)
+        self._sketch_source.blockSignals(True)
+        self._sketch_source.setCurrentIndex(
+            source_index if source_index >= 0 else 0
+        )
+        self._sketch_source.blockSignals(False)
+        self._sketch_hue_merge.blockSignals(True)
+        self._sketch_hue_merge.setChecked(bool(self.bot.sketch_hue_merge))
+        self._sketch_hue_merge.blockSignals(False)
+        self._sketch_hue_threshold.set_value(float(self.bot.sketch_hue_threshold))
+        self._sketch_smoothing.set_value(float(self.bot.sketch_smoothing))
+        self._sketch_join_distance.set_value(float(self.bot.sketch_join_distance))
+        self._sketch_min_stroke.set_value(float(self.bot.sketch_min_stroke))
+        self._sketch_epsilon.set_value(float(self.bot.sketch_epsilon))
+        self._sketch_gradient_gate.blockSignals(True)
+        self._sketch_gradient_gate.setChecked(
+            float(self.bot.sketch_gradient_gate) > 0
+        )
+        self._sketch_gradient_gate.blockSignals(False)
+        gradient_keep = float(self.bot.sketch_gradient_gate)
+        self._sketch_gradient_keep.set_value(
+            round(gradient_keep * 100) if gradient_keep > 0 else 60
+        )
+        self._canny_low.set_value(float(self.bot.canny_low))
+        self._canny_high.set_value(float(self.bot.canny_high))
+        self._canny_auto_toggle.blockSignals(True)
+        self._canny_auto_toggle.setChecked(bool(self.bot.canny_auto))
+        self._canny_auto_toggle.blockSignals(False)
+        self._canny_color_edges_toggle.blockSignals(True)
+        self._canny_color_edges_toggle.setChecked(bool(self.bot.canny_color_edges))
+        self._canny_color_edges_toggle.blockSignals(False)
+        self._sync_sketch_visibility()
         self._chk_double_edges.blockSignals(True)
         self._chk_double_edges.setChecked(bool(self.bot.outline_double_edges))
         self._chk_double_edges.blockSignals(False)
@@ -1215,13 +1655,38 @@ class MainWindow(QMainWindow):
             self._mode_combo.setCurrentIndex(mode_index)
             self._mode_combo.blockSignals(False)
         self._update_mode_controls()
+        if not self._initializing:
+            self._schedule_preview()
 
     def _update_mode_controls(self) -> None:
-        """Show only the pacing controls that apply to the chosen mode."""
+        """Show only the controls that apply to the chosen mode."""
+        runs = self._mode in (Bot.LAYERED, Bot.SLOTTED)
         outline = self._mode == Bot.OUTLINE
-        self._runs_controls.setVisible(not outline)
+        sketch = self._mode == Bot.SKETCH
+        self._runs_controls.setVisible(runs)
         self._outline_controls.setVisible(outline)
+        self._sketch_controls.setVisible(sketch)
+        self._continuous_controls.setVisible(outline or sketch)
         self._mode_hint.setText(self._MODE_HINTS.get(self._mode, ""))
+
+    def _sync_sketch_visibility(self) -> None:
+        """Canny thresholds apply only to the Canny source; gate sliders are
+        enabled only while their toggle is on."""
+        canny = self._sketch_source.currentData() == Bot.EDGE_CANNY
+        manual = canny and not self._canny_auto_toggle.isChecked()
+        for widget in (
+            self._canny_auto_toggle,
+            self._canny_color_edges_toggle,
+            self._canny_low,
+            self._canny_high,
+        ):
+            widget.setVisible(canny)
+        self._canny_low.setEnabled(manual)
+        self._canny_high.setEnabled(manual)
+        self._sketch_hue_threshold.setEnabled(self._sketch_hue_merge.isChecked())
+        self._sketch_gradient_keep.setEnabled(
+            self._sketch_gradient_gate.isChecked()
+        )
 
     def _sync_env_ui(self) -> None:
         recipe = get_recipe(self.profile.target)
@@ -1316,6 +1781,7 @@ class MainWindow(QMainWindow):
         self.bot.settings[index] = value
         self._store_drawing_settings()
         self._save_config()
+        self._schedule_preview()
 
     def _on_mode_changed(self, _index: int) -> None:
         if self._initializing:
@@ -1323,6 +1789,7 @@ class MainWindow(QMainWindow):
         self._mode = self._mode_combo.currentData()
         self._update_mode_controls()
         self._save_config()
+        self._schedule_preview()
 
     def _on_outline_settings_changed(self, _value: float = 0.0) -> None:
         if self._initializing:
@@ -1343,6 +1810,45 @@ class MainWindow(QMainWindow):
         )
         self._store_drawing_settings()
         self._save_config()
+        self._schedule_preview()
+
+    def _on_sketch_settings_changed(self, _value=0.0) -> None:
+        if self._initializing:
+            return
+        self.bot.sketch_edge_source = (
+            self._sketch_source.currentData() or Bot.EDGE_EDGEDRAWING
+        )
+        self.bot.sketch_hue_merge = bool(self._sketch_hue_merge.isChecked())
+        self.bot.sketch_hue_threshold = max(
+            0.0, float(self._sketch_hue_threshold.value())
+        )
+        self.bot.sketch_smoothing = max(0.0, float(self._sketch_smoothing.value()))
+        self.bot.sketch_join_distance = max(
+            0.0, float(self._sketch_join_distance.value())
+        )
+        self.bot.sketch_min_stroke = max(
+            0.0, float(self._sketch_min_stroke.value())
+        )
+        self.bot.sketch_epsilon = max(0.0, float(self._sketch_epsilon.value()))
+        self.bot.sketch_gradient_gate = (
+            float(self._sketch_gradient_keep.value()) / 100.0
+            if self._sketch_gradient_gate.isChecked()
+            else 0.0
+        )
+        self.bot.canny_auto = bool(self._canny_auto_toggle.isChecked())
+        self.bot.canny_color_edges = bool(
+            self._canny_color_edges_toggle.isChecked()
+        )
+        self.bot.canny_low = max(0.0, float(self._canny_low.value()))
+        self.bot.canny_high = max(0.0, float(self._canny_high.value()))
+        self._sync_sketch_visibility()
+        self._store_drawing_settings()
+        self._save_config()
+        self._schedule_preview()
+
+    def _on_sketch_source_changed(self, _index: int = 0) -> None:
+        self._sync_sketch_visibility()
+        self._on_sketch_settings_changed()
 
     def _on_outline_double_edges_changed(self, checked: bool) -> None:
         if self._initializing:
@@ -1350,6 +1856,7 @@ class MainWindow(QMainWindow):
         self.bot.outline_double_edges = bool(checked)
         self._store_drawing_settings()
         self._save_config()
+        self._schedule_preview()
 
     def _on_metric_changed(self, _index: int) -> None:
         if self._initializing:
@@ -1726,8 +2233,13 @@ class MainWindow(QMainWindow):
             return
         self._imname = path
         self._remember_last_image(path)
-        self._preview.set_pixmap(pil_to_qpixmap(image))
-        self._preview_meta.setText(f"{image.width} \u00d7 {image.height} px")
+        self._source_pixmap = pil_to_qpixmap(image)
+        self._source_meta = f"{image.width} \u00d7 {image.height} px"
+        if self._preview_view == "preview":
+            self._schedule_preview(immediate=True)
+        else:
+            self._preview.set_pixmap(self._source_pixmap)
+            self._preview_meta.setText(self._source_meta)
         self._image_stack.setCurrentWidget(self._preview_page)
         note = self._pending_source
         self._pending_source = None
@@ -1924,6 +2436,7 @@ class MainWindow(QMainWindow):
         self._store_drawing_settings()
         self._save_config()
         self._refresh_readiness()
+        self._schedule_preview(immediate=True)
         palette = getattr(self.bot, "_palette", None)
         canvas_found = "canvas" in applied
         palette_found = "palette" in applied

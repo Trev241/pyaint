@@ -21,6 +21,9 @@ class Bot(CacheMixin):
     SLOTTED = planner.SLOTTED
     LAYERED = planner.LAYERED
     OUTLINE = planner.OUTLINE
+    SKETCH = planner.SKETCH
+    EDGE_CANNY = planner.EDGE_CANNY
+    EDGE_EDGEDRAWING = planner.EDGE_EDGEDRAWING
 
     IGNORE_WHITE = planner.IGNORE_WHITE
     IGNORE_TRANSPARENT = planner.IGNORE_TRANSPARENT
@@ -76,6 +79,25 @@ class Bot(CacheMixin):
         # Lab step below which soft tonal boundaries merge (0 disables); this is
         # the knob that stops shading and gradients from being traced.
         self.outline_step_threshold = planner.OUTLINE_STEP_THRESHOLD
+        # Sketch knobs (SKETCH mode): an edge source (EdgeDrawing or Canny)
+        # yields polylines; hue merge and gates clean them up. Distances are
+        # canvas pixels.
+        self.sketch_edge_source = planner.SKETCH_EDGE_SOURCE
+        self.sketch_smoothing = planner.SKETCH_SMOOTHING
+        self.sketch_join_distance = planner.SKETCH_JOIN_DISTANCE
+        self.sketch_join_turn = planner.SKETCH_JOIN_TURN
+        self.sketch_min_stroke = planner.SKETCH_MIN_STROKE
+        self.sketch_epsilon = planner.SKETCH_EPSILON
+        self.sketch_hue_merge = planner.SKETCH_HUE_MERGE
+        self.sketch_hue_threshold = planner.SKETCH_HUE_THRESHOLD
+        self.sketch_gradient_gate = planner.SKETCH_GRADIENT_GATE
+        # Canny-specific thresholds (only used when the Canny source is picked).
+        self.canny_low = planner.SKETCH_CANNY_LOW
+        self.canny_high = planner.SKETCH_CANNY_HIGH
+        self.canny_auto = planner.SKETCH_CANNY_AUTO
+        self.canny_aperture = planner.SKETCH_CANNY_APERTURE
+        self.canny_l2 = planner.SKETCH_CANNY_L2
+        self.canny_color_edges = planner.SKETCH_CANNY_COLOR_EDGES
         self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
 
         # The taught environment lives in one shared Profile (pyaint/profile.py).
@@ -290,6 +312,21 @@ class Bot(CacheMixin):
             self.outline_tiny_area,
             self.outline_similar_color,
             self.outline_step_threshold,
+            self.sketch_edge_source,
+            self.sketch_smoothing,
+            self.sketch_join_distance,
+            self.sketch_join_turn,
+            self.sketch_min_stroke,
+            self.sketch_epsilon,
+            self.sketch_hue_merge,
+            self.sketch_hue_threshold,
+            self.sketch_gradient_gate,
+            self.canny_low,
+            self.canny_high,
+            self.canny_auto,
+            self.canny_aperture,
+            self.canny_l2,
+            self.canny_color_edges,
         )
 
     def draw(self, cmap):
@@ -671,6 +708,21 @@ class Bot(CacheMixin):
             self.outline_tiny_area,
             self.outline_similar_color,
             self.outline_step_threshold,
+            self.sketch_edge_source,
+            self.sketch_smoothing,
+            self.sketch_join_distance,
+            self.sketch_join_turn,
+            self.sketch_min_stroke,
+            self.sketch_epsilon,
+            self.sketch_hue_merge,
+            self.sketch_hue_threshold,
+            self.sketch_gradient_gate,
+            self.canny_low,
+            self.canny_high,
+            self.canny_auto,
+            self.canny_aperture,
+            self.canny_l2,
+            self.canny_color_edges,
         )
 
     def simple_test_draw(self):

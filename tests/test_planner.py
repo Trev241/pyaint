@@ -481,3 +481,146 @@ def test_fit_to_canvas_keeps_origin_inside_padded_border():
     _, _, xo, yo = planner.fit_to_canvas(image, (x, y, w, h), 10)
     assert xo >= x + planner.CANVAS_PADDING
     assert yo >= y + planner.CANVAS_PADDING
+
+
+# ---------------------------------------------------------------------------
+# Canny sketch mode
+# ---------------------------------------------------------------------------
+def _rectangle_image(width=60, height=40):
+    image = Image.new("RGB", (width, height), WHITE)
+    for x in range(10, 50):
+        image.putpixel((x, 8), (0, 0, 0))
+        image.putpixel((x, 31), (0, 0, 0))
+    for y in range(8, 32):
+        image.putpixel((10, y), (0, 0, 0))
+        image.putpixel((49, y), (0, 0, 0))
+    return image
+
+
+def _sketch_canny(image, **kwargs):
+    width, height = image.size
+    options = dict(
+        edge_source=planner.EDGE_CANNY,
+        smooth_strength=0,
+        canny_low=50,
+        canny_high=150,
+        canny_auto=False,
+        hue_merge=False,
+    )
+    options.update(kwargs)
+    return planner.plan_sketch(image, 0, 0, 1, (width, height), None, 0, **options)
+
+
+def test_trace_edge_chains_follows_a_straight_line():
+    edges = np.zeros((10, 10), dtype=np.uint8)
+    edges[5, 1:8] = 255
+    chains = planner._trace_edge_chains(edges)
+    assert len(chains) == 1
+    assert chains[0] == [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5), (6, 5), (7, 5)]
+
+
+def test_trace_edge_chains_handles_an_l_corner():
+    edges = np.zeros((10, 10), dtype=np.uint8)
+    edges[2, 2:7] = 255
+    edges[2:7, 6] = 255
+    chains = planner._trace_edge_chains(edges)
+    # The 8-connected corner leaves a short diagonal fragment; the longest
+    # chain must still run the whole L, and every edge pixel is covered.
+    longest = max(chains, key=len)
+    assert longest[0] == (2, 2)
+    assert longest[-1] == (6, 6)
+    covered = {(x, y) for chain in chains for x, y in chain}
+    ys, xs = np.where(edges > 0)
+    assert covered == set(zip(xs.tolist(), ys.tolist()))
+
+
+def test_join_strokes_direction_filter_keeps_crossings_apart():
+    collinear = [[(0, 0), (10, 0)], [(10, 1), (20, 1)]]
+    assert len(planner._join_strokes(collinear, 3.0, max_turn_degrees=60)) == 1
+    corner = [[(0, 0), (10, 0)], [(10, 1), (10, 11)]]
+    assert len(planner._join_strokes(corner, 3.0, max_turn_degrees=60)) == 2
+    # The original behaviour (no direction filter) still joins the corner.
+    assert len(planner._join_strokes(corner, 3.0)) == 1
+
+
+def test_plan_sketch_canny_flat_image_has_no_strokes():
+    flat = Image.new("RGB", (40, 30), WHITE)
+    assert _sketch_canny(flat) == {}
+
+
+def test_plan_sketch_canny_traces_a_rectangle():
+    cmap = _sketch_canny(_rectangle_image())
+    strokes = cmap[planner.OUTLINE_COLOUR]
+    assert strokes
+    xs = [x for stroke in strokes for x, _ in stroke]
+    ys = [y for stroke in strokes for _, y in stroke]
+    assert min(xs) <= 10 and max(xs) >= 49
+    assert min(ys) <= 8 and max(ys) >= 31
+    # At least one trace should close back on itself (the border loop).
+    assert any(stroke[0] == stroke[-1] for stroke in strokes)
+
+
+def test_plan_sketch_is_deterministic():
+    rng = np.random.default_rng(0)
+    image = Image.fromarray(
+        rng.integers(0, 256, size=(40, 40, 3), dtype=np.uint8), "RGB"
+    )
+    first = _sketch_canny(image)
+    second = _sketch_canny(image)
+    assert first == second
+
+
+def test_plan_sketch_edgedrawing_source_traces_a_rectangle():
+    import pytest
+
+    cv2 = pytest.importorskip("cv2")
+    if not hasattr(cv2, "ximgproc"):
+        pytest.skip("opencv-contrib (cv2.ximgproc) not installed")
+    image = _rectangle_image()
+    cmap = planner.plan_sketch(
+        image,
+        0,
+        0,
+        1,
+        image.size,
+        None,
+        0,
+        edge_source=planner.EDGE_EDGEDRAWING,
+        smooth_strength=0,
+        hue_merge=False,
+    )
+    assert cmap[planner.OUTLINE_COLOUR]
+
+
+def test_keep_by_hue_drops_same_hue_and_keeps_colour_boundary():
+    image = np.zeros((40, 60, 3), np.uint8)
+    image[:, :30] = (200, 30, 30)
+    image[:, 30:] = (200, 30, 30)  # same red on both sides
+    hue, sat = planner._hue_planes(image)
+    stroke = [(30, y) for y in range(5, 35)]
+    assert planner._keep_by_hue(stroke, hue, sat, 15.0) is False
+
+    image[:, 30:] = (30, 30, 200)  # blue on the right
+    hue, sat = planner._hue_planes(image)
+    assert planner._keep_by_hue(stroke, hue, sat, 15.0) is True
+
+
+def test_plan_image_routes_sketch_mode():
+    image = _rectangle_image()
+    cmap = planner.plan_image(
+        image,
+        (0, 0, 60, 40),
+        1,
+        _palette(),
+        "rgb",
+        0,
+        planner.SKETCH,
+        sketch_edge_source=planner.EDGE_CANNY,
+        sketch_smoothing=0,
+        sketch_hue_merge=False,
+        canny_low=50,
+        canny_high=150,
+        canny_auto=False,
+    )
+    assert planner.OUTLINE_COLOUR in cmap
+    assert cmap[planner.OUTLINE_COLOUR]

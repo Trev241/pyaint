@@ -344,6 +344,17 @@ def test_cache_filename_depends_on_outline_step_threshold(tmp_path, monkeypatch)
     assert off != on
 
 
+def test_cache_filename_depends_on_canny_low(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = write_image(tmp_path, {(0, 0): RED}, (2, 1))
+    bot = make_bot(step=2, canvas=(0, 0, 4, 2), positions=POSITIONS)
+    bot.canny_low = 30.0
+    low = bot.get_cache_filename(path)
+    bot.canny_low = 90.0
+    high = bot.get_cache_filename(path)
+    assert low != high
+
+
 def test_process_outline_honours_stroke_distance(tmp_path):
     pixels = {
         (x, y): (RED if (x + y) % 2 == 0 else BLUE)
@@ -359,6 +370,27 @@ def test_process_outline_honours_stroke_distance(tmp_path):
     fine_count = sum(len(lines) for lines in fine.values())
     coarse_count = sum(len(lines) for lines in coarse.values())
     assert coarse_count <= fine_count
+
+
+def test_process_sketch_selectable_edge_source(tmp_path):
+    pixels = {}
+    for x in range(4, 16):
+        pixels[(x, 4)] = (0, 0, 0)
+        pixels[(x, 15)] = (0, 0, 0)
+    for y in range(4, 16):
+        pixels[(4, y)] = (0, 0, 0)
+        pixels[(15, y)] = (0, 0, 0)
+    path = write_image(tmp_path, pixels, (20, 20))
+    bot = make_bot(step=1, canvas=(0, 0, 20, 20), positions=POSITIONS)
+    bot.sketch_hue_merge = False
+
+    bot.sketch_edge_source = planner.EDGE_CANNY
+    assert bot.process(path, mode=Bot.SKETCH)
+
+    cv2 = pytest.importorskip("cv2")
+    if hasattr(cv2, "ximgproc"):
+        bot.sketch_edge_source = planner.EDGE_EDGEDRAWING
+        assert bot.process(path, mode=Bot.SKETCH)
 
 
 def test_precompute_then_load_round_trip(tmp_path, monkeypatch):

@@ -13,6 +13,29 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Live drawing preview.** The preview pane gained a **Source / Preview**
+  toggle. *Preview* plans and renders the current image exactly as it will be
+  drawn — thin black line art for Outline/Sketch, palette-coloured fills for
+  Slotted/Layered — without touching the screen. Planning runs off the GUI
+  thread and is debounced while sliders move; the frame dims and shows a small
+  spinner while it updates, and stale results are dropped with a generation
+  counter. Stroke/cell counts show in the preview meta. Backed by the pure
+  `pyaint/render.py` renderer and the `pyaint/ui/plan_tasks.py` worker.
+- **New Sketch stroke mode with a selectable edge source.** A fourth
+  processing mode (`sketch`) traces the image's edges into black polylines —
+  no segmentation, no region merge and no drawing palette. `edge_source`
+  chooses **Edge drawing** (`cv2.ximgproc.createEdgeDrawing`, which returns
+  long connected polylines; the default, needs opencv-contrib) or **Canny**
+  (auto-Otsu or manual thresholds, traced with a straightest-continuation
+  walk). Both share the cleanup: gap join, polygon simplification, an optional
+  **hue merge** that drops strokes whose two sides share a hue (so shading and
+  tonal edges are not traced while real colour boundaries stay), an optional
+  weak-edge gradient gate, and a minimum-stroke filter. Every parameter is
+  exposed in the inspector, round-trips through `config.json`, and is part of
+  the precompute cache key (`SKETCH_PIPELINE_VERSION`).
+  `PYAINT_DEBUG_SKETCH=1` dumps the edge map and a red overlay.
+- **opencv-contrib-python replaces opencv-python.** The Sketch mode's default
+  Edge drawing source needs `cv2.ximgproc`; the extra is otherwise drop-in.
 - **Outline segments with its own adaptive palette and merges on region
   means.** Outline draws only black, so the target's drawing palette was
   erasing real boundaries before tracing (on a sample image, 64 adaptive

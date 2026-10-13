@@ -46,6 +46,10 @@ except ImportError:  # pragma: no cover - only when numpy is not installed
 SLOTTED = "slotted"
 LAYERED = "layered"
 OUTLINE = "outline"
+SKETCH = "sketch"
+#: Selectable edge sources for SKETCH mode.
+EDGE_CANNY = "canny"
+EDGE_EDGEDRAWING = "edgedrawing"
 
 IGNORE_WHITE = 1 << 0
 IGNORE_TRANSPARENT = 1 << 1
@@ -111,6 +115,58 @@ OUTLINE_PIPELINE_VERSION = 2
 OUTLINE_DEBUG = bool(os.environ.get("PYAINT_DEBUG_LABELS"))
 OUTLINE_DEBUG_PATH = os.environ.get(
     "PYAINT_DEBUG_LABELS_PATH", os.path.join("build", "debug_labels.png")
+)
+
+# ---------------------------------------------------------------------------
+# Sketch defaults. SKETCH mode ignores segmentation, region merging and the
+# drawing palette: an edge source (EdgeDrawing or Canny) yields polylines, and
+# shared cleanup (hue merge, gap join, simplify, gates) turns them into black
+# strokes. Distances are canvas pixels.
+# ---------------------------------------------------------------------------
+#: Default edge source. EdgeDrawing returns connected polylines; Canny is the
+#: lighter classic fallback and works without opencv-contrib.
+SKETCH_EDGE_SOURCE = EDGE_EDGEDRAWING
+#: Bilateral smoothing level before extraction (0 disables).
+SKETCH_SMOOTHING = 3
+#: Max canvas-pixel gap between two open endpoints for them to chain.
+SKETCH_JOIN_DISTANCE = 10.0
+#: Max turn (degrees) allowed when chaining two endpoints; keeps a crossing
+#: from fusing unrelated branches into a loop.
+SKETCH_JOIN_TURN = 60.0
+#: Open strokes shorter than this many px are dropped.
+SKETCH_MIN_STROKE = 8
+#: Polygon simplification tolerance in canvas pixels.
+SKETCH_EPSILON = 1.2
+#: Hue merge: drop a stroke whose two sides share a hue, so shading/tonal
+#: boundaries are not traced while real colour boundaries are kept.
+SKETCH_HUE_MERGE = True
+#: Minimum circular hue difference (degrees) across a stroke to keep it.
+SKETCH_HUE_THRESHOLD = 15.0
+#: Pixels either side of a stroke sampled for the hue test.
+SKETCH_HUE_OFFSET = 4
+#: Saturation below which a pixel's hue is ignored (dark outlines are kept).
+SKETCH_HUE_SAT_MIN = 45.0
+#: Optional weak-edge gate: ``0`` disables, otherwise keep this fraction of
+#: strokes ranked by mean gradient magnitude.
+SKETCH_GRADIENT_GATE = 0.0
+#: Canny hysteresis thresholds, used when :data:`SKETCH_CANNY_AUTO` is off.
+SKETCH_CANNY_LOW = 50
+SKETCH_CANNY_HIGH = 150
+#: Derive the Canny thresholds from Otsu on the gradient magnitude.
+SKETCH_CANNY_AUTO = True
+#: Canny Sobel aperture (3, 5 or 7).
+SKETCH_CANNY_APERTURE = 3
+#: Use the L2 gradient norm (more accurate on diagonals).
+SKETCH_CANNY_L2 = True
+#: Also detect Canny edges on Lab chroma so iso-luminant boundaries are caught.
+SKETCH_CANNY_COLOR_EDGES = False
+#: Bump when the sketch pipeline changes shape (part of the precompute cache key).
+SKETCH_PIPELINE_VERSION = 1
+#: Developer flag: ``PYAINT_DEBUG_SKETCH=1`` dumps the edge map and a red
+#: overlay on the source so the extraction can be eyeballed.
+SKETCH_DEBUG = bool(os.environ.get("PYAINT_DEBUG_SKETCH"))
+SKETCH_DEBUG_PATH = os.environ.get(
+    "PYAINT_DEBUG_SKETCH_PATH", os.path.join("build", "debug_sketch.png")
 )
 
 Colour = Tuple[int, int, int]
@@ -1118,8 +1174,25 @@ def _keep_short_drops(keep_flags, min_drop_run):
     return rotated[count - start:] + rotated[:count - start]
 
 
-def _join_strokes(strokes, max_distance):
-    """Chain open strokes whose endpoints lie within ``max_distance``."""
+def _turn_degrees(in_dir, out_dir):
+    """Angle in degrees between two integer direction vectors."""
+    dot = in_dir[0] * out_dir[0] + in_dir[1] * out_dir[1]
+    magnitude = math.hypot(in_dir[0], in_dir[1]) * math.hypot(out_dir[0], out_dir[1])
+    if magnitude == 0:
+        return 180.0
+    cosine = max(-1.0, min(1.0, dot / magnitude))
+    return math.degrees(math.acos(cosine))
+
+
+def _join_strokes(strokes, max_distance, max_turn_degrees=None):
+    """Chain open strokes whose endpoints lie within ``max_distance``.
+
+    When ``max_turn_degrees`` is given, two endpoints only chain if the
+    direction the first stroke arrives at the joint continues into the second
+    (a straight-ish join). This keeps a crossing of two lines from being fused
+    into a loop; ``None`` disables the check and preserves the original
+    nearest-endpoint behaviour.
+    """
     if max_distance <= 0 or len(strokes) < 2:
         return [list(stroke) for stroke in strokes]
 
@@ -1135,7 +1208,14 @@ def _join_strokes(strokes, max_distance):
 
     used = set()
 
-    def nearest_free_endpoint(point):
+    def outgoing_direction(stroke, end):
+        if len(stroke) < 2:
+            return None
+        if end == 0:
+            return (stroke[1][0] - stroke[0][0], stroke[1][1] - stroke[0][1])
+        return (stroke[-2][0] - stroke[-1][0], stroke[-2][1] - stroke[-1][1])
+
+    def nearest_free_endpoint(point, incoming=None):
         cx, cy = cell_of(point)
         best, best_distance = None, max_distance
         for dx in (-1, 0, 1):
@@ -1147,13 +1227,27 @@ def _join_strokes(strokes, max_distance):
                     distance = (
                         (other[0] - point[0]) ** 2 + (other[1] - point[1]) ** 2
                     ) ** 0.5
-                    if distance <= best_distance:
-                        best, best_distance = (stroke_id, end), distance
+                    if distance > best_distance:
+                        continue
+                    if max_turn_degrees is not None and incoming is not None:
+                        out_dir = outgoing_direction(strokes[stroke_id], end)
+                        if (
+                            out_dir is not None
+                            and _turn_degrees(incoming, out_dir) > max_turn_degrees
+                        ):
+                            continue
+                    best, best_distance = (stroke_id, end), distance
         return best
 
     def extend_tail(chain):
         while True:
-            found = nearest_free_endpoint(chain[-1])
+            incoming = None
+            if len(chain) >= 2:
+                incoming = (
+                    chain[-1][0] - chain[-2][0],
+                    chain[-1][1] - chain[-2][1],
+                )
+            found = nearest_free_endpoint(chain[-1], incoming)
             if found is None:
                 return
             stroke_id, end = found
@@ -1428,6 +1522,403 @@ def plan_outline(
     return {OUTLINE_COLOUR: result} if result else {}
 
 
+# ---------------------------------------------------------------------------
+# Canny sketch: source -> Canny edge map -> traced black polylines.
+# This mode ignores segmentation, region merging and the drawing palette; it
+# just sketches the strongest edges of the image as continuous strokes.
+# ---------------------------------------------------------------------------
+#: 8-connected neighbour offsets, used by the edge tracer.
+_NEIGHBOUR_OFFSETS = (
+    (-1, -1),
+    (-1, 0),
+    (-1, 1),
+    (0, -1),
+    (0, 1),
+    (1, -1),
+    (1, 0),
+    (1, 1),
+)
+
+
+def _save_debug_sketch(image_rgb, edges, path):
+    """Developer dump: the raw edge map and a red overlay on the source."""
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    cv2.imwrite(path, edges)
+    overlay = _np.ascontiguousarray(image_rgb[:, :, :3]).copy()
+    overlay[edges > 0] = (255, 0, 0)
+    base, _ = os.path.splitext(path)
+    cv2.imwrite(f"{base}_overlay.png", cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+
+
+def _otsu_canny_thresholds(gray):
+    """Otsu-derived ``(low, high)`` Canny hysteresis thresholds."""
+    gradient_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    gradient_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    magnitude = cv2.magnitude(gradient_x, gradient_y)
+    magnitude = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX).astype(
+        _np.uint8
+    )
+    high, _ = cv2.threshold(
+        magnitude, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+    return 0.4 * float(high), float(high)
+
+
+def _canny_edge_map(image_rgb, lab, low, high, auto, aperture, l2, color_edges):
+    """Binary uint8 Canny edge map of an already-smoothed RGB image."""
+    aperture = int(aperture)
+    if aperture not in (3, 5, 7):
+        aperture = 3
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+    if auto:
+        low, high = _otsu_canny_thresholds(gray)
+    edges = cv2.Canny(
+        gray, float(low), float(high), apertureSize=aperture, L2gradient=bool(l2)
+    )
+    if color_edges and lab is not None:
+        chroma = _np.sqrt(lab[..., 1] ** 2 + lab[..., 2] ** 2)
+        chroma = cv2.normalize(chroma, None, 0, 255, cv2.NORM_MINMAX).astype(
+            _np.uint8
+        )
+        if auto:
+            color_low, color_high = _otsu_canny_thresholds(chroma)
+        else:
+            color_low, color_high = low, high
+        edges = cv2.bitwise_or(
+            edges,
+            cv2.Canny(
+                chroma,
+                float(color_low),
+                float(color_high),
+                apertureSize=aperture,
+                L2gradient=True,
+            ),
+        )
+    return edges
+
+
+def _edge_degree(edges):
+    """Number of 8-connected edge neighbours at every pixel."""
+    mask = edges > 0
+    padded = _np.pad(mask, 1).astype(_np.uint8)
+    neighbours = (
+        padded[:-2, :-2]
+        + padded[:-2, 1:-1]
+        + padded[:-2, 2:]
+        + padded[1:-1, :-2]
+        + padded[1:-1, 2:]
+        + padded[2:, :-2]
+        + padded[2:, 1:-1]
+        + padded[2:, 2:]
+    )
+    return _np.where(mask, neighbours, 0).astype(_np.uint8)
+
+
+def _trace_edge_chains(edges):
+    """Trace a 1px edge map into straightest-continuation pixel chains.
+
+    Every undirected adjacency is consumed once. From each pixel the walk
+    picks the *straightest* unvisited neighbour, so a crossing is followed
+    straight through instead of fragmenting into four short spurs. Chains
+    start at endpoints/junctions where possible. Returns a list of chains,
+    each a list of ``(x, y)`` points.
+    """
+    mask = edges > 0
+    if not mask.any():
+        return []
+    height, width = mask.shape
+    degree = _edge_degree(edges)
+    total = height * width
+    visited = set()
+
+    def index(row, col):
+        return row * width + col
+
+    def key(a, b):
+        return a * total + b
+
+    def neighbours(row, col):
+        for dr, dc in _NEIGHBOUR_OFFSETS:
+            nr, nc = row + dr, col + dc
+            if 0 <= nr < height and 0 <= nc < width and mask[nr, nc]:
+                yield nr, nc
+
+    def walk(start, second):
+        a, b = index(*start), index(*second)
+        visited.add(key(a, b))
+        visited.add(key(b, a))
+        chain = [(start[1], start[0]), (second[1], second[0])]
+        previous, current = start, second
+        incoming = (current[0] - previous[0], current[1] - previous[1])
+        while True:
+            best, best_turn = None, None
+            for nxt in neighbours(current[0], current[1]):
+                na, nb = index(*current), index(*nxt)
+                if key(na, nb) in visited:
+                    continue
+                out_dir = (nxt[0] - current[0], nxt[1] - current[1])
+                turn = _turn_degrees(incoming, out_dir)
+                if best is None or turn < best_turn:
+                    best, best_turn = nxt, turn
+            if best is None:
+                break
+            na, nb = index(*current), index(*best)
+            visited.add(key(na, nb))
+            visited.add(key(nb, na))
+            chain.append((best[1], best[0]))
+            incoming = (best[0] - current[0], best[1] - current[1])
+            current = best
+            if current == start:
+                break
+        return chain
+
+    chains = []
+    for node_pass in (True, False):
+        seed_mask = mask & (degree != 2) if node_pass else mask
+        for row, col in _np.argwhere(seed_mask):
+            start = (int(row), int(col))
+            for second in neighbours(start[0], start[1]):
+                if key(index(*start), index(*second)) not in visited:
+                    chains.append(walk(start, second))
+    return chains
+
+
+def _edgedrawing_segments(image_rgb):
+    """Connected edge polylines from ``cv2.ximgproc.createEdgeDrawing``.
+
+    Returns ``(segments, edge_image)`` where ``segments`` is a list of
+    ``(x, y)`` polylines. Empty when opencv-contrib (``cv2.ximgproc``) is
+    unavailable, so the caller can fall back to Canny.
+    """
+    if not hasattr(cv2, "ximgproc"):
+        return [], None
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+    drawing = cv2.ximgproc.createEdgeDrawing()
+    drawing.Params.NFAValidation = True
+    drawing.Params.MinLineLength = 6
+    drawing.detectEdges(gray)
+    edge_image = drawing.getEdgeImage()
+    segments = [
+        [(int(x), int(y)) for x, y in _np.asarray(segment).reshape(-1, 2)]
+        for segment in drawing.getSegments()
+    ]
+    return segments, edge_image
+
+
+def _hue_planes(image_rgb):
+    """Hue (0-360) and saturation (0-255) planes of an RGB image."""
+    hsv = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV)
+    return hsv[..., 0].astype(_np.float32) * 2.0, hsv[..., 1].astype(_np.float32)
+
+
+def _hue_difference(a, b):
+    diff = abs(a - b) % 360.0
+    return min(diff, 360.0 - diff)
+
+
+def _patch_hue(hue, sat, x, y, radius=2):
+    """Saturation-weighted circular mean hue in a patch, or ``None``."""
+    height, width = hue.shape
+    x0, x1 = max(0, x - radius), min(width, x + radius + 1)
+    y0, y1 = max(0, y - radius), min(height, y + radius + 1)
+    if x0 >= x1 or y0 >= y1:
+        return None
+    hues = hue[y0:y1, x0:x1].ravel()
+    sats = sat[y0:y1, x0:x1].ravel()
+    mask = sats > 0
+    if not mask.any():
+        return None
+    angles = _np.radians(hues[mask])
+    weights = sats[mask].astype(_np.float64)
+    mean = math.degrees(
+        math.atan2(
+            float((_np.sin(angles) * weights).sum()),
+            float((_np.cos(angles) * weights).sum()),
+        )
+    ) % 360.0
+    return mean, float(sats[mask].mean())
+
+
+def _stroke_hue_contrast(stroke, hue, sat, offset, sat_min):
+    """Mean hue step (degrees) across a stroke, or ``None`` for an outline.
+
+    ``None`` means too few saturated samples (a dark/outline stroke), which is
+    always kept.
+    """
+    diffs = []
+    saturated = 0
+    count = len(stroke)
+    for i, (x, y) in enumerate(stroke):
+        j0, j1 = max(0, i - 2), min(count - 1, i + 2)
+        tangent = (stroke[j1][0] - stroke[j0][0], stroke[j1][1] - stroke[j0][1])
+        norm = math.hypot(*tangent)
+        if norm < 1e-6:
+            continue
+        normal = (-tangent[1] / norm, tangent[0] / norm)
+        side_a = _patch_hue(
+            hue, sat, int(x + normal[0] * offset), int(y + normal[1] * offset)
+        )
+        side_b = _patch_hue(
+            hue, sat, int(x - normal[0] * offset), int(y - normal[1] * offset)
+        )
+        if side_a is None or side_b is None:
+            continue
+        if side_a[1] >= sat_min and side_b[1] >= sat_min:
+            saturated += 1
+            diffs.append(_hue_difference(side_a[0], side_b[0]))
+    if saturated < max(3, int(0.15 * count)):
+        return None
+    return float(_np.mean(diffs))
+
+
+def _keep_by_hue(stroke, hue, sat, threshold,
+                 offset=SKETCH_HUE_OFFSET, sat_min=SKETCH_HUE_SAT_MIN):
+    """True when a stroke separates two different hues (or is an outline)."""
+    contrast = _stroke_hue_contrast(stroke, hue, sat, offset, sat_min)
+    return contrast is None or contrast >= threshold
+
+
+def _gradient_magnitude(image_rgb):
+    """Sobel gradient magnitude of the greyscale image (float32)."""
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY).astype(_np.float32)
+    return cv2.magnitude(
+        cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3),
+        cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3),
+    )
+
+
+def _stroke_gradient(stroke, magnitude, radius=1):
+    values = []
+    height, width = magnitude.shape
+    for x, y in stroke:
+        x0, x1 = max(0, x - radius), min(width, x + radius + 1)
+        y0, y1 = max(0, y - radius), min(height, y + radius + 1)
+        if x0 < x1 and y0 < y1:
+            values.append(float(magnitude[y0:y1, x0:x1].max()))
+    return float(_np.mean(values)) if values else 0.0
+
+
+def _gate_by_gradient(strokes, magnitude, keep_fraction):
+    """Keep only the top ``keep_fraction`` of strokes by mean gradient."""
+    means = [_stroke_gradient(stroke, magnitude) for stroke in strokes]
+    if not means:
+        return strokes
+    threshold = _np.percentile(means, 100.0 * (1.0 - keep_fraction))
+    return [s for s, m in zip(strokes, means) if m >= threshold]
+
+
+def plan_sketch(
+    source,
+    xo: int,
+    yo: int,
+    step: int,
+    size,
+    palette,
+    flags: int,
+    edge_source: str = SKETCH_EDGE_SOURCE,
+    smooth_strength: float = SKETCH_SMOOTHING,
+    join_distance: float = SKETCH_JOIN_DISTANCE,
+    join_turn: float = SKETCH_JOIN_TURN,
+    min_stroke: float = SKETCH_MIN_STROKE,
+    epsilon: float = SKETCH_EPSILON,
+    hue_merge: bool = SKETCH_HUE_MERGE,
+    hue_threshold: float = SKETCH_HUE_THRESHOLD,
+    gradient_gate: float = SKETCH_GRADIENT_GATE,
+    canny_low: float = SKETCH_CANNY_LOW,
+    canny_high: float = SKETCH_CANNY_HIGH,
+    canny_auto: bool = SKETCH_CANNY_AUTO,
+    canny_aperture: int = SKETCH_CANNY_APERTURE,
+    canny_l2: bool = SKETCH_CANNY_L2,
+    canny_color_edges: bool = SKETCH_CANNY_COLOR_EDGES,
+    debug: Optional[bool] = None,
+    debug_path: Optional[str] = None,
+) -> Cmap:
+    """Sketch the source into black polylines with a selectable edge source.
+
+    Pipeline: bilateral smooth -> edge source (EdgeDrawing or Canny) -> join
+    -> simplify -> hue merge -> optional weak-edge gate -> drop short. The
+    result is painted black, so the drawing palette and the label-map merge
+    are not involved. ``edge_source`` is :data:`EDGE_EDGEDRAWING` (connected
+    polylines) or :data:`EDGE_CANNY` (traced 1px edges).
+    """
+    if _np is None:
+        return {}
+    tw, th = size
+    canvas_w, canvas_h = tw * step, th * step
+    src_w, src_h = source.size
+    if canvas_w <= 0 or canvas_h <= 0 or src_w <= 0 or src_h <= 0:
+        return {}
+
+    factor = src_w / canvas_w
+    factor_y = src_h / canvas_h
+    scale = min(factor, factor_y)
+
+    rgba = _np.asarray(source)
+    if rgba.ndim == 2:
+        rgb = _np.repeat(rgba[:, :, None], 3, axis=2)
+    else:
+        rgb = _np.ascontiguousarray(rgba[:, :, :3])
+
+    image_rgb, lab = _smooth_to_lab(rgb, smooth_strength)
+    if edge_source == EDGE_EDGEDRAWING:
+        segments, edge_image = _edgedrawing_segments(image_rgb)
+        if not segments:
+            edge_source = EDGE_CANNY  # opencv-contrib unavailable -> fall back
+    if edge_source == EDGE_CANNY:
+        edge_image = _canny_edge_map(
+            image_rgb, lab, canny_low, canny_high, canny_auto,
+            canny_aperture, canny_l2, canny_color_edges,
+        )
+        segments = _trace_edge_chains(edge_image)
+    chains = [chain for chain in segments if len(chain) >= 2]
+    # Join on the raw chains: their local directions are accurate, and
+    # simplifying first would turn a corner into one long segment whose
+    # direction no longer describes the join. Closed loops are left untouched.
+    joined = _join_strokes(
+        chains, float(join_distance) * scale, max_turn_degrees=join_turn
+    )
+    simplify_epsilon = float(epsilon) * scale
+    strokes: List[Stroke] = []
+    for chain in joined:
+        closed = len(chain) >= 3 and chain[0] == chain[-1]
+        path = _simplify(chain, closed, simplify_epsilon)
+        if closed and path:
+            path.append(path[0])
+        if len(path) >= 2:
+            strokes.append(path)
+
+    if hue_merge and float(hue_threshold) > 0:
+        hue, sat = _hue_planes(image_rgb)
+        strokes = [
+            stroke
+            for stroke in strokes
+            if _keep_by_hue(stroke, hue, sat, float(hue_threshold))
+        ]
+    if gradient_gate and float(gradient_gate) > 0:
+        strokes = _gate_by_gradient(
+            strokes, _gradient_magnitude(image_rgb), float(gradient_gate)
+        )
+    min_length = float(min_stroke) * scale
+    kept = [stroke for stroke in strokes if _path_length(stroke) >= min_length]
+
+    if debug is None:
+        debug = SKETCH_DEBUG
+    if debug and edge_image is not None:
+        _save_debug_sketch(image_rgb, edge_image, debug_path or SKETCH_DEBUG_PATH)
+
+    result = [
+        [
+            (int(round(xo + x / factor)), int(round(yo + y / factor_y)))
+            for x, y in stroke
+        ]
+        for stroke in kept
+        if len(stroke) >= 2
+    ]
+    return {OUTLINE_COLOUR: result} if result else {}
+
+
 def plan(
     grid: ColourGrid,
     xo: int,
@@ -1474,11 +1965,27 @@ def plan_image(
     tiny_area: int = OUTLINE_TINY_AREA,
     similar_color: float = OUTLINE_SIMILAR_COLOR,
     step_threshold: float = OUTLINE_STEP_THRESHOLD,
+    sketch_edge_source: str = SKETCH_EDGE_SOURCE,
+    sketch_smoothing: float = SKETCH_SMOOTHING,
+    sketch_join_distance: float = SKETCH_JOIN_DISTANCE,
+    sketch_join_turn: float = SKETCH_JOIN_TURN,
+    sketch_min_stroke: float = SKETCH_MIN_STROKE,
+    sketch_epsilon: float = SKETCH_EPSILON,
+    sketch_hue_merge: bool = SKETCH_HUE_MERGE,
+    sketch_hue_threshold: float = SKETCH_HUE_THRESHOLD,
+    sketch_gradient_gate: float = SKETCH_GRADIENT_GATE,
+    canny_low: float = SKETCH_CANNY_LOW,
+    canny_high: float = SKETCH_CANNY_HIGH,
+    canny_auto: bool = SKETCH_CANNY_AUTO,
+    canny_aperture: int = SKETCH_CANNY_APERTURE,
+    canny_l2: bool = SKETCH_CANNY_L2,
+    canny_color_edges: bool = SKETCH_CANNY_COLOR_EDGES,
 ) -> Cmap:
     """Fit + quantise + plan a full image. Returns a stroke map (``cmap``).
 
     OUTLINE runs the label-map cleaner (:func:`plan_outline`) on the source
-    directly; the row/layer modes still share :func:`quantize_image`.
+    directly; SKETCH runs the edge tracer (:func:`plan_sketch`); the row/layer
+    modes still share :func:`quantize_image`.
     """
     source, (tw, th), xo, yo = fit_to_canvas(image, canvas, step)
     if mode == OUTLINE:
@@ -1497,6 +2004,31 @@ def plan_image(
             similar_color,
             double_edges,
             step_threshold=step_threshold,
+        )
+    if mode == SKETCH:
+        return plan_sketch(
+            source,
+            xo,
+            yo,
+            step,
+            (tw, th),
+            palette,
+            flags,
+            sketch_edge_source,
+            sketch_smoothing,
+            sketch_join_distance,
+            sketch_join_turn,
+            sketch_min_stroke,
+            sketch_epsilon,
+            sketch_hue_merge,
+            sketch_hue_threshold,
+            sketch_gradient_gate,
+            canny_low,
+            canny_high,
+            canny_auto,
+            canny_aperture,
+            canny_l2,
+            canny_color_edges,
         )
     grid = quantize_image(source, (tw, th), palette, metric, flags)
     return plan(
@@ -1524,11 +2056,27 @@ def plan_region_image(
     tiny_area: int = OUTLINE_TINY_AREA,
     similar_color: float = OUTLINE_SIMILAR_COLOR,
     step_threshold: float = OUTLINE_STEP_THRESHOLD,
+    sketch_edge_source: str = SKETCH_EDGE_SOURCE,
+    sketch_smoothing: float = SKETCH_SMOOTHING,
+    sketch_join_distance: float = SKETCH_JOIN_DISTANCE,
+    sketch_join_turn: float = SKETCH_JOIN_TURN,
+    sketch_min_stroke: float = SKETCH_MIN_STROKE,
+    sketch_epsilon: float = SKETCH_EPSILON,
+    sketch_hue_merge: bool = SKETCH_HUE_MERGE,
+    sketch_hue_threshold: float = SKETCH_HUE_THRESHOLD,
+    sketch_gradient_gate: float = SKETCH_GRADIENT_GATE,
+    canny_low: float = SKETCH_CANNY_LOW,
+    canny_high: float = SKETCH_CANNY_HIGH,
+    canny_auto: bool = SKETCH_CANNY_AUTO,
+    canny_aperture: int = SKETCH_CANNY_APERTURE,
+    canny_l2: bool = SKETCH_CANNY_L2,
+    canny_color_edges: bool = SKETCH_CANNY_COLOR_EDGES,
 ) -> Cmap:
     """Fit + quantise + plan a sub-region. Returns a stroke map (``cmap``).
 
     OUTLINE runs the label-map cleaner (:func:`plan_outline`) on the source
-    directly; the row/layer modes still share :func:`quantize_image`.
+    directly; SKETCH runs the edge tracer (:func:`plan_sketch`); the row/layer
+    modes still share :func:`quantize_image`.
     """
     source, (tw, th), xo, yo = fit_region(image, region, canvas, step, canvas_target)
     if mode == OUTLINE:
@@ -1547,6 +2095,31 @@ def plan_region_image(
             similar_color,
             double_edges,
             step_threshold=step_threshold,
+        )
+    if mode == SKETCH:
+        return plan_sketch(
+            source,
+            xo,
+            yo,
+            step,
+            (tw, th),
+            palette,
+            flags,
+            sketch_edge_source,
+            sketch_smoothing,
+            sketch_join_distance,
+            sketch_join_turn,
+            sketch_min_stroke,
+            sketch_epsilon,
+            sketch_hue_merge,
+            sketch_hue_threshold,
+            sketch_gradient_gate,
+            canny_low,
+            canny_high,
+            canny_auto,
+            canny_aperture,
+            canny_l2,
+            canny_color_edges,
         )
     grid = quantize_image(source, (tw, th), palette, metric, flags)
     return plan(

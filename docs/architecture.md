@@ -100,7 +100,17 @@ that opens the image, reads the canvas, and hands the rest over:
      soft-boundary merge compares **component mean colours**, not the local
      boundary step, so a soft edge between two genuinely different regions is
      kept while a smooth gradient collapses; thin features (outlines, lashes)
-     are protected. The grid-only entry points still use the legacy
+     are protected.
+   - **Sketch** (`plan_sketch`): sketches the source's edges directly. It
+     smooths the source, runs a selectable edge source — **Edge drawing**
+     (`cv2.ximgproc.createEdgeDrawing`, which returns long connected polylines)
+     or **Canny** (auto-Otsu or manual thresholds, traced into centerline pixel
+     chains with a straightest-continuation walk) — then joins, simplifies,
+     applies an optional hue merge (drop strokes whose two sides share a hue,
+     so shading is not traced while colour boundaries stay), an optional
+     weak-edge gate, and a minimum-stroke filter. It never touches the drawing
+     palette or the label map.
+     The grid-only entry points still use the legacy
      `plan_regions` seam-ownership tracer, where `double_edges` follows each
      region's full boundary and `morphology` can despeckle the masks.
      `stroke_distance` is kept for API/cache compatibility but no longer
@@ -108,6 +118,17 @@ that opens the image, reads the canvas, and hands the rest over:
 
 `process_region()` uses `fit_region()` + the same quantize/plan steps for
 partial redraws.
+
+## Live preview
+
+`pyaint/render.py` (pure) renders a `cmap` or a quantised colour grid to a PIL
+image in canvas coordinates: thin black polylines for the line modes, palette-
+coloured `step`-wide blocks for the fill modes. `pyaint/ui/plan_tasks.py` wraps
+it in a `QRunnable` that snapshots every planner input, plans on the global
+`QThreadPool`, and emits a `QImage` tagged with a generation id. `MainWindow`
+debounces requests (~300 ms), dims the preview and shows a spinner while a task
+runs, and drops stale generations so a moved slider can never apply an old
+frame. The **Source / Preview** toggle only plans while *Preview* is active.
 
 ## Drawing execution
 

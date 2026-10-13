@@ -103,10 +103,15 @@ image  →  fit + downscale to the canvas (nearest-neighbour)
        →  replay strokes with pyautogui, selecting colours as it goes
 ```
 
-Three processing modes:
+Four processing modes:
 
 - **Outline** (default) — traces region outlines as continuous, human-shaped
   strokes. Pacing is tuned with the stroke-speed and event-interval controls.
+- **Sketch** — traces the image's edges into black line art (no colour fills).
+  The edge source is selectable: **Edge drawing** (connected polylines, needs
+  opencv-contrib) or **Canny** (the lighter classic). *Merge by colour* drops
+  shading/tonal edges while keeping real colour boundaries; smoothing, join
+  distance and min stroke are exposed in the inspector.
 - **Layered** — merges a colour's runs where later colours paint over them:
   fewer strokes, faster drawing, smoother joins.
 - **Slotted** — draws every run exactly as-is: no overdraw, but more strokes.

@@ -40,12 +40,51 @@ class CacheMixin:
         outline_step_threshold = getattr(
             self, "outline_step_threshold", planner.OUTLINE_STEP_THRESHOLD
         )
+        sketch_edge_source = getattr(
+            self, "sketch_edge_source", planner.SKETCH_EDGE_SOURCE
+        )
+        sketch_smoothing = getattr(
+            self, "sketch_smoothing", planner.SKETCH_SMOOTHING
+        )
+        sketch_join_distance = getattr(
+            self, "sketch_join_distance", planner.SKETCH_JOIN_DISTANCE
+        )
+        sketch_join_turn = getattr(
+            self, "sketch_join_turn", planner.SKETCH_JOIN_TURN
+        )
+        sketch_min_stroke = getattr(
+            self, "sketch_min_stroke", planner.SKETCH_MIN_STROKE
+        )
+        sketch_epsilon = getattr(self, "sketch_epsilon", planner.SKETCH_EPSILON)
+        sketch_hue_merge = getattr(
+            self, "sketch_hue_merge", planner.SKETCH_HUE_MERGE
+        )
+        sketch_hue_threshold = getattr(
+            self, "sketch_hue_threshold", planner.SKETCH_HUE_THRESHOLD
+        )
+        sketch_gradient_gate = getattr(
+            self, "sketch_gradient_gate", planner.SKETCH_GRADIENT_GATE
+        )
+        canny_low = getattr(self, "canny_low", planner.SKETCH_CANNY_LOW)
+        canny_high = getattr(self, "canny_high", planner.SKETCH_CANNY_HIGH)
+        canny_auto = getattr(self, "canny_auto", planner.SKETCH_CANNY_AUTO)
+        canny_aperture = getattr(self, "canny_aperture", planner.SKETCH_CANNY_APERTURE)
+        canny_l2 = getattr(self, "canny_l2", planner.SKETCH_CANNY_L2)
+        canny_color_edges = getattr(
+            self, "canny_color_edges", planner.SKETCH_CANNY_COLOR_EDGES
+        )
         settings_str = (
             f"{self.settings}_{flags}_{mode}_{canvas_info}_{metric}_"
             f"{stroke_distance}_{outline_morphology}_{double_edges}_"
             f"{outline_smoothing}_{outline_join_distance}_{outline_small_area}_"
             f"{outline_tiny_area}_{outline_similar_color}_{outline_step_threshold}_"
-            f"{planner.OUTLINE_PIPELINE_VERSION}_{planner.CANVAS_PADDING}"
+            f"{sketch_edge_source}_{sketch_smoothing}_{sketch_join_distance}_"
+            f"{sketch_join_turn}_{sketch_min_stroke}_{sketch_epsilon}_"
+            f"{sketch_hue_merge}_{sketch_hue_threshold}_{sketch_gradient_gate}_"
+            f"{canny_low}_{canny_high}_{canny_auto}_{canny_aperture}_{canny_l2}_"
+            f"{canny_color_edges}_"
+            f"{planner.OUTLINE_PIPELINE_VERSION}_{planner.SKETCH_PIPELINE_VERSION}_"
+            f"{planner.CANVAS_PADDING}"
         )
         settings_hash = hashlib.md5(settings_str.encode()).hexdigest()[:8]
 
@@ -85,6 +124,39 @@ class CacheMixin:
             'outline_similar_color': getattr(self, "outline_similar_color", 10.0),
             'outline_step_threshold': getattr(
                 self, "outline_step_threshold", planner.OUTLINE_STEP_THRESHOLD
+            ),
+            'sketch_edge_source': getattr(
+                self, "sketch_edge_source", planner.SKETCH_EDGE_SOURCE
+            ),
+            'sketch_smoothing': getattr(
+                self, "sketch_smoothing", planner.SKETCH_SMOOTHING
+            ),
+            'sketch_join_distance': getattr(
+                self, "sketch_join_distance", planner.SKETCH_JOIN_DISTANCE
+            ),
+            'sketch_join_turn': getattr(
+                self, "sketch_join_turn", planner.SKETCH_JOIN_TURN
+            ),
+            'sketch_min_stroke': getattr(
+                self, "sketch_min_stroke", planner.SKETCH_MIN_STROKE
+            ),
+            'sketch_epsilon': getattr(self, "sketch_epsilon", planner.SKETCH_EPSILON),
+            'sketch_hue_merge': getattr(
+                self, "sketch_hue_merge", planner.SKETCH_HUE_MERGE
+            ),
+            'sketch_hue_threshold': getattr(
+                self, "sketch_hue_threshold", planner.SKETCH_HUE_THRESHOLD
+            ),
+            'sketch_gradient_gate': getattr(
+                self, "sketch_gradient_gate", planner.SKETCH_GRADIENT_GATE
+            ),
+            'canny_low': getattr(self, "canny_low", planner.SKETCH_CANNY_LOW),
+            'canny_high': getattr(self, "canny_high", planner.SKETCH_CANNY_HIGH),
+            'canny_auto': getattr(self, "canny_auto", planner.SKETCH_CANNY_AUTO),
+            'canny_aperture': getattr(self, "canny_aperture", planner.SKETCH_CANNY_APERTURE),
+            'canny_l2': getattr(self, "canny_l2", planner.SKETCH_CANNY_L2),
+            'canny_color_edges': getattr(
+                self, "canny_color_edges", planner.SKETCH_CANNY_COLOR_EDGES
             ),
             'canvas': self._canvas,
             'image_hash': hashlib.md5(open(image_path, 'rb').read()).hexdigest()[:8],

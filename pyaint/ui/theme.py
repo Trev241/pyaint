@@ -589,6 +589,27 @@ def stylesheet(tokens: dict | None = None) -> str:
         font-size: 11px;
         padding: 0 2px;
     }}
+    #ViewToggleGroup {{
+        background: {t['bg_input']};
+        border: 1px solid {t['border_input']};
+        border-radius: 4px;
+    }}
+    QPushButton#ViewToggle {{
+        background: transparent;
+        border: none;
+        border-radius: 3px;
+        padding: 3px 10px;
+        color: {t['fg_dim']};
+        font-size: 11px;
+    }}
+    QPushButton#ViewToggle:hover {{
+        color: {t['fg']};
+    }}
+    QPushButton#ViewToggle:checked {{
+        background: {t['bg_active']};
+        color: {t['fg']};
+        font-weight: 600;
+    }}
     #ModeHint {{
         color: {t['fg_muted']};
         font-size: 11px;

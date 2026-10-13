@@ -156,6 +156,97 @@ def test_outline_double_edges_toggle_persists(app, tmp_path, monkeypatch):
         restored.close()
 
 
+def test_sketch_mode_controls_switch_and_persist(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._mode_combo.setCurrentIndex(
+            window._mode_combo.findData(Bot.SKETCH)
+        )
+        assert window._sketch_controls.isVisibleTo(window)
+        assert window._continuous_controls.isVisibleTo(window)
+        assert not window._runs_controls.isVisibleTo(window)
+        assert not window._outline_controls.isVisibleTo(window)
+
+        # The edge source is selectable; Canny thresholds appear with it.
+        assert window._sketch_source.currentData() == Bot.EDGE_EDGEDRAWING
+        window._sketch_source.setCurrentIndex(
+            window._sketch_source.findData(Bot.EDGE_CANNY)
+        )
+        assert window.bot.sketch_edge_source == Bot.EDGE_CANNY
+        assert window._canny_low.isVisibleTo(window)
+
+        window._canny_low.set_value(80, emit=True)
+        window._sketch_hue_threshold.set_value(22, emit=True)
+        window._sketch_join_distance.set_value(4.0, emit=True)
+        assert window.bot.canny_low == pytest.approx(80)
+        assert window.bot.sketch_hue_threshold == pytest.approx(22)
+        assert window.bot.sketch_join_distance == pytest.approx(4.0)
+        window._save_config()
+    finally:
+        window.close()
+
+    restored = MainWindow(Bot())
+    try:
+        assert restored.bot.sketch_edge_source == Bot.EDGE_CANNY
+        assert restored.bot.canny_low == pytest.approx(80)
+        assert restored.bot.sketch_hue_threshold == pytest.approx(22)
+        assert restored.bot.sketch_join_distance == pytest.approx(4.0)
+        assert restored._mode == Bot.SKETCH
+    finally:
+        restored.close()
+
+
+def test_preview_view_toggle_and_restore(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        assert window._preview_view == "source"
+        assert window._view_source_btn.isChecked()
+
+        window._view_group.idClicked.emit(1)
+        assert window._preview_view == "preview"
+        assert window._view_preview_btn.isChecked()
+
+        window._view_group.idClicked.emit(0)
+        assert window._preview_view == "source"
+        assert window._view_source_btn.isChecked()
+        assert window._preview_meta.text()  # restored meta, never blank
+    finally:
+        window.close()
+
+
+def test_plan_preview_task_emits_canvas_sized_image(app, tmp_path):
+    from pyaint import planner
+    from pyaint.palette import Palette
+    from pyaint.ui.plan_tasks import PlanPreviewTask
+
+    source = tmp_path / "src.png"
+    Image.new("RGB", (20, 20), (255, 0, 0)).save(source)
+    captured = {}
+    task = PlanPreviewTask(
+        7,
+        str(source),
+        (0, 0, 20, 20),
+        2,
+        Palette(colors_pos={(255, 0, 0): (0, 0), (0, 0, 255): (1, 0)}),
+        "rgb",
+        planner.IGNORE_WHITE | planner.IGNORE_TRANSPARENT,
+        planner.SLOTTED,
+        {},
+    )
+    task.signals.ready.connect(
+        lambda generation, image, meta: captured.update(
+            generation=generation, image=image, meta=meta
+        )
+    )
+    task.run()
+    assert captured["generation"] == 7
+    assert captured["image"].width() == 20
+    assert captured["image"].height() == 20
+    assert captured["meta"]
+
+
 def test_progress_overlay_updates(app):
     from PySide6.QtCore import Qt
 
