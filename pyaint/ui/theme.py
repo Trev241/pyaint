@@ -610,6 +610,46 @@ def stylesheet(tokens: dict | None = None) -> str:
         color: {t['fg']};
         font-weight: 600;
     }}
+    #SegmentedGroup {{
+        background: {t['bg_input']};
+        border: 1px solid {t['border_input']};
+        border-radius: 5px;
+    }}
+    QPushButton#SegmentButton {{
+        background: transparent;
+        border: none;
+        border-radius: 4px;
+        padding: 6px 8px;
+        color: {t['fg_dim']};
+        font-size: 11px;
+    }}
+    QPushButton#SegmentButton:hover {{
+        color: {t['fg']};
+    }}
+    QPushButton#SegmentButton:checked {{
+        background: {t['accent']};
+        color: {t['accent_fg']};
+        font-weight: 600;
+    }}
+    #PresetTagline {{
+        color: {t['fg']};
+        font-size: 12px;
+        font-weight: 600;
+        padding: 4px 2px 0 2px;
+    }}
+    #PresetHint {{
+        color: {t['fg_muted']};
+        font-size: 11px;
+        padding: 0 2px 2px 2px;
+    }}
+    #PaneLabel {{
+        color: {t['fg_dim']};
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        padding: 0 2px;
+    }}
     #ModeHint {{
         color: {t['fg_muted']};
         font-size: 11px;

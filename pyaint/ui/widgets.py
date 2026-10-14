@@ -9,8 +9,10 @@ from typing import Optional
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, Qt, Signal
 from PySide6.QtGui import QImage, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -72,6 +74,109 @@ class CheckBox(QCheckBox):
             QPointF(left + width * 0.82, top + height * 0.22),
         ])
         painter.end()
+
+
+class CheckBoxField(QWidget):
+    """A checkbox with an optional one-line description underneath it.
+
+    The plain :class:`CheckBox` only carries a tooltip; an on-screen hint is
+    far easier to discover, so the tunable controls use this wrapper.
+    """
+
+    toggled = Signal(bool)
+
+    def __init__(self, label: str, hint: str = "", parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setSpacing(2)
+
+        self._check = CheckBox(label)
+        self._check.toggled.connect(self._on_toggled)
+        layout.addWidget(self._check)
+
+        self._hint = QLabel()
+        self._hint.setObjectName("FieldHint")
+        self._hint.setWordWrap(True)
+        layout.addWidget(self._hint)
+        self.set_hint(hint)
+
+    def _on_toggled(self, checked: bool) -> None:
+        self.toggled.emit(checked)
+
+    def set_hint(self, text: str) -> None:
+        self._hint.setText(text or "")
+        self._hint.setVisible(bool(text))
+
+    def isChecked(self) -> bool:  # noqa: N802 - Qt-style API
+        return self._check.isChecked()
+
+    def setChecked(self, checked: bool) -> None:  # noqa: N802 - Qt-style API
+        self._check.setChecked(checked)
+
+    def setToolTip(self, text: str) -> None:  # noqa: N802 - Qt-style API
+        super().setToolTip(text)
+        self._check.setToolTip(text)
+
+    def blockSignals(self, block: bool) -> bool:  # noqa: N802 - Qt-style API
+        # The public ``toggled`` signal is forwarded manually, so block the
+        # inner checkbox to suppress it as Qt callers expect.
+        self._check.blockSignals(block)
+        return super().blockSignals(block)
+
+
+class SegmentedControl(QWidget):
+    """A compact grid of mutually-exclusive, checkable buttons.
+
+    ``options`` is a sequence of ``(key, label)`` pairs; ``changed`` fires with
+    the key when the user picks one. ``set_value`` never emits, so the owner
+    can sync the control without re-triggering its own handler.
+    """
+
+    changed = Signal(str)
+
+    def __init__(self, options, columns: int = 0, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SegmentedGroup")
+        self._buttons: dict = {}
+        columns = columns or len(options)
+
+        grid = QGridLayout(self)
+        grid.setContentsMargins(1, 1, 1, 1)
+        grid.setSpacing(0)
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+        for index, (key, label) in enumerate(options):
+            button = QPushButton(label)
+            button.setObjectName("SegmentButton")
+            button.setCheckable(True)
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(
+                lambda checked, k=key: self._on_clicked(k, checked)
+            )
+            self._group.addButton(button)
+            self._buttons[key] = button
+            grid.addWidget(button, index // columns, index % columns)
+        for column in range(columns):
+            grid.setColumnStretch(column, 1)
+
+    def _on_clicked(self, key: str, checked: bool) -> None:
+        if checked:
+            self.changed.emit(key)
+
+    def value(self):
+        for key, button in self._buttons.items():
+            if button.isChecked():
+                return key
+        return None
+
+    def set_value(self, key) -> None:
+        # Relax exclusivity while clearing so the group can momentarily hold no
+        # checked button (e.g. switching straight from one preset to another).
+        self._group.setExclusive(False)
+        for item_key, button in self._buttons.items():
+            button.setChecked(item_key == key)
+        self._group.setExclusive(True)
 
 
 class NoticeBanner(QFrame):
@@ -223,6 +328,11 @@ class CollapsibleSection(QFrame):
     def add_layout(self, layout) -> None:
         self._body_layout.addLayout(layout)
 
+    def set_expanded(self, expanded: bool) -> None:
+        """Open or close the body without needing a click on the header."""
+        self._toggle.setChecked(expanded)
+        self._on_toggle(expanded)
+
     def _on_toggle(self, checked: bool) -> None:
         self._toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
         self._body.setVisible(checked)
@@ -282,6 +392,7 @@ class SliderField(QWidget):
         maximum: float,
         value: float,
         resolution: float = 0.01,
+        hint: str = "",
         parent=None,
     ):
         super().__init__(parent)
@@ -313,7 +424,17 @@ class SliderField(QWidget):
         self._slider.valueChanged.connect(self._on_slider)
         outer.addWidget(self._slider)
 
+        self._hint = QLabel()
+        self._hint.setObjectName("FieldHint")
+        self._hint.setWordWrap(True)
+        outer.addWidget(self._hint)
+        self.set_hint(hint)
+
         self._update_label(value)
+
+    def set_hint(self, text: str) -> None:
+        self._hint.setText(text or "")
+        self._hint.setVisible(bool(text))
 
     def _on_slider(self, raw: int) -> None:
         value = raw * self._resolution
