@@ -168,8 +168,10 @@ def test_sketch_mode_controls_switch_and_persist(app, tmp_path, monkeypatch):
         assert not window._runs_controls.isVisibleTo(window)
         assert not window._outline_controls.isVisibleTo(window)
 
-        # The edge source is selectable; Canny thresholds appear with it.
+        # The edge source and the rest of the tuning live under Advanced; open
+        # it so the Canny thresholds are visible with the Canny source.
         assert window._sketch_source.currentData() == Bot.EDGE_EDGEDRAWING
+        window._sketch_advanced.set_expanded(True)
         window._sketch_source.setCurrentIndex(
             window._sketch_source.findData(Bot.EDGE_CANNY)
         )
@@ -195,6 +197,30 @@ def test_sketch_mode_controls_switch_and_persist(app, tmp_path, monkeypatch):
         assert restored._mode == Bot.SKETCH
     finally:
         restored.close()
+
+
+def test_sketch_presets_apply_and_detect_custom(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._mode_combo.setCurrentIndex(
+            window._mode_combo.findData(Bot.SKETCH)
+        )
+        # A fresh config opens on the friendly Cartoon preset.
+        assert window._sketch_preset_control.value() == "cartoon"
+
+        window._sketch_preset_control.changed.emit("realistic")
+        assert window.bot.sketch_hue_threshold == pytest.approx(28.0)
+        assert window.bot.sketch_gradient_keep == pytest.approx(0.6)
+        assert window._sketch_preset_control.value() == "realistic"
+
+        # Touching an advanced knob drops the selector back to Custom, which
+        # is a caption rather than a selectable segment (no button checked).
+        window._sketch_hue_threshold.set_value(12, emit=True)
+        assert window._sketch_preset_control.value() is None
+        assert "Custom" in window._sketch_preset_title.text()
+    finally:
+        window.close()
 
 
 def test_preview_view_toggle_and_restore(app, tmp_path, monkeypatch):

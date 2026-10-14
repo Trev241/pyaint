@@ -68,6 +68,12 @@ from pyaint.ui.countdown import CountdownBanner
 from pyaint.ui.icons import icon
 from pyaint.ui.overlay import DetectionOverlay, ProgressOverlay
 from pyaint.ui.plan_tasks import PlanPreviewTask
+from pyaint.ui.presets import (
+    SKETCH_PRESET_FIELDS,
+    SKETCH_PRESET_OPTIONS,
+    match_preset,
+    preset_by_key,
+)
 from pyaint.ui.previews import store_box_preview
 from pyaint.ui.widgets import (
     CheckBox,
@@ -78,6 +84,7 @@ from pyaint.ui.widgets import (
     NoticeBanner,
     ReadinessStrip,
     Section,
+    SegmentedControl,
     SliderField,
     accepts_image_drop,
     local_path_from_mime,
@@ -167,6 +174,9 @@ class MainWindow(QMainWindow):
         self.tools = {}
         self.draw_options = 0
         self._mode = Bot.OUTLINE
+        # True while a preset is being pushed into the widgets, so the change
+        # handlers do not immediately flip the selector back to Custom.
+        self._applying_sketch_preset = False
         self._busy = False
         self._last_url = ""
         # Durable copy of the most recently loaded image, restored on startup.
@@ -639,6 +649,33 @@ class MainWindow(QMainWindow):
             "info",
         )
         sketch_layout.addWidget(self._sketch_notice)
+
+        preset_label = QLabel("Line quality preset")
+        preset_label.setObjectName("FieldLabel")
+        sketch_layout.addWidget(preset_label)
+        self._sketch_preset_control = SegmentedControl(
+            SKETCH_PRESET_OPTIONS, columns=2
+        )
+        self._sketch_preset_control.changed.connect(
+            self._on_sketch_preset_changed
+        )
+        sketch_layout.addWidget(self._sketch_preset_control)
+        self._sketch_preset_title = QLabel()
+        self._sketch_preset_title.setObjectName("PresetTagline")
+        sketch_layout.addWidget(self._sketch_preset_title)
+        self._sketch_preset_desc = QLabel()
+        self._sketch_preset_desc.setObjectName("PresetHint")
+        self._sketch_preset_desc.setWordWrap(True)
+        sketch_layout.addWidget(self._sketch_preset_desc)
+
+        self._sketch_advanced = CollapsibleSection("Advanced settings")
+        advanced_hint = QLabel(
+            "Fine-tune the chosen preset. Changing any value switches the "
+            "preset to Custom."
+        )
+        advanced_hint.setObjectName("SectionHint")
+        advanced_hint.setWordWrap(True)
+        self._sketch_advanced.add(advanced_hint)
         for widget in (
             self._sketch_source,
             self._sketch_hue_merge,
@@ -653,7 +690,8 @@ class MainWindow(QMainWindow):
             self._canny_high,
             self._canny_color_edges_toggle,
         ):
-            sketch_layout.addWidget(widget)
+            self._sketch_advanced.add(widget)
+        sketch_layout.addWidget(self._sketch_advanced)
         drawing.add(self._sketch_controls)
 
         # Pacing controls are shared by the continuous-stroke modes.
@@ -1377,6 +1415,11 @@ class MainWindow(QMainWindow):
         self._theme_combo.setCurrentIndex(index if index >= 0 else 0)
         self._theme_combo.blockSignals(False)
 
+        if not settings:
+            # First run: start from the Cartoon preset rather than a wall of
+            # edge-detection defaults, so the first sketch looks good.
+            self._apply_sketch_preset_values("cartoon")
+
         drawing_by_target = self.tools.get("drawing_by_target")
         self._drawing_by_target = (
             dict(drawing_by_target) if isinstance(drawing_by_target, dict) else {}
@@ -1653,8 +1696,8 @@ class MainWindow(QMainWindow):
             "thins shared borders to one clean line."
         ),
         Bot.SKETCH: (
-            "Sketches the image's edges into black line art. Pick the edge "
-            "source and merge by colour to drop shading."
+            "Sketches the image's edges into black line art. Pick a preset "
+            "for the look, then open Advanced only if you need to tune it."
         ),
     }
 
@@ -1695,6 +1738,7 @@ class MainWindow(QMainWindow):
         self._canny_color_edges_toggle.setChecked(bool(self.bot.canny_color_edges))
         self._canny_color_edges_toggle.blockSignals(False)
         self._sync_sketch_visibility()
+        self._detect_sketch_preset()
         self._chk_double_edges.blockSignals(True)
         self._chk_double_edges.setChecked(bool(self.bot.outline_double_edges))
         self._chk_double_edges.blockSignals(False)
@@ -1733,6 +1777,50 @@ class MainWindow(QMainWindow):
         self._canny_low.setEnabled(manual)
         self._canny_high.setEnabled(manual)
         self._sketch_hue_threshold.setEnabled(self._sketch_hue_merge.isChecked())
+
+    # -- Sketch presets -------------------------------------------------
+    def _read_sketch_settings(self) -> dict:
+        return {
+            field: getattr(self.bot, field) for field in SKETCH_PRESET_FIELDS
+        }
+
+    def _set_sketch_preset_ui(self, key: str) -> None:
+        preset = preset_by_key(key)
+        self._sketch_preset_control.set_value(key)
+        self._sketch_preset_title.setText(preset["tagline"])
+        self._sketch_preset_desc.setText(preset["description"])
+
+    def _detect_sketch_preset(self) -> None:
+        """Show the preset the live knobs currently match, else Custom."""
+        self._set_sketch_preset_ui(
+            match_preset(self._read_sketch_settings()) or "custom"
+        )
+
+    def _apply_sketch_preset_values(self, key: str) -> bool:
+        """Push a preset's values onto the bot. False for the Custom entry."""
+        preset = preset_by_key(key)
+        if not preset["settings"]:
+            return False
+        for name, value in preset["settings"].items():
+            setattr(self.bot, name, value)
+        return True
+
+    def _on_sketch_preset_changed(self, key: str) -> None:
+        if self._initializing:
+            return
+        if not self._apply_sketch_preset_values(key):
+            # "Custom" just documents the current manual state.
+            self._set_sketch_preset_ui("custom")
+            return
+        self._applying_sketch_preset = True
+        try:
+            self._refresh_drawing_widgets()
+        finally:
+            self._applying_sketch_preset = False
+        self._set_sketch_preset_ui(key)
+        self._store_drawing_settings()
+        self._save_config()
+        self._schedule_preview(immediate=True)
 
     def _sync_env_ui(self) -> None:
         recipe = get_recipe(self.profile.target)
@@ -1886,6 +1974,9 @@ class MainWindow(QMainWindow):
         self.bot.canny_low = max(0.0, float(self._canny_low.value()))
         self.bot.canny_high = max(0.0, float(self._canny_high.value()))
         self._sync_sketch_visibility()
+        if not self._applying_sketch_preset:
+            # A manual tweak no longer matches the selected preset.
+            self._set_sketch_preset_ui("custom")
         self._store_drawing_settings()
         self._save_config()
         self._schedule_preview()

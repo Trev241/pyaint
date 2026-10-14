@@ -13,6 +13,14 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Sketch presets and a friendlier Sketch panel.** SKETCH now opens with two
+  immutable looks — **Cartoon** (flat, cel-shaded art; every stroke kept) and
+  **Realistic** (photos and painterly art; weak edges pruned to tone shading
+  down) — chosen to match the image you loaded. Every edge-detection knob moved
+  under a collapsed **Advanced settings** section with an on-screen hint.
+  Changing any knob leaves the presets and shows a read-only **Custom** caption,
+  so the built-ins stay identical on every machine. Preset data lives in
+  `pyaint/ui/presets.py`.
 - **Live drawing preview.** The preview pane gained a **Source / Preview**
   toggle. *Preview* plans and renders the current image exactly as it will be
   drawn — thin black line art for Outline/Sketch, palette-coloured fills for
