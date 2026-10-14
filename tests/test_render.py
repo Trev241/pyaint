@@ -40,6 +40,8 @@ def test_preview_fill_mode_reports_grid_cells():
     frame, meta = render.preview(
         image, (0, 0, 16, 16), 2, palette, "rgb", 0, planner.SLOTTED, {}
     )
-    assert frame.size == (16, 16)
+    # The frame is cropped to the drawn region (the fitted source rectangle),
+    # so the canvas padding around it is not shown as dead space.
+    assert frame.size == (8, 8)
     assert "cells" in meta
-    assert frame.getpixel((4, 4)) == (255, 0, 0)
+    assert frame.getpixel((0, 0)) == (255, 0, 0)

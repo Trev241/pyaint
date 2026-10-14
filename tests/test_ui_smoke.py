@@ -303,7 +303,7 @@ def test_compare_disabled_without_an_image(app, tmp_path, monkeypatch):
         window.close()
 
 
-def test_plan_preview_task_emits_canvas_sized_image(app, tmp_path):
+def test_plan_preview_task_frames_the_drawn_region(app, tmp_path):
     from pyaint import planner
     from pyaint.palette import Palette
     from pyaint.ui.plan_tasks import PlanPreviewTask
@@ -329,8 +329,13 @@ def test_plan_preview_task_emits_canvas_sized_image(app, tmp_path):
     )
     task.run()
     assert captured["generation"] == 7
-    assert captured["image"].width() == 20
-    assert captured["image"].height() == 20
+    # The preview is cropped to the drawn region, not the padded canvas rect.
+    source_img = Image.open(source)
+    _s, (grid_w, grid_h), _ox, _oy = planner.fit_to_canvas(
+        source_img, (0, 0, 20, 20), 2
+    )
+    assert captured["image"].width() == grid_w * 2
+    assert captured["image"].height() == grid_h * 2
     assert captured["meta"]
 
 

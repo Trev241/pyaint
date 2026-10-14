@@ -79,15 +79,46 @@ def render_fills(grid, canvas, origin, step: int) -> Image.Image:
     return image
 
 
+def _content_box(cmap, canvas, margin: int = 2):
+    """Bounding box (canvas coords) of every stroke, or ``None`` if empty."""
+    xs = []
+    ys = []
+    for strokes in cmap.values():
+        for stroke in strokes:
+            for px, py in stroke:
+                xs.append(px)
+                ys.append(py)
+    if not xs:
+        return None
+    x, y, w, h = (int(v) for v in canvas)
+    left = max(x, int(min(xs)) - margin)
+    top = max(y, int(min(ys)) - margin)
+    right = min(x + w, int(max(xs)) + margin + 1)
+    bottom = min(y + h, int(max(ys)) + margin + 1)
+    if right - left < 2 or bottom - top < 2:
+        return None
+    return left, top, right, bottom
+
+
 def preview(image, canvas, step: int, palette, metric, flags: int, mode: str,
             plan_kwargs: Dict) -> Tuple[Image.Image, str]:
-    """Plan + render one preview frame. Returns ``(PIL.Image, meta_text)``."""
+    """Plan + render one preview frame. Returns ``(PIL.Image, meta_text)``.
+
+    The frame is cropped to the content the plan actually covers (the fitted
+    source rectangle, or the strokes' bounds for line modes), so the preview
+    carries no baked-in canvas whitespace and Compare shows matching framing.
+    """
+    x, y, w, h = (int(v) for v in canvas)
     if mode in LINE_MODES:
         cmap = planner.plan_image(
             image, canvas, step, palette, metric, flags, mode, **plan_kwargs
         )
         strokes = sum(len(lines) for lines in cmap.values())
-        return render_plan(cmap, canvas, step, mode), f"{strokes} strokes"
+        frame = render_plan(cmap, canvas, step, mode)
+        box = _content_box(cmap, canvas)
+        if box is not None:
+            frame = frame.crop((box[0] - x, box[1] - y, box[2] - x, box[3] - y))
+        return frame, f"{strokes} strokes"
 
     source, (grid_w, grid_h), origin_x, origin_y = planner.fit_to_canvas(
         image, canvas, step
@@ -95,5 +126,11 @@ def preview(image, canvas, step: int, palette, metric, flags: int, mode: str,
     grid = planner.quantize_image(
         source, (grid_w, grid_h), palette, metric, flags
     )
-    image_out = render_fills(grid, canvas, (origin_x, origin_y), step)
-    return image_out, f"{grid_w} \u00d7 {grid_h} cells"
+    frame = render_fills(grid, canvas, (origin_x, origin_y), step)
+    left = max(0, origin_x - x)
+    top = max(0, origin_y - y)
+    right = min(w, origin_x - x + grid_w * step)
+    bottom = min(h, origin_y - y + grid_h * step)
+    if right > left and bottom > top:
+        frame = frame.crop((left, top, right, bottom))
+    return frame, f"{grid_w} \u00d7 {grid_h} cells"
