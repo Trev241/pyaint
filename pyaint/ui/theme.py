@@ -282,6 +282,37 @@ def stylesheet(tokens: dict | None = None) -> str:
         font-size: 11px;
         font-weight: 600;
     }}
+    #FamilyLabel {{
+        color: {t['fg_muted']};
+        font-size: 11px;
+        font-weight: 600;
+        padding: 6px 0 1px 2px;
+    }}
+    QRadioButton#ModeRailItem {{
+        color: {t['fg_muted']};
+        padding: 6px 8px;
+        border-radius: 4px;
+        spacing: 8px;
+    }}
+    QRadioButton#ModeRailItem:hover {{
+        background: {t['bg_hover']};
+        color: {t['fg']};
+    }}
+    QRadioButton#ModeRailItem:checked {{
+        color: {t['fg']};
+        font-weight: 600;
+    }}
+    QRadioButton#ModeRailItem::indicator {{
+        width: 13px;
+        height: 13px;
+        border-radius: 7px;
+        border: 2px solid {t['border_input']};
+        background: transparent;
+    }}
+    QRadioButton#ModeRailItem::indicator:checked {{
+        border: 2px solid {t['accent']};
+        background: {t['accent']};
+    }}
 
     /* --- Dialog text ---------------------------------------------------- */
     #DialogTitle {{

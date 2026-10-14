@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QSlider,
@@ -35,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 
-from pyaint.ui import bands
+from pyaint.ui import bands, modes
 
 
 def pil_to_qpixmap(image) -> QPixmap:
@@ -600,6 +601,73 @@ class DualReadoutSlider(QWidget):
         self._slider.setValue(round(value / self._resolution))
         self._update_label(value)
         self._block = False
+
+
+class ModeRail(QWidget):
+    """A single-choice mode picker: one *Mode* heading, family subheadings,
+    and radio items.
+
+    Exactly one mode is active at any time; the radio dots make that explicit
+    across the ``Runs`` and ``Contours`` families, which only describe how the
+    modes produce the image.
+    """
+
+    modeChanged = Signal(str)
+
+    def __init__(self, current: str, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ModeRail")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(1)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        title = QLabel("Mode")
+        title.setObjectName("FieldLabel")
+        header.addWidget(title)
+        header.addStretch(1)
+        hint = QLabel("choose one")
+        hint.setObjectName("FieldHint")
+        header.addWidget(hint)
+        layout.addLayout(header)
+        layout.addSpacing(4)
+
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+        self._buttons = {}
+        for family, items in modes.MODE_FAMILIES:
+            family_label = QLabel(family)
+            family_label.setObjectName("FamilyLabel")
+            layout.addWidget(family_label)
+            for name, mode in items:
+                button = QRadioButton(name)
+                button.setObjectName("ModeRailItem")
+                button.setChecked(mode == current)
+                button.toggled.connect(
+                    lambda checked, m=mode: self._on_toggled(checked, m)
+                )
+                self._group.addButton(button)
+                self._buttons[mode] = button
+                layout.addWidget(button)
+        layout.addStretch(1)
+
+    def _on_toggled(self, checked: bool, mode: str) -> None:
+        if checked:
+            self.modeChanged.emit(mode)
+
+    def mode(self) -> str:
+        """The active mode, or '' if nothing is selected."""
+        for mode, button in self._buttons.items():
+            if button.isChecked():
+                return mode
+        return ""
+
+    def set_mode(self, mode: str) -> None:
+        """Select ``mode`` without re-emitting when it is already active."""
+        button = self._buttons.get(mode)
+        if button is not None and not button.isChecked():
+            button.setChecked(True)
 
 
 # ---------------------------------------------------------------------------

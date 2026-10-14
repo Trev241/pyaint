@@ -1462,3 +1462,19 @@ def test_dual_readout_slider_shows_number_and_band(app):
         assert field._band_label.text() == "Coarse"
     finally:
         field.close()
+
+
+def test_mode_rail_is_a_single_choice(app):
+    from pyaint import planner
+    from pyaint.ui.widgets import ModeRail
+
+    rail = ModeRail(planner.LAYERED)
+    try:
+        assert rail.mode() == planner.LAYERED
+        rail.set_mode(planner.SKETCH)
+        assert rail.mode() == planner.SKETCH
+        # Radio exclusivity: exactly one mode is ever active.
+        checked = [b for b in rail._buttons.values() if b.isChecked()]
+        assert len(checked) == 1
+    finally:
+        rail.close()
