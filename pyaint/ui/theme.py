@@ -1,9 +1,9 @@
-"""Theming for the PySide6 UI.
+"""Theming for the PySide6 UI — "Studio Warm".
 
-Two flat token sets are provided — VS Code "Dark Modern" and "Light Modern" —
-plus an ``auto`` mode that follows the OS colour scheme. Everything visual
-(surfaces, text, accent) comes from these tokens, so switching themes is a
-single re-apply.
+Two flat token sets (warm-paper light, warm-charcoal dark) plus an ``auto`` mode
+that follows the OS colour scheme. Surfaces are warm, never gray; one clay
+accent carries every highlight. Everything visual (surfaces, text, accent)
+comes from these tokens, so switching themes is a single re-apply.
 """
 
 from __future__ import annotations
@@ -12,61 +12,61 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 DARK = {
-    "bg": "#1f1f1f",
-    "bg_activity": "#181818",
-    "bg_side": "#181818",
-    "bg_status": "#181818",
-    "bg_input": "#313131",
-    "bg_hover": "#2a2d2e",
-    "bg_active": "#37373d",
-    "bg_card": "#232323",
-    "border": "#2b2b2b",
-    "border_input": "#3c3c3c",
-    "fg": "#cccccc",
-    "fg_muted": "#9d9d9d",
-    "fg_dim": "#6e7681",
-    "accent": "#0078d4",
-    "accent_hover": "#026ec1",
-    "accent_pressed": "#025a9e",
-    "accent_fg": "#ffffff",
-    "danger": "#f14c4c",
-    "success": "#4ec9b0",
-    "warning": "#cca700",
-    "notice_info_bg": "rgba(0, 120, 212, 0.14)",
-    "notice_success_bg": "rgba(78, 201, 176, 0.14)",
-    "notice_warning_bg": "rgba(204, 167, 0, 0.14)",
-    "notice_error_bg": "rgba(241, 76, 76, 0.14)",
-    "scrollbar": "rgba(121, 121, 121, 0.40)",
-    "scrollbar_hover": "rgba(150, 150, 150, 0.75)",
+    "bg": "#1E1B19",
+    "bg_activity": "#171513",
+    "bg_side": "#171513",
+    "bg_status": "#171513",
+    "bg_input": "#2E2926",
+    "bg_hover": "#2A2623",
+    "bg_active": "#332E2A",
+    "bg_card": "#262220",
+    "border": "#3A342F",
+    "border_input": "#4A423C",
+    "fg": "#ECE5DC",
+    "fg_muted": "#B3A79A",
+    "fg_dim": "#948A7E",
+    "accent": "#E07856",
+    "accent_hover": "#D66B49",
+    "accent_pressed": "#C55F3F",
+    "accent_fg": "#1E1B19",
+    "danger": "#E07068",
+    "success": "#7FB07A",
+    "warning": "#E0B84E",
+    "notice_info_bg": "rgba(224, 120, 86, 0.16)",
+    "notice_success_bg": "rgba(127, 176, 122, 0.16)",
+    "notice_warning_bg": "rgba(224, 184, 78, 0.16)",
+    "notice_error_bg": "rgba(224, 112, 104, 0.16)",
+    "scrollbar": "rgba(150, 140, 128, 0.40)",
+    "scrollbar_hover": "rgba(170, 160, 148, 0.70)",
 }
 
 LIGHT = {
-    "bg": "#ffffff",
-    "bg_activity": "#f8f8f8",
-    "bg_side": "#f8f8f8",
-    "bg_status": "#f8f8f8",
-    "bg_input": "#ffffff",
-    "bg_hover": "#e8e8e8",
-    "bg_active": "#dcdcdc",
-    "bg_card": "#f3f3f3",
-    "border": "#e5e5e5",
-    "border_input": "#cecece",
-    "fg": "#3b3b3b",
-    "fg_muted": "#616161",
-    "fg_dim": "#8b8b8b",
-    "accent": "#005fb8",
-    "accent_hover": "#0258a8",
-    "accent_pressed": "#024a8f",
-    "accent_fg": "#ffffff",
-    "danger": "#cd3131",
-    "success": "#107c10",
-    "warning": "#bf8803",
-    "notice_info_bg": "rgba(0, 95, 184, 0.10)",
-    "notice_success_bg": "rgba(16, 124, 16, 0.10)",
-    "notice_warning_bg": "rgba(191, 136, 3, 0.12)",
-    "notice_error_bg": "rgba(205, 49, 49, 0.10)",
-    "scrollbar": "rgba(100, 100, 100, 0.35)",
-    "scrollbar_hover": "rgba(80, 80, 80, 0.60)",
+    "bg": "#FAF7F2",
+    "bg_activity": "#F2ECE4",
+    "bg_side": "#F2ECE4",
+    "bg_status": "#F2ECE4",
+    "bg_input": "#FFFFFF",
+    "bg_hover": "#EDE6DC",
+    "bg_active": "#E4DACD",
+    "bg_card": "#FFFDFA",
+    "border": "#E6DED2",
+    "border_input": "#D9CFC1",
+    "fg": "#2B2622",
+    "fg_muted": "#6B6157",
+    "fg_dim": "#736A5F",
+    "accent": "#B8542F",
+    "accent_hover": "#A94A2B",
+    "accent_pressed": "#964124",
+    "accent_fg": "#FFFFFF",
+    "danger": "#B23A34",
+    "success": "#4F7A4A",
+    "warning": "#C58A1E",
+    "notice_info_bg": "rgba(184, 84, 47, 0.10)",
+    "notice_success_bg": "rgba(79, 122, 74, 0.12)",
+    "notice_warning_bg": "rgba(197, 138, 30, 0.14)",
+    "notice_error_bg": "rgba(178, 58, 52, 0.12)",
+    "scrollbar": "rgba(120, 105, 92, 0.35)",
+    "scrollbar_hover": "rgba(120, 105, 92, 0.60)",
 }
 
 THEME_MODES = ("auto", "dark", "light")
@@ -107,7 +107,7 @@ def stylesheet(tokens: dict | None = None) -> str:
     return f"""
     * {{
         font-family: "Segoe UI", "SF Pro Text", "Ubuntu", sans-serif;
-        font-size: 12px;
+        font-size: 13px;
         outline: none;
     }}
 
@@ -152,7 +152,6 @@ def stylesheet(tokens: dict | None = None) -> str:
         color: {t['fg_muted']};
         font-size: 11px;
         font-weight: 600;
-        letter-spacing: 1px;
         padding: 10px 12px 4px 12px;
     }}
     QScrollArea {{
@@ -173,7 +172,7 @@ def stylesheet(tokens: dict | None = None) -> str:
     QScrollBar::handle:vertical {{
         background: {t['scrollbar']};
         min-height: 28px;
-        border-radius: 5px;
+        border-radius: 8px;
         margin: 2px;
     }}
     QScrollBar::handle:vertical:hover {{
@@ -196,7 +195,7 @@ def stylesheet(tokens: dict | None = None) -> str:
     QScrollBar::handle:horizontal {{
         background: {t['scrollbar']};
         min-width: 28px;
-        border-radius: 5px;
+        border-radius: 8px;
         margin: 2px;
     }}
     QScrollBar::handle:horizontal:hover {{
@@ -224,8 +223,6 @@ def stylesheet(tokens: dict | None = None) -> str:
         color: {t['fg']};
         font-size: 11px;
         font-weight: 700;
-        letter-spacing: 0.8px;
-        text-transform: uppercase;
         padding: 12px 12px 2px 12px;
     }}
     #SectionHint {{
@@ -239,7 +236,6 @@ def stylesheet(tokens: dict | None = None) -> str:
         color: {t['fg_muted']};
         font-size: 11px;
         font-weight: 700;
-        letter-spacing: 0.8px;
         padding: 12px 10px 2px 8px;
         text-align: left;
     }}
@@ -291,7 +287,7 @@ def stylesheet(tokens: dict | None = None) -> str:
     QRadioButton#ModeRailItem {{
         color: {t['fg_muted']};
         padding: 6px 8px;
-        border-radius: 4px;
+        border-radius: 8px;
         spacing: 8px;
     }}
     QRadioButton#ModeRailItem:hover {{
@@ -507,7 +503,7 @@ def stylesheet(tokens: dict | None = None) -> str:
         background: {t['fg']};
         width: 10px;
         margin: -5px 0;
-        border-radius: 5px;
+        border-radius: 8px;
     }}
     QSlider::handle:horizontal:hover {{
         background: {t['accent']};
@@ -565,14 +561,12 @@ def stylesheet(tokens: dict | None = None) -> str:
     #ImageHeader {{
         background: {t['bg_card']};
         border: 1px solid {t['border']};
-        border-radius: 6px;
+        border-radius: 8px;
     }}
     #ImageTitle {{
         color: {t['fg']};
         font-size: 11px;
         font-weight: 700;
-        letter-spacing: 0.8px;
-        text-transform: uppercase;
     }}
     #SourceLabel {{
         color: {t['fg_dim']};
@@ -585,7 +579,7 @@ def stylesheet(tokens: dict | None = None) -> str:
     #SearchField {{
         background: {t['bg_input']};
         border: 1px solid {t['border_input']};
-        border-radius: 4px;
+        border-radius: 8px;
         padding: 6px 8px;
         min-height: 18px;
     }}
@@ -594,30 +588,28 @@ def stylesheet(tokens: dict | None = None) -> str:
     }}
     #LoadButton {{
         padding: 6px 16px;
-        border-radius: 4px;
+        border-radius: 8px;
         font-weight: 600;
     }}
     #PreviewStage {{
         background: {t['bg_card']};
         border: 1px solid {t['border']};
-        border-radius: 6px;
+        border-radius: 8px;
     }}
     #PreviewImage {{
         background: {t['bg']};
         border: 1px solid {t['border']};
-        border-radius: 4px;
+        border-radius: 8px;
     }}
     #PreviewImage[dragActive="true"] {{
         background: {t['bg_card']};
         border: 2px dashed {t['accent']};
-        border-radius: 6px;
+        border-radius: 8px;
     }}
     #StageHeader {{
         color: {t['fg_muted']};
         font-size: 11px;
         font-weight: 700;
-        letter-spacing: 0.8px;
-        text-transform: uppercase;
         padding: 0 2px;
     }}
     #StageMeta {{
@@ -628,12 +620,12 @@ def stylesheet(tokens: dict | None = None) -> str:
     #ViewToggleGroup {{
         background: {t['bg_input']};
         border: 1px solid {t['border_input']};
-        border-radius: 4px;
+        border-radius: 8px;
     }}
     QPushButton#ViewToggle {{
         background: transparent;
         border: none;
-        border-radius: 3px;
+        border-radius: 8px;
         padding: 3px 10px;
         color: {t['fg_dim']};
         font-size: 11px;
@@ -649,12 +641,12 @@ def stylesheet(tokens: dict | None = None) -> str:
     #SegmentedGroup {{
         background: {t['bg_input']};
         border: 1px solid {t['border_input']};
-        border-radius: 5px;
+        border-radius: 8px;
     }}
     QPushButton#SegmentButton {{
         background: transparent;
         border: none;
-        border-radius: 4px;
+        border-radius: 8px;
         padding: 6px 8px;
         color: {t['fg_dim']};
         font-size: 11px;
@@ -682,8 +674,6 @@ def stylesheet(tokens: dict | None = None) -> str:
         color: {t['fg_dim']};
         font-size: 10px;
         font-weight: 700;
-        letter-spacing: 0.6px;
-        text-transform: uppercase;
         padding: 0 2px;
     }}
     #ModeHint {{
@@ -706,7 +696,7 @@ def stylesheet(tokens: dict | None = None) -> str:
     #GalleryTile {{
         background: {t['bg_card']};
         border: 1px solid {t['border']};
-        border-radius: 4px;
+        border-radius: 8px;
     }}
     #GalleryTile:hover {{ border: 1px solid {t['accent']}; }}
     #GalleryImage {{ background: {t['bg_input']}; }}
@@ -758,7 +748,7 @@ def stylesheet(tokens: dict | None = None) -> str:
 
     QGroupBox {{
         border: 1px solid {t['border']};
-        border-radius: 3px;
+        border-radius: 8px;
         margin-top: 12px;
         padding-top: 8px;
     }}
