@@ -13,6 +13,19 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **"Studio Warm" look and an "easel" layout.** The UI moves off the VS Code
+  palette to warm-paper / warm-charcoal surfaces with a single clay accent
+  (`#B8542F` / `#E07856`, AA-verified), 13px sentence-case type, 8px shapes, and
+  a brush-stroke app icon (`assets/pyaint.ico`, wired into the window and the
+  frozen exe). The window is now a left single-choice **Mode** rail (radio dots
+  grouped under the **Runs** / **Contours** families), a frameless canvas with
+  the mode-aware **Look** selector and a **Customize** action cluster, and a
+  settings pane that stays hidden until **Customize** is pressed. Pane controls
+  show both the value and a band word (`12 px · Balanced`) with a pip meter.
+- **Drawing "Look" presets** (Balanced / Smooth / Fast draft) for the fill and
+  Outline modes, matching the existing SKETCH presets; the Look selector swaps
+  to Cartoon/Realistic in Edge tracing. Looks set pacing only, never planner
+  internals.
 - **Sketch presets and a friendlier Sketch panel.** SKETCH now opens with two
   immutable looks — **Cartoon** (flat, cel-shaded art; every stroke kept) and
   **Realistic** (photos and painterly art; weak edges pruned to tone shading
@@ -93,6 +106,16 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   key.
 
 ### Changed
+- **Preview is framed to its content.** The live preview and Compare no longer
+  show baked-in canvas whitespace: the frame is cropped to the fitted source
+  rectangle (fill modes) or the strokes' bounds (line modes), so Compare shows
+  matching framing and the preview is no longer letterboxed inside its pane.
+- **Friendly-guide copy**: *Find canvas*, *Set up manually*, *Finish setup*,
+  *Save the plan for next time*, *Try 20 strokes*, *Check brush size*, *Reset
+  all settings*, *Select area*, *Draw area*, and softer empty states.
+- **UI smoke tests are an opt-in group.** `pytest` runs the fast headless suite
+  (~7s); `pytest -m ui` runs the Qt widget tests (~23s). Closing a window now
+  destroys it, which fixes the module-state stall that used to hang the run.
 - **Sketch weak-edge pruning is one slider, not a toggle.** The redundant
   **Drop weak edges** checkbox is gone; **Keep strongest %** (10–100, default
   100 = keep every stroke) now controls gradient pruning on its own. The

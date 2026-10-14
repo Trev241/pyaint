@@ -20,3 +20,7 @@ else:
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
 TARGETS_DIR = os.path.join(PROJECT_ROOT, "targets")
 USER_TARGETS_DIR = os.path.join(os.path.expanduser("~"), ".pyaint", "targets")
+
+#: Where read-only bundled assets live. Under PyInstaller onefile the data is
+#: unpacked to ``sys._MEIPASS``, not next to the executable.
+RESOURCE_ROOT = getattr(sys, "_MEIPASS", PROJECT_ROOT)

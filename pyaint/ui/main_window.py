@@ -25,7 +25,7 @@ from typing import Optional
 
 from PIL import Image
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, QPixmap
+from PySide6.QtGui import QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -151,6 +151,9 @@ class MainWindow(InspectorMixin, QMainWindow):
         self.bot = bot
         self.title = "Pyaint"
         self.setWindowTitle(self.title)
+        app_icon = os.path.join(paths.RESOURCE_ROOT, "assets", "pyaint.ico")
+        if os.path.exists(app_icon):
+            self.setWindowIcon(QIcon(app_icon))
         self.resize(1320, 840)
         self.setMinimumSize(940, 620)
         self.setAcceptDrops(True)
