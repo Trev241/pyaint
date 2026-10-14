@@ -62,8 +62,8 @@ class CacheMixin:
         sketch_hue_threshold = getattr(
             self, "sketch_hue_threshold", planner.SKETCH_HUE_THRESHOLD
         )
-        sketch_gradient_gate = getattr(
-            self, "sketch_gradient_gate", planner.SKETCH_GRADIENT_GATE
+        sketch_gradient_keep = getattr(
+            self, "sketch_gradient_keep", planner.SKETCH_GRADIENT_KEEP
         )
         canny_low = getattr(self, "canny_low", planner.SKETCH_CANNY_LOW)
         canny_high = getattr(self, "canny_high", planner.SKETCH_CANNY_HIGH)
@@ -80,7 +80,7 @@ class CacheMixin:
             f"{outline_tiny_area}_{outline_similar_color}_{outline_step_threshold}_"
             f"{sketch_edge_source}_{sketch_smoothing}_{sketch_join_distance}_"
             f"{sketch_join_turn}_{sketch_min_stroke}_{sketch_epsilon}_"
-            f"{sketch_hue_merge}_{sketch_hue_threshold}_{sketch_gradient_gate}_"
+            f"{sketch_hue_merge}_{sketch_hue_threshold}_{sketch_gradient_keep}_"
             f"{canny_low}_{canny_high}_{canny_auto}_{canny_aperture}_{canny_l2}_"
             f"{canny_color_edges}_"
             f"{planner.OUTLINE_PIPELINE_VERSION}_{planner.SKETCH_PIPELINE_VERSION}_"
@@ -147,8 +147,8 @@ class CacheMixin:
             'sketch_hue_threshold': getattr(
                 self, "sketch_hue_threshold", planner.SKETCH_HUE_THRESHOLD
             ),
-            'sketch_gradient_gate': getattr(
-                self, "sketch_gradient_gate", planner.SKETCH_GRADIENT_GATE
+            'sketch_gradient_keep': getattr(
+                self, "sketch_gradient_keep", planner.SKETCH_GRADIENT_KEEP
             ),
             'canny_low': getattr(self, "canny_low", planner.SKETCH_CANNY_LOW),
             'canny_high': getattr(self, "canny_high", planner.SKETCH_CANNY_HIGH),

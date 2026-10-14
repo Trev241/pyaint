@@ -90,7 +90,7 @@ class Bot(CacheMixin):
         self.sketch_epsilon = planner.SKETCH_EPSILON
         self.sketch_hue_merge = planner.SKETCH_HUE_MERGE
         self.sketch_hue_threshold = planner.SKETCH_HUE_THRESHOLD
-        self.sketch_gradient_gate = planner.SKETCH_GRADIENT_GATE
+        self.sketch_gradient_keep = planner.SKETCH_GRADIENT_KEEP
         # Canny-specific thresholds (only used when the Canny source is picked).
         self.canny_low = planner.SKETCH_CANNY_LOW
         self.canny_high = planner.SKETCH_CANNY_HIGH
@@ -320,7 +320,7 @@ class Bot(CacheMixin):
             self.sketch_epsilon,
             self.sketch_hue_merge,
             self.sketch_hue_threshold,
-            self.sketch_gradient_gate,
+            self.sketch_gradient_keep,
             self.canny_low,
             self.canny_high,
             self.canny_auto,
@@ -716,7 +716,7 @@ class Bot(CacheMixin):
             self.sketch_epsilon,
             self.sketch_hue_merge,
             self.sketch_hue_threshold,
-            self.sketch_gradient_gate,
+            self.sketch_gradient_keep,
             self.canny_low,
             self.canny_high,
             self.canny_auto,

@@ -146,9 +146,9 @@ SKETCH_HUE_THRESHOLD = 15.0
 SKETCH_HUE_OFFSET = 4
 #: Saturation below which a pixel's hue is ignored (dark outlines are kept).
 SKETCH_HUE_SAT_MIN = 45.0
-#: Optional weak-edge gate: ``0`` disables, otherwise keep this fraction of
-#: strokes ranked by mean gradient magnitude.
-SKETCH_GRADIENT_GATE = 0.0
+#: Fraction of strokes to keep, ranked by mean gradient magnitude. ``1.0``
+#: keeps every stroke (weak-edge pruning off).
+SKETCH_GRADIENT_KEEP = 1.0
 #: Canny hysteresis thresholds, used when :data:`SKETCH_CANNY_AUTO` is off.
 SKETCH_CANNY_LOW = 50
 SKETCH_CANNY_HIGH = 150
@@ -161,7 +161,7 @@ SKETCH_CANNY_L2 = True
 #: Also detect Canny edges on Lab chroma so iso-luminant boundaries are caught.
 SKETCH_CANNY_COLOR_EDGES = False
 #: Bump when the sketch pipeline changes shape (part of the precompute cache key).
-SKETCH_PIPELINE_VERSION = 1
+SKETCH_PIPELINE_VERSION = 2
 #: Developer flag: ``PYAINT_DEBUG_SKETCH=1`` dumps the edge map and a red
 #: overlay on the source so the extraction can be eyeballed.
 SKETCH_DEBUG = bool(os.environ.get("PYAINT_DEBUG_SKETCH"))
@@ -1825,7 +1825,7 @@ def plan_sketch(
     epsilon: float = SKETCH_EPSILON,
     hue_merge: bool = SKETCH_HUE_MERGE,
     hue_threshold: float = SKETCH_HUE_THRESHOLD,
-    gradient_gate: float = SKETCH_GRADIENT_GATE,
+    gradient_keep: float = SKETCH_GRADIENT_KEEP,
     canny_low: float = SKETCH_CANNY_LOW,
     canny_high: float = SKETCH_CANNY_HIGH,
     canny_auto: bool = SKETCH_CANNY_AUTO,
@@ -1896,9 +1896,10 @@ def plan_sketch(
             for stroke in strokes
             if _keep_by_hue(stroke, hue, sat, float(hue_threshold))
         ]
-    if gradient_gate and float(gradient_gate) > 0:
+    keep_fraction = float(gradient_keep)
+    if 0.0 < keep_fraction < 1.0:
         strokes = _gate_by_gradient(
-            strokes, _gradient_magnitude(image_rgb), float(gradient_gate)
+            strokes, _gradient_magnitude(image_rgb), keep_fraction
         )
     min_length = float(min_stroke) * scale
     kept = [stroke for stroke in strokes if _path_length(stroke) >= min_length]
@@ -1973,7 +1974,7 @@ def plan_image(
     sketch_epsilon: float = SKETCH_EPSILON,
     sketch_hue_merge: bool = SKETCH_HUE_MERGE,
     sketch_hue_threshold: float = SKETCH_HUE_THRESHOLD,
-    sketch_gradient_gate: float = SKETCH_GRADIENT_GATE,
+    sketch_gradient_keep: float = SKETCH_GRADIENT_KEEP,
     canny_low: float = SKETCH_CANNY_LOW,
     canny_high: float = SKETCH_CANNY_HIGH,
     canny_auto: bool = SKETCH_CANNY_AUTO,
@@ -2022,7 +2023,7 @@ def plan_image(
             sketch_epsilon,
             sketch_hue_merge,
             sketch_hue_threshold,
-            sketch_gradient_gate,
+            sketch_gradient_keep,
             canny_low,
             canny_high,
             canny_auto,
@@ -2064,7 +2065,7 @@ def plan_region_image(
     sketch_epsilon: float = SKETCH_EPSILON,
     sketch_hue_merge: bool = SKETCH_HUE_MERGE,
     sketch_hue_threshold: float = SKETCH_HUE_THRESHOLD,
-    sketch_gradient_gate: float = SKETCH_GRADIENT_GATE,
+    sketch_gradient_keep: float = SKETCH_GRADIENT_KEEP,
     canny_low: float = SKETCH_CANNY_LOW,
     canny_high: float = SKETCH_CANNY_HIGH,
     canny_auto: bool = SKETCH_CANNY_AUTO,
@@ -2113,7 +2114,7 @@ def plan_region_image(
             sketch_epsilon,
             sketch_hue_merge,
             sketch_hue_threshold,
-            sketch_gradient_gate,
+            sketch_gradient_keep,
             canny_low,
             canny_high,
             canny_auto,

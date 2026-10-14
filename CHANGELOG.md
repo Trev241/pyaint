@@ -29,10 +29,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   (auto-Otsu or manual thresholds, traced with a straightest-continuation
   walk). Both share the cleanup: gap join, polygon simplification, an optional
   **hue merge** that drops strokes whose two sides share a hue (so shading and
-  tonal edges are not traced while real colour boundaries stay), an optional
-  weak-edge gradient gate, and a minimum-stroke filter. Every parameter is
-  exposed in the inspector, round-trips through `config.json`, and is part of
-  the precompute cache key (`SKETCH_PIPELINE_VERSION`).
+  tonal edges are not traced while real colour boundaries stay), a weak-edge
+  pruning step (`sketch_gradient_keep`), and a minimum-stroke filter. Every
+  parameter is exposed in the inspector, round-trips through `config.json`, and
+  is part of the precompute cache key (`SKETCH_PIPELINE_VERSION`).
   `PYAINT_DEBUG_SKETCH=1` dumps the edge map and a red overlay.
 - **opencv-contrib-python replaces opencv-python.** The Sketch mode's default
   Edge drawing source needs `cv2.ximgproc`; the extra is otherwise drop-in.
@@ -85,6 +85,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   key.
 
 ### Changed
+- **Sketch weak-edge pruning is one slider, not a toggle.** The redundant
+  **Drop weak edges** checkbox is gone; **Keep strongest %** (10–100, default
+  100 = keep every stroke) now controls gradient pruning on its own. The
+  overloaded `sketch_gradient_gate` float is replaced by `sketch_gradient_keep`
+  (a fraction, `1.0` = keep all), and `SKETCH_PIPELINE_VERSION` bumped so cached
+  sketches recompute. Unreleased legacy configs are not migrated: the stale key
+  is dropped on load.
 - **Simpler inspector.** Removed the **App behaviour** section: the
   New Layer / Color Button / Okay toggles duplicated Setup and recipe defaults,
   so teach and enable tools in Setup instead. The now-unused `ToolControls`

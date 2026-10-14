@@ -71,6 +71,7 @@ from pyaint.ui.plan_tasks import PlanPreviewTask
 from pyaint.ui.previews import store_box_preview
 from pyaint.ui.widgets import (
     CheckBox,
+    CheckBoxField,
     CollapsibleSection,
     ImagePreview,
     MasonryGallery,
@@ -353,6 +354,10 @@ class MainWindow(QMainWindow):
 
         mode = Section("Stroke mode", "How the image is turned into strokes.")
         self._mode_combo = QComboBox()
+        self._mode_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
+        self._mode_combo.setMinimumContentsLength(8)
         self._mode_combo.addItem("Layered (fewer strokes)", Bot.LAYERED)
         self._mode_combo.addItem("Slotted (exact runs)", Bot.SLOTTED)
         self._mode_combo.addItem("Outline (continuous lines)", Bot.OUTLINE)
@@ -459,73 +464,114 @@ class MainWindow(QMainWindow):
         ):
             field.changed.connect(self._on_outline_settings_changed)
 
-        # Sketch (edge trace) controls. The edge source is selectable; the
-        # rest of the cleanup is shared.
+        # Sketch (edge trace) controls. A preset chooses the whole look; the
+        # individual knobs live under Advanced so a first-time user is not
+        # confronted with a wall of sliders.
         self._sketch_source = QComboBox()
-        self._sketch_source.addItem(
-            "Edge drawing (connected lines)", Bot.EDGE_EDGEDRAWING
+        self._sketch_source.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
         )
-        self._sketch_source.addItem("Canny (classic)", Bot.EDGE_CANNY)
+        self._sketch_source.setMinimumContentsLength(8)
+        self._sketch_source.addItem("Edge drawing", Bot.EDGE_EDGEDRAWING)
+        self._sketch_source.addItem("Canny", Bot.EDGE_CANNY)
         self._sketch_source.setToolTip(
-            "Sketch only: which edge detector finds the lines. Edge drawing "
-            "returns long connected strokes; Canny is the lighter classic."
+            "Which edge detector finds the lines. 'Edge drawing' returns long "
+            "connected strokes; 'Canny' is the lighter classic."
         )
-        self._sketch_hue_merge = CheckBox("Merge by colour (drop shading)")
-        self._sketch_hue_merge.setToolTip(
-            "Sketch only: drop strokes whose two sides share a hue, so shading "
-            "and tonal edges are not drawn while colour boundaries stay."
+        self._sketch_hue_merge = CheckBoxField(
+            "Merge by colour",
+            "Drop strokes whose two sides share a hue, so soft shading is not "
+            "traced while real colour boundaries stay.",
         )
-        self._sketch_hue_threshold = SliderField("Colour difference", 0, 60, 15, 1)
-        self._sketch_hue_threshold.setToolTip(
-            "Sketch only: minimum hue difference (degrees) across a stroke to "
-            "keep it. Higher = more shading edges dropped."
+        self._sketch_hue_threshold = SliderField(
+            "Colour difference",
+            0,
+            60,
+            15,
+            1,
+            hint=(
+                "Minimum hue difference (degrees) across a stroke to keep it. "
+                "Higher drops more shading edges."
+            ),
         )
-        self._sketch_smoothing = SliderField("Smoothing", 0, 5, 3, 1)
-        self._sketch_smoothing.setToolTip(
-            "Sketch only: edge-preserving smoothing before detection. Higher "
-            "values remove texture but round fine detail."
+        self._sketch_smoothing = SliderField(
+            "Smoothing",
+            0,
+            5,
+            3,
+            1,
+            hint=(
+                "Edge-preserving blur before detection. Higher removes "
+                "texture but rounds fine detail."
+            ),
         )
         self._sketch_join_distance = SliderField(
-            "Join distance (px)", 0.0, 20.0, 10.0, 0.5
+            "Join distance (px)",
+            0.0,
+            20.0,
+            10.0,
+            0.5,
+            hint=(
+                "Bridge open stroke ends within this many pixels into one "
+                "longer, continuous line."
+            ),
         )
-        self._sketch_join_distance.setToolTip(
-            "Sketch only: chain open stroke endpoints within this many pixels."
+        self._sketch_min_stroke = SliderField(
+            "Min stroke (px)",
+            0,
+            60,
+            8,
+            1,
+            hint="Discard open strokes shorter than this, removing specks.",
         )
-        self._sketch_min_stroke = SliderField("Min stroke (px)", 0, 60, 8, 1)
-        self._sketch_min_stroke.setToolTip(
-            "Sketch only: drop open strokes shorter than this many pixels."
+        self._sketch_epsilon = SliderField(
+            "Simplify (px)",
+            0.0,
+            5.0,
+            1.2,
+            0.1,
+            hint=(
+                "Polygon simplification tolerance. Higher = fewer, "
+                "straighter points per stroke."
+            ),
         )
-        self._sketch_epsilon = SliderField("Simplify (px)", 0.0, 5.0, 1.2, 0.1)
-        self._sketch_epsilon.setToolTip(
-            "Sketch only: polygon simplification tolerance. Higher = fewer, "
-            "straighter points per stroke."
-        )
-        self._sketch_gradient_gate = CheckBox("Drop weak edges")
-        self._sketch_gradient_gate.setToolTip(
-            "Sketch only: keep only the strokes with the strongest gradient."
-        )
-        self._sketch_gradient_keep = SliderField("Keep strongest %", 10, 100, 60, 5)
-        self._sketch_gradient_keep.setToolTip(
-            "Sketch only: percentage of strokes kept when dropping weak edges."
+        self._sketch_gradient_keep = SliderField(
+            "Keep strongest %",
+            10,
+            100,
+            100,
+            5,
+            hint=(
+                "Keep only the highest-gradient strokes. 100 keeps them all; "
+                "lower values prune weak edges and soft shading."
+            ),
         )
         # Canny-only thresholds.
-        self._canny_auto_toggle = CheckBox("Auto Canny thresholds (Otsu)")
-        self._canny_auto_toggle.setToolTip(
-            "Canny source only: derive the hysteresis thresholds from the "
-            "image's gradient. Turn off to set Low/High by hand."
+        self._canny_auto_toggle = CheckBoxField(
+            "Auto Canny thresholds",
+            "Derive the thresholds from the image's gradient (Otsu). Turn off "
+            "to set Low/High by hand.",
         )
-        self._canny_low = SliderField("Canny low", 0, 255, 50, 1)
-        self._canny_low.setToolTip(
-            "Canny source only: weaker edges below this gradient are discarded."
+        self._canny_low = SliderField(
+            "Canny low",
+            0,
+            255,
+            50,
+            1,
+            hint="Weaker edges below this gradient are discarded.",
         )
-        self._canny_high = SliderField("Canny high", 0, 255, 150, 1)
-        self._canny_high.setToolTip(
-            "Canny source only: strong edges above this gradient seed the trace."
+        self._canny_high = SliderField(
+            "Canny high",
+            0,
+            255,
+            150,
+            1,
+            hint="Strong edges above this gradient seed the trace.",
         )
-        self._canny_color_edges_toggle = CheckBox("Also trace colour edges")
-        self._canny_color_edges_toggle.setToolTip(
-            "Canny source only: also detect edges on colour (Lab chroma) so "
-            "boundaries between equally bright colours are sketched."
+        self._canny_color_edges_toggle = CheckBoxField(
+            "Trace colour edges",
+            "Also detect edges on colour, so boundaries between equally bright "
+            "colours are sketched.",
         )
         for field in (
             self._sketch_hue_threshold,
@@ -542,9 +588,6 @@ class MainWindow(QMainWindow):
             self._on_sketch_source_changed
         )
         self._sketch_hue_merge.toggled.connect(self._on_sketch_settings_changed)
-        self._sketch_gradient_gate.toggled.connect(
-            self._on_sketch_settings_changed
-        )
         self._canny_auto_toggle.toggled.connect(self._on_sketch_settings_changed)
         self._canny_color_edges_toggle.toggled.connect(
             self._on_sketch_settings_changed
@@ -571,11 +614,10 @@ class MainWindow(QMainWindow):
             "info",
         )
         outline_layout.addWidget(self._outline_notice)
-        self._chk_double_edges = CheckBox("Double-paint shared edges")
-        self._chk_double_edges.setToolTip(
-            "Outline only. Off (recommended): a border shared by two regions is "
-            "thinned to one clean line. On: every region paints its whole "
-            "border, so shared edges are drawn twice and look heavier."
+        self._chk_double_edges = CheckBoxField(
+            "Double-paint edges",
+            "Off keeps each shared border as one clean line; on draws every "
+            "region's full border, so shared edges look heavier.",
         )
         self._chk_double_edges.toggled.connect(
             self._on_outline_double_edges_changed
@@ -605,7 +647,6 @@ class MainWindow(QMainWindow):
             self._sketch_join_distance,
             self._sketch_min_stroke,
             self._sketch_epsilon,
-            self._sketch_gradient_gate,
             self._sketch_gradient_keep,
             self._canny_auto_toggle,
             self._canny_low,
@@ -646,6 +687,10 @@ class MainWindow(QMainWindow):
         metric_label = QLabel("Colour matching")
         metric_label.setObjectName("FieldHint")
         self._metric_combo = QComboBox()
+        self._metric_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
+        self._metric_combo.setMinimumContentsLength(8)
         self._metric_combo.addItem("Perceptual (CIEDE2000)", METRIC_CIEDE2000)
         self._metric_combo.addItem("Legacy (squared RGB)", METRIC_RGB)
         self._metric_combo.setItemData(
@@ -735,6 +780,10 @@ class MainWindow(QMainWindow):
             "Appearance", "Follow the system theme or choose one explicitly."
         )
         self._theme_combo = QComboBox()
+        self._theme_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
+        self._theme_combo.setMinimumContentsLength(8)
         for mode in theme.THEME_MODES:
             self._theme_combo.addItem(theme.THEME_LABELS[mode], mode)
         self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
@@ -968,7 +1017,7 @@ class MainWindow(QMainWindow):
             "sketch_epsilon": self.bot.sketch_epsilon,
             "sketch_hue_merge": self.bot.sketch_hue_merge,
             "sketch_hue_threshold": self.bot.sketch_hue_threshold,
-            "sketch_gradient_gate": self.bot.sketch_gradient_gate,
+            "sketch_gradient_keep": self.bot.sketch_gradient_keep,
             "canny_low": self.bot.canny_low,
             "canny_high": self.bot.canny_high,
             "canny_auto": self.bot.canny_auto,
@@ -1224,6 +1273,9 @@ class MainWindow(QMainWindow):
         self._pause_edit.setText(self.bot.pause_key)
 
         settings = self.tools.get("drawing_settings", {})
+        # Unreleased legacy key: drop it rather than migrate.
+        if isinstance(settings, dict):
+            settings.pop("sketch_gradient_gate", None)
         self.bot.settings = [
             settings.get("delay", 0.1),
             settings.get("pixel_size", 12),
@@ -1279,8 +1331,8 @@ class MainWindow(QMainWindow):
         self.bot.sketch_hue_threshold = float(
             settings.get("sketch_hue_threshold", 15.0)
         )
-        self.bot.sketch_gradient_gate = float(
-            settings.get("sketch_gradient_gate", 0.0)
+        self.bot.sketch_gradient_keep = float(
+            settings.get("sketch_gradient_keep", 1.0)
         )
         self.bot.canny_low = float(settings.get("canny_low", 50))
         self.bot.canny_high = float(settings.get("canny_high", 150))
@@ -1421,7 +1473,7 @@ class MainWindow(QMainWindow):
             "sketch_epsilon": float(self.bot.sketch_epsilon),
             "sketch_hue_merge": bool(self.bot.sketch_hue_merge),
             "sketch_hue_threshold": float(self.bot.sketch_hue_threshold),
-            "sketch_gradient_gate": float(self.bot.sketch_gradient_gate),
+            "sketch_gradient_keep": float(self.bot.sketch_gradient_keep),
             "canny_low": float(self.bot.canny_low),
             "canny_high": float(self.bot.canny_high),
             "canny_auto": bool(self.bot.canny_auto),
@@ -1436,6 +1488,8 @@ class MainWindow(QMainWindow):
         """Apply a per-target drawing snapshot, then sync the widgets."""
         if not isinstance(data, dict):
             return
+        # Unreleased legacy key: drop it rather than migrate.
+        data.pop("sketch_gradient_gate", None)
         settings = data.get("settings")
         if isinstance(settings, (list, tuple)) and len(settings) >= 3:
             self.bot.settings = [
@@ -1495,9 +1549,9 @@ class MainWindow(QMainWindow):
             self.bot.sketch_hue_threshold = max(
                 0.0, float(data["sketch_hue_threshold"])
             )
-        if "sketch_gradient_gate" in data:
-            self.bot.sketch_gradient_gate = max(
-                0.0, float(data["sketch_gradient_gate"])
+        if "sketch_gradient_keep" in data:
+            self.bot.sketch_gradient_keep = max(
+                0.0, float(data["sketch_gradient_keep"])
             )
         if "canny_low" in data:
             self.bot.canny_low = max(0.0, float(data["canny_low"]))
@@ -1547,7 +1601,8 @@ class MainWindow(QMainWindow):
         settings["sketch_epsilon"] = float(self.bot.sketch_epsilon)
         settings["sketch_hue_merge"] = bool(self.bot.sketch_hue_merge)
         settings["sketch_hue_threshold"] = float(self.bot.sketch_hue_threshold)
-        settings["sketch_gradient_gate"] = float(self.bot.sketch_gradient_gate)
+        settings["sketch_gradient_keep"] = float(self.bot.sketch_gradient_keep)
+        settings.pop("sketch_gradient_gate", None)
         settings["canny_low"] = float(self.bot.canny_low)
         settings["canny_high"] = float(self.bot.canny_high)
         settings["canny_auto"] = bool(self.bot.canny_auto)
@@ -1628,14 +1683,8 @@ class MainWindow(QMainWindow):
         self._sketch_join_distance.set_value(float(self.bot.sketch_join_distance))
         self._sketch_min_stroke.set_value(float(self.bot.sketch_min_stroke))
         self._sketch_epsilon.set_value(float(self.bot.sketch_epsilon))
-        self._sketch_gradient_gate.blockSignals(True)
-        self._sketch_gradient_gate.setChecked(
-            float(self.bot.sketch_gradient_gate) > 0
-        )
-        self._sketch_gradient_gate.blockSignals(False)
-        gradient_keep = float(self.bot.sketch_gradient_gate)
         self._sketch_gradient_keep.set_value(
-            round(gradient_keep * 100) if gradient_keep > 0 else 60
+            round(float(self.bot.sketch_gradient_keep) * 100)
         )
         self._canny_low.set_value(float(self.bot.canny_low))
         self._canny_high.set_value(float(self.bot.canny_high))
@@ -1670,8 +1719,8 @@ class MainWindow(QMainWindow):
         self._mode_hint.setText(self._MODE_HINTS.get(self._mode, ""))
 
     def _sync_sketch_visibility(self) -> None:
-        """Canny thresholds apply only to the Canny source; gate sliders are
-        enabled only while their toggle is on."""
+        """Canny thresholds apply only to the Canny source; the colour-difference
+        slider is enabled only while colour merging is on."""
         canny = self._sketch_source.currentData() == Bot.EDGE_CANNY
         manual = canny and not self._canny_auto_toggle.isChecked()
         for widget in (
@@ -1684,9 +1733,6 @@ class MainWindow(QMainWindow):
         self._canny_low.setEnabled(manual)
         self._canny_high.setEnabled(manual)
         self._sketch_hue_threshold.setEnabled(self._sketch_hue_merge.isChecked())
-        self._sketch_gradient_keep.setEnabled(
-            self._sketch_gradient_gate.isChecked()
-        )
 
     def _sync_env_ui(self) -> None:
         recipe = get_recipe(self.profile.target)
@@ -1830,10 +1876,8 @@ class MainWindow(QMainWindow):
             0.0, float(self._sketch_min_stroke.value())
         )
         self.bot.sketch_epsilon = max(0.0, float(self._sketch_epsilon.value()))
-        self.bot.sketch_gradient_gate = (
+        self.bot.sketch_gradient_keep = (
             float(self._sketch_gradient_keep.value()) / 100.0
-            if self._sketch_gradient_gate.isChecked()
-            else 0.0
         )
         self.bot.canny_auto = bool(self._canny_auto_toggle.isChecked())
         self.bot.canny_color_edges = bool(

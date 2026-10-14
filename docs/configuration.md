@@ -90,11 +90,13 @@ so a small palette would only erase boundaries before they can be traced. The
 number of colours is a planner constant, not a user setting.
 
 **Sketch** keys are shown only while **Sketch** is selected; the mode draws
-black line art and ignores the target palette. `sketch_edge_source` picks the
-edge detector (`edgedrawing` or `canny`). Shared cleanup: `sketch_smoothing`,
-`sketch_join_distance`, `sketch_min_stroke`, `sketch_epsilon`,
-`sketch_hue_merge` + `sketch_hue_threshold` (drop shading), and
-`sketch_gradient_gate` (drop weak edges, 0 = off). Canny-only:
+black line art and ignores the target palette. Presets (**Cartoon**,
+**Realistic**) set these together; editing any value switches the panel to
+*Custom*. `sketch_edge_source` picks the edge detector (`edgedrawing` or
+`canny`). Shared cleanup: `sketch_smoothing`, `sketch_join_distance`,
+`sketch_min_stroke`, `sketch_epsilon`, `sketch_hue_merge` +
+`sketch_hue_threshold` (drop shading), and `sketch_gradient_keep` (fraction of
+strokes kept by gradient; `1.0` keeps all). Canny-only:
 `canny_low`, `canny_high`, `canny_auto`, `canny_color_edges` (Low/High used
 only when `canny_auto` is off). All of them are part of the precompute cache
 key (`SKETCH_PIPELINE_VERSION`).
