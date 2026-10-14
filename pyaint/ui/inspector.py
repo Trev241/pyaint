@@ -31,10 +31,10 @@ from pyaint.ui.widgets import (
     CheckBox,
     CheckBoxField,
     CollapsibleSection,
+    DualReadoutSlider,
     NoticeBanner,
     Section,
     SegmentedControl,
-    SliderField,
 )
 
 
@@ -108,13 +108,13 @@ class InspectorMixin:
         drawing = Section("Drawing", "How slowly and how finely Pyaint paints.")
 
         # Kept in this order: index matches ``Bot.settings`` (delay, step, jump).
-        delay = SliderField("Time per stroke", 0.0, 1.0, 0.1, 0.01)
+        delay = DualReadoutSlider("Time per stroke", "time_per_stroke", 0.0, 1.0, 0.1, 0.01)
         delay.setToolTip("How long each run takes (higher = slower, smoother).")
-        detail = SliderField("Detail (lower = finer)", 1, 50, 12, 1)
+        detail = DualReadoutSlider("Detail", "detail", 1, 50, 12, 1)
         detail.setToolTip(
             "Pixel step between sampled points. Lower = finer detail, more strokes."
         )
-        jump = SliderField("Pause after big moves", 0.0, 2.0, 0.5, 0.05)
+        jump = DualReadoutSlider("Pause after big moves", "pause_after_big_moves", 0.0, 2.0, 0.5, 0.05)
         jump.setToolTip(
             "Pause inserted when the cursor jumps a long way between runs."
         )
@@ -128,35 +128,33 @@ class InspectorMixin:
 
         # Outline pacing: the prototype's continuous-stroke knobs, surfaced
         # only while Outline is selected.
-        self._stroke_speed = SliderField("Stroke speed (px/s)", 200, 5000, 1500, 50)
+        self._stroke_speed = DualReadoutSlider("Stroke speed", "drawing_speed", 200, 5000, 1500, 50)
         self._stroke_speed.setToolTip(
             "How fast the cursor travels while tracing an outline (higher = faster)."
         )
-        self._event_interval = SliderField("Event interval (ms)", 2, 50, 17, 1)
+        self._event_interval = DualReadoutSlider("Event interval", "event_interval", 2, 50, 17, 1)
         self._event_interval.setToolTip(
             "Time between cursor move events. Lower = smoother, but a heavier "
             "input load on the target."
         )
-        self._travel_delay = SliderField("Pause between strokes", 0.0, 1.0, 0.05, 0.01)
+        self._travel_delay = DualReadoutSlider("Pause between strokes", "pause_between_strokes", 0.0, 1.0, 0.05, 0.01)
         self._travel_delay.setToolTip(
             "Pause inserted when moving between separate outline strokes."
         )
         # Label-map cleaner thresholds, exposed so more aggressive values can be
         # trialled against fragmentation.
-        self._outline_smoothing = SliderField("Smoothing", 0, 5, 2, 1)
+        self._outline_smoothing = DualReadoutSlider("Smoothing", "smoothing", 0, 5, 2, 1)
         self._outline_smoothing.setToolTip(
             "Outline only: edge-preserving bilateral smoothing before tracing. "
             "Higher values remove more anti-aliasing specks but round fine detail."
         )
-        self._outline_join_distance = SliderField(
-            "Join distance (px)", 0.0, 20.0, 6.0, 0.5
+        self._outline_join_distance = DualReadoutSlider("Join distance", "join_distance", 0.0, 20.0, 6.0, 0.5
         )
         self._outline_join_distance.setToolTip(
             "Outline only: chain open stroke endpoints within this many pixels "
             "into one longer stroke. Raise it to remove fragmentation."
         )
-        self._outline_step_threshold = SliderField(
-            "Shading cleanup", 0.0, 30.0, 10.0, 1.0
+        self._outline_step_threshold = DualReadoutSlider("Shading cleanup", "skip_soft_shading", 0.0, 30.0, 10.0, 1.0
         )
         self._outline_step_threshold.setToolTip(
             "Outline only: merge touching regions whose mean colours are within "
@@ -193,8 +191,7 @@ class InspectorMixin:
             "Drop strokes whose two sides share a hue, so soft shading is not "
             "traced while real colour boundaries stay.",
         )
-        self._sketch_hue_threshold = SliderField(
-            "Colour difference",
+        self._sketch_hue_threshold = DualReadoutSlider("Colour difference", "hue_difference",
             0,
             60,
             15,
@@ -204,8 +201,7 @@ class InspectorMixin:
                 "Higher drops more shading edges."
             ),
         )
-        self._sketch_smoothing = SliderField(
-            "Smoothing",
+        self._sketch_smoothing = DualReadoutSlider("Smoothing", "smoothing",
             0,
             5,
             3,
@@ -215,8 +211,7 @@ class InspectorMixin:
                 "texture but rounds fine detail."
             ),
         )
-        self._sketch_join_distance = SliderField(
-            "Join distance (px)",
+        self._sketch_join_distance = DualReadoutSlider("Join distance", "join_distance",
             0.0,
             20.0,
             10.0,
@@ -226,16 +221,14 @@ class InspectorMixin:
                 "longer, continuous line."
             ),
         )
-        self._sketch_min_stroke = SliderField(
-            "Min stroke (px)",
+        self._sketch_min_stroke = DualReadoutSlider("Min stroke", "min_stroke",
             0,
             60,
             8,
             1,
             hint="Discard open strokes shorter than this, removing specks.",
         )
-        self._sketch_epsilon = SliderField(
-            "Simplify (px)",
+        self._sketch_epsilon = DualReadoutSlider("Simplify", "simplify",
             0.0,
             5.0,
             1.2,
@@ -245,8 +238,7 @@ class InspectorMixin:
                 "straighter points per stroke."
             ),
         )
-        self._sketch_gradient_keep = SliderField(
-            "Keep strongest %",
+        self._sketch_gradient_keep = DualReadoutSlider("Keep strongest %", "skip_faint_edges",
             10,
             100,
             100,
@@ -262,16 +254,14 @@ class InspectorMixin:
             "Derive the thresholds from the image's gradient (Otsu). Turn off "
             "to set Low/High by hand.",
         )
-        self._canny_low = SliderField(
-            "Canny low",
+        self._canny_low = DualReadoutSlider("Canny low", "canny_low",
             0,
             255,
             50,
             1,
             hint="Weaker edges below this gradient are discarded.",
         )
-        self._canny_high = SliderField(
-            "Canny high",
+        self._canny_high = DualReadoutSlider("Canny high", "canny_high",
             0,
             255,
             150,
@@ -405,7 +395,7 @@ class InspectorMixin:
         drawing.add(self._continuous_controls)
 
         trigger_row = QHBoxLayout()
-        trigger_label = QLabel("Trigger distance (px)")
+        trigger_label = QLabel("Trigger distance")
         trigger_label.setObjectName("FieldHint")
         self._jump_threshold = QSpinBox()
         self._jump_threshold.setRange(1, 200)

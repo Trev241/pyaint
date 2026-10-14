@@ -16,6 +16,18 @@ from typing import Dict, Optional, Tuple
 #: control key -> (unit, ((upper_bound_inclusive | None, label), ...))
 CONTROL_BANDS: Dict[str, Tuple[str, Tuple[Tuple[Optional[float], str], ...]]] = {
     "detail": ("px", ((8, "Fine"), (17, "Balanced"), (None, "Coarse"))),
+    "time_per_stroke": ("s", ((0.05, "Quick"), (0.2, "Steady"), (None, "Slow"))),
+    "pause_after_big_moves": (
+        "s",
+        ((0.05, "Short"), (0.5, "Steady"), (None, "Long")),
+    ),
+    "pause_between_strokes": (
+        "s",
+        ((0.02, "Short"), (0.15, "Steady"), (None, "Long")),
+    ),
+    "hue_difference": ("\u00b0", ((10, "Tight"), (30, "Balanced"), (None, "Loose"))),
+    "canny_low": ("", ((80, "Low"), (180, "Medium"), (None, "High"))),
+    "canny_high": ("", ((100, "Low"), (200, "Medium"), (None, "High"))),
     "drawing_speed": (
         "px/s",
         ((800, "Relaxed"), (2500, "Steady"), (None, "Brisk")),
