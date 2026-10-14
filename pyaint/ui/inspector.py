@@ -89,61 +89,21 @@ class InspectorMixin:
             "Environment",
             "Where Pyaint finds the canvas and palette. Switch targets above.",
         )
-        self._detection_label = QLabel("No regions detected yet.")
+        self._detection_label = QLabel("Pyaint doesn't know where your canvas is yet.")
         self._detection_label.setObjectName("SectionHint")
         self._detection_label.setWordWrap(True)
         env.add(self._detection_label)
         needs = QLabel(
-            "Auto-detect needs a blank canvas and the target app visible on the "
-            "primary monitor at 100% display scaling."
+            "Finding the canvas needs a blank canvas and the target app visible "
+            "on the primary monitor at 100% display scaling."
         )
         needs.setObjectName("SectionHint")
         needs.setWordWrap(True)
         env.add(needs)
         layout.insertWidget(layout.count() - 1, env)
 
-        mode = Section("Stroke mode", "How the image is turned into strokes.")
-        self._mode_combo = QComboBox()
-        self._mode_combo.setSizeAdjustPolicy(
-            QComboBox.AdjustToMinimumContentsLengthWithIcon
-        )
-        self._mode_combo.setMinimumContentsLength(8)
-        self._mode_combo.addItem("Layered (fewer strokes)", Bot.LAYERED)
-        self._mode_combo.addItem("Slotted (exact runs)", Bot.SLOTTED)
-        self._mode_combo.addItem("Outline (continuous lines)", Bot.OUTLINE)
-        self._mode_combo.addItem("Sketch (edge trace)", Bot.SKETCH)
-        self._mode_combo.setItemData(
-            0,
-            "Merges a colour's runs where later colours paint over them: fewer "
-            "strokes, faster drawing, smoother joins.",
-            Qt.ToolTipRole,
-        )
-        self._mode_combo.setItemData(
-            1,
-            "Draws every run exactly as-is: no overdraw, but more strokes to draw.",
-            Qt.ToolTipRole,
-        )
-        self._mode_combo.setItemData(
-            2,
-            "Default: traces region outlines as continuous strokes and thins "
-            "shared borders to one clean line.",
-            Qt.ToolTipRole,
-        )
-        self._mode_combo.setItemData(
-            3,
-            "Sketches the image's edges into black line art. Choose the edge "
-            "source (Edge drawing or Canny) and merge by colour to drop "
-            "shading.",
-            Qt.ToolTipRole,
-        )
-        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        mode.add(self._mode_combo)
-
-        self._mode_hint = QLabel()
-        self._mode_hint.setObjectName("ModeHint")
-        self._mode_hint.setWordWrap(True)
-        mode.add(self._mode_hint)
-        layout.insertWidget(layout.count() - 1, mode)
+        # Mode selection lives on the main-surface rail, not the pane; see
+        # MainWindow._build_mode_rail.
 
         drawing = Section("Drawing", "How slowly and how finely Pyaint paints.")
 
@@ -505,16 +465,16 @@ class InspectorMixin:
         diag_note.setWordWrap(True)
         diagnostics.add(diag_note)
         self._btn_precompute = self._tool_button(
-            "Prepare & cache",
+            "Save the plan for next time",
             "download",
             self._on_precompute,
             "Save the stroke map so repeat runs skip processing (drawing time is unchanged)",
         )
         self._btn_test = self._tool_button(
-            "Test draw", "zap", self._on_test_draw, "Draw the first 20 strokes"
+            "Try 20 strokes", "zap", self._on_test_draw, "Draw the first 20 strokes"
         )
         self._btn_simple = self._tool_button(
-            "Brush test",
+            "Check brush size",
             "play",
             self._on_simple_test,
             "Draw 5 lines to tune the brush size",
@@ -523,14 +483,14 @@ class InspectorMixin:
             diagnostics.add(button)
 
         redraw = Section("Redraw region", "Draw only a rectangle you pick on screen.")
-        self._region_label = QLabel("No region selected.")
+        self._region_label = QLabel("No area selected yet.")
         self._region_label.setObjectName("SectionHint")
         self._region_label.setWordWrap(True)
         redraw.add(self._region_label)
         row2 = QHBoxLayout()
-        pick = QPushButton("Pick region")
+        pick = QPushButton("Select area")
         pick.clicked.connect(self.pick_region)
-        draw = QPushButton("Draw region")
+        draw = QPushButton("Draw area")
         draw.clicked.connect(self._on_draw_region)
         row2.addWidget(pick)
         row2.addWidget(draw)
@@ -583,7 +543,7 @@ class InspectorMixin:
         container.add(keys)
 
         files = Section("Files")
-        reset = QPushButton("Reset config")
+        reset = QPushButton("Reset all settings")
         reset.setObjectName("Danger")
         reset.clicked.connect(self._on_reset_config)
         files.add(reset)

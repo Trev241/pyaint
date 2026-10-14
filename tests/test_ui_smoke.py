@@ -92,6 +92,7 @@ def test_mode_specific_controls_switch_with_stroke_mode(app, tmp_path, monkeypat
     bot = Bot()
     window = MainWindow(bot)
     try:
+        window._customize_btn.setChecked(True)  # pane is hidden by default
         layered = window._mode_combo.findData(Bot.LAYERED)
         outline = window._mode_combo.findData(Bot.OUTLINE)
 
@@ -192,6 +193,7 @@ def test_sketch_mode_controls_switch_and_persist(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     window = MainWindow(Bot())
     try:
+        window._customize_btn.setChecked(True)  # pane is hidden by default
         window._mode_combo.setCurrentIndex(
             window._mode_combo.findData(Bot.SKETCH)
         )
@@ -1171,6 +1173,7 @@ def test_mspaint_double_click_toggle_persists(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     window = MainWindow(Bot())
     try:
+        window._customize_btn.setChecked(True)  # pane is hidden by default
         # Desktop recipes expose it; browser recipes hide it.
         assert window._chk_mspaint.isVisibleTo(window)
         window.profile.target = "skribbl"

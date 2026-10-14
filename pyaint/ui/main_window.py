@@ -72,6 +72,9 @@ from pyaint.ui.plan_tasks import PlanPreviewTask
 from pyaint.ui.presets import (
     SKETCH_PRESET_FIELDS,
     SKETCH_PRESET_OPTIONS,
+    drawing_preset_by_key,
+    look_options,
+    match_drawing_preset,
     match_preset,
     preset_by_key,
 )
@@ -81,7 +84,9 @@ from pyaint.ui.widgets import (
     CheckBoxField,
     CollapsibleSection,
     ImagePreview,
+    LookSelector,
     MasonryGallery,
+    ModeRail,
     NoticeBanner,
     ReadinessStrip,
     Section,
@@ -258,15 +263,16 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._countdown_banner.cancelled.connect(self._cancel_auto_detect)
         root.addWidget(self._countdown_banner)
 
-        # Hub: the preview is the hero, settings live in the inspector.
+        # Easel: mode rail | canvas | settings pane (hidden until Customize).
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
-        body.addWidget(self._build_content(), 1)
-        body.addWidget(self._build_inspector())
+        body.addWidget(self._build_mode_rail())
+        body.addWidget(self._build_canvas(), 1)
+        self._inspector = self._build_inspector()
+        self._inspector.setVisible(False)
+        body.addWidget(self._inspector)
         root.addLayout(body, 1)
-
-        root.addWidget(self._build_action_bar())
 
     def _build_topbar(self) -> QWidget:
         bar = QFrame()
@@ -285,12 +291,12 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._target_combo.currentIndexChanged.connect(self._on_target_changed)
         layout.addWidget(self._target_combo)
 
-        self._auto_btn = QPushButton("Auto-detect")
+        self._auto_btn = QPushButton("Find canvas")
         self._auto_btn.setToolTip("Find the canvas and palette from a screenshot")
         self._auto_btn.clicked.connect(self.auto_detect)
         layout.addWidget(self._auto_btn)
 
-        self._teach_btn = QPushButton("Set up\u2026")
+        self._teach_btn = QPushButton("Set up manually\u2026")
         self._teach_btn.setToolTip("Teach Pyaint where the canvas and palette are")
         self._teach_btn.clicked.connect(self.open_setup)
         layout.addWidget(self._teach_btn)
@@ -301,6 +307,104 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._env_chip.setToolTip("Canvas and palette status")
         layout.addWidget(self._env_chip)
         return bar
+
+    def _build_mode_rail(self) -> QWidget:
+        """The left tool rail: one single-choice mode picker.
+
+        ``_mode_combo`` stays as the state holder (and the hidden driver used
+        by config and preset code); the rail is the visible control, and the
+        two stay in sync.
+        """
+        frame = QFrame()
+        frame.setObjectName("Rail")
+        frame.setFixedWidth(168)
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(12, 16, 12, 16)
+        layout.setSpacing(8)
+
+        self._mode_combo = QComboBox()
+        self._mode_combo.setVisible(False)
+        self._mode_combo.addItem("Layered", Bot.LAYERED)
+        self._mode_combo.addItem("Slotted", Bot.SLOTTED)
+        self._mode_combo.addItem("Outline", Bot.OUTLINE)
+        self._mode_combo.addItem("Edge tracing", Bot.SKETCH)
+        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+
+        self._mode_rail = ModeRail(self._mode)
+        self._mode_rail.modeChanged.connect(self._on_mode_rail_changed)
+        layout.addWidget(self._mode_rail)
+
+        self._mode_hint = QLabel()
+        self._mode_hint.setObjectName("ModeHint")
+        self._mode_hint.setWordWrap(True)
+        layout.addWidget(self._mode_hint)
+        layout.addStretch(1)
+        return frame
+
+    def _on_mode_rail_changed(self, mode: str) -> None:
+        index = self._mode_combo.findData(mode)
+        if index >= 0:
+            self._mode_combo.setCurrentIndex(index)
+
+    def _build_canvas(self) -> QWidget:
+        """The canvas column: preview/gallery over the action cluster."""
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._build_content(), 1)
+        layout.addWidget(self._build_action_bar())
+        return host
+
+    def _on_customize_toggled(self, visible: bool) -> None:
+        self._inspector.setVisible(bool(visible))
+
+    # -- Look (mode-aware preset) -------------------------------------
+    def _drawing_values(self) -> dict:
+        return {
+            "delay": self.bot.settings[Bot.DELAY],
+            "pixel_size": self.bot.settings[Bot.STEP],
+            "jump_delay": self.bot.settings[Bot.JUMP_DELAY],
+            "stroke_speed": self.bot.stroke_speed,
+            "frame_interval": self.bot.frame_interval,
+            "travel_delay": self.bot.travel_delay,
+        }
+
+    def _look_current_key(self) -> str:
+        if self._mode == Bot.SKETCH:
+            values = {
+                field: getattr(self.bot, field) for field in SKETCH_PRESET_FIELDS
+            }
+            return match_preset(values) or "custom"
+        return match_drawing_preset(self._drawing_values()) or "custom"
+
+    def _refresh_look_control(self) -> None:
+        control = getattr(self, "_look_control", None)
+        if control is None:
+            return
+        options = list(look_options(self._mode)) + [("custom", "Custom")]
+        control.set_options(options, self._look_current_key())
+
+    def _on_look_changed(self, key: str) -> None:
+        if self._initializing or key == "custom":
+            return
+        if self._mode == Bot.SKETCH:
+            self._on_sketch_preset_changed(key)
+            self._refresh_look_control()
+            return
+        values = drawing_preset_by_key(key)["settings"]
+        self.bot.settings = [
+            values["delay"],
+            values["pixel_size"],
+            values["jump_delay"],
+        ]
+        self.bot.stroke_speed = values["stroke_speed"]
+        self.bot.frame_interval = values["frame_interval"]
+        self.bot.travel_delay = values["travel_delay"]
+        self._refresh_drawing_widgets()
+        self._store_drawing_settings()
+        self._save_config()
+        self._schedule_preview(immediate=True)
 
     def _build_content(self) -> QWidget:
         """The Image panel: source controls stacked over preview/gallery."""
@@ -421,9 +525,15 @@ class MainWindow(InspectorMixin, QMainWindow):
         stage_header = QHBoxLayout()
         stage_header.setContentsMargins(2, 0, 2, 0)
         stage_header.setSpacing(8)
-        stage_title = QLabel("Preview")
-        stage_title.setObjectName("StageHeader")
-        stage_header.addWidget(stage_title)
+        look_label = QLabel("Look")
+        look_label.setObjectName("FieldLabel")
+        stage_header.addWidget(look_label)
+        self._look_control = LookSelector(
+            list(look_options(self._mode)) + [("custom", "Custom")],
+            self._look_current_key(),
+        )
+        self._look_control.changed.connect(self._on_look_changed)
+        stage_header.addWidget(self._look_control)
         stage_header.addStretch(1)
 
         # Source / Preview / Compare view switch. Making all three explicit
@@ -689,7 +799,14 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._readiness.setObjectName("ReadinessStripInline")
         layout.addWidget(self._readiness, 1)
 
-        self._fix_btn = QPushButton("Fix")
+        self._customize_btn = QPushButton("Customize")
+        self._customize_btn.setObjectName("ToolBarButton")
+        self._customize_btn.setCheckable(True)
+        self._customize_btn.setToolTip("Show or hide the drawing settings")
+        self._customize_btn.toggled.connect(self._on_customize_toggled)
+        layout.addWidget(self._customize_btn)
+
+        self._fix_btn = QPushButton("Finish setup")
         self._fix_btn.setObjectName("FixButton")
         self._fix_btn.setToolTip("Set up what is missing")
         self._fix_btn.clicked.connect(self._on_fix)
@@ -1286,6 +1403,9 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._sketch_controls.setVisible(sketch)
         self._continuous_controls.setVisible(outline or sketch)
         self._mode_hint.setText(self._MODE_HINTS.get(self._mode, ""))
+        if getattr(self, "_mode_rail", None) is not None:
+            self._mode_rail.set_mode(self._mode)
+        self._refresh_look_control()
 
     def _sync_sketch_visibility(self) -> None:
         """Canny thresholds apply only to the Canny source; the colour-difference
@@ -1366,7 +1486,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._detection_label.setText(
             "Detected: " + "; ".join(parts)
             if parts
-            else "No regions detected yet — run Auto-detect or teach it manually."
+            else "Pyaint doesn't know where your canvas is yet."
         )
         self._refresh_readiness()
 

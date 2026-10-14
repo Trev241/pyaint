@@ -148,6 +148,10 @@ def stylesheet(tokens: dict | None = None) -> str:
         background: {t['bg_side']};
         border-right: 1px solid {t['border']};
     }}
+    #Rail {{
+        background: {t['bg_side']};
+        border-right: 1px solid {t['border']};
+    }}
     #SideBarTitle {{
         color: {t['fg_muted']};
         font-size: 11px;
@@ -593,12 +597,10 @@ def stylesheet(tokens: dict | None = None) -> str:
     }}
     #PreviewStage {{
         background: {t['bg_card']};
-        border: 1px solid {t['border']};
         border-radius: 8px;
     }}
     #PreviewImage {{
         background: {t['bg']};
-        border: 1px solid {t['border']};
         border-radius: 8px;
     }}
     #PreviewImage[dragActive="true"] {{
@@ -694,12 +696,12 @@ def stylesheet(tokens: dict | None = None) -> str:
     }}
     #GalleryContainer {{ background: {t['bg']}; }}
     #GalleryTile {{
-        background: {t['bg_card']};
-        border: 1px solid {t['border']};
+        background: transparent;
+        border: 2px solid transparent;
         border-radius: 8px;
     }}
-    #GalleryTile:hover {{ border: 1px solid {t['accent']}; }}
-    #GalleryImage {{ background: {t['bg_input']}; }}
+    #GalleryTile:hover {{ border: 2px solid {t['border']}; }}
+    #GalleryImage {{ background: {t['bg_input']}; border-radius: 6px; }}
 
     /* --- Floating progress overlay -------------------------------------- */
     #ProgressOverlay {{

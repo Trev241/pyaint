@@ -670,6 +670,45 @@ class ModeRail(QWidget):
             button.setChecked(True)
 
 
+class LookSelector(QWidget):
+    """A mode-aware preset selector: one row of exclusive pills.
+
+    ``options`` can be rebuilt when the stroke mode changes (SKETCH shows its
+    own presets), while the current selection is preserved when still present.
+    """
+
+    changed = Signal(str)
+
+    def __init__(self, options, current=None, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        self._layout = layout
+        self._control = None
+        self.set_options(options, current)
+
+    def set_options(self, options, current=None) -> None:
+        if current is None and self._control is not None:
+            current = self._control.value()
+        if self._control is not None:
+            self._layout.removeWidget(self._control)
+            self._control.deleteLater()
+        control = SegmentedControl(options, columns=len(options))
+        control.changed.connect(self.changed)
+        self._control = control
+        self._layout.addWidget(control)
+        if current is not None:
+            control.set_value(current)
+
+    def value(self):
+        return self._control.value() if self._control is not None else None
+
+    def set_value(self, key) -> None:
+        if self._control is not None:
+            self._control.set_value(key)
+
+
 # ---------------------------------------------------------------------------
 # Drag & drop helpers
 #
