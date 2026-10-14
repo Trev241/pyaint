@@ -242,6 +242,33 @@ def test_preview_view_toggle_and_restore(app, tmp_path, monkeypatch):
         window.close()
 
 
+def test_compare_disabled_without_an_image(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        # The isolated config points PROJECT_ROOT at tmp_path, so no image is
+        # loaded and Compare starts unavailable.
+        assert not window._view_split_btn.isEnabled()
+
+        source = tmp_path / "src.png"
+        Image.new("RGB", (12, 12), (255, 0, 0)).save(source)
+        window._set_image_path(str(source))
+        assert window._view_split_btn.isEnabled()
+
+        window._view_group.idClicked.emit(2)
+        assert window._preview_view == "split"
+
+        # No source image: the Compare choice is disabled and any split view
+        # falls back to showing the source only.
+        window._imname = ""
+        window._source_pixmap = None
+        window._update_compare_available()
+        assert not window._view_split_btn.isEnabled()
+        assert window._preview_view == "source"
+    finally:
+        window.close()
+
+
 def test_plan_preview_task_emits_canvas_sized_image(app, tmp_path):
     from pyaint import planner
     from pyaint.palette import Palette

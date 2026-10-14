@@ -94,12 +94,17 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - **Sketch weak-edge pruning is one slider, not a toggle.** The redundant
-  **Drop weak edges** checkbox is gone; **Keep strongest %** (10–100, default
+  **Drop weak edges** checkbox is gone; **Keep strongest %** (10â€“100, default
   100 = keep every stroke) now controls gradient pruning on its own. The
   overloaded `sketch_gradient_gate` float is replaced by `sketch_gradient_keep`
   (a fraction, `1.0` = keep all), and `SKETCH_PIPELINE_VERSION` bumped so cached
   sketches recompute. Unreleased legacy configs are not migrated: the stale key
   is dropped on load.
+- **The preview now offers Source / Preview / Compare.** *Compare* shows the
+  loaded image and the planned result side by side as a before/after, so the
+  live preview is obvious instead of hidden behind a toggle. The view choice
+  persists in `config.json` (`preview_view` now also accepts `"split"`), and
+  *Compare* stays disabled until a source image is loaded.
 - **Simpler inspector.** Removed the **App behaviour** section: the
   New Layer / Color Button / Okay toggles duplicated Setup and recipe defaults,
   so teach and enable tools in Setup instead. The now-unused `ToolControls`

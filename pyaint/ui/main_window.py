@@ -641,11 +641,11 @@ class MainWindow(QMainWindow):
         self._sketch_controls = QWidget()
         sketch_layout = QVBoxLayout(self._sketch_controls)
         sketch_layout.setContentsMargins(0, 0, 0, 0)
-        sketch_layout.setSpacing(4)
+        sketch_layout.setSpacing(6)
         self._sketch_notice = NoticeBanner()
         self._sketch_notice.show_notice(
-            "Sketch traces the image's edges into black line art. Edge drawing "
-            "gives connected strokes; Merge by colour drops shading.",
+            "Sketch traces the image's edges into black line art. Start with a "
+            "preset, then open Advanced only if the result needs tuning.",
             "info",
         )
         sketch_layout.addWidget(self._sketch_notice)
@@ -973,13 +973,23 @@ class MainWindow(QMainWindow):
         stage_header.addWidget(stage_title)
         stage_header.addStretch(1)
 
-        # Source / Preview view switch.
+        # Source / Preview / Compare view switch. Making all three explicit
+        # (rather than a source/preview toggle) keeps the planned result obvious
+        # from the first launch.
         self._view_source_btn = QPushButton("Source")
+        self._view_source_btn.setToolTip("Show only the loaded image.")
         self._view_preview_btn = QPushButton("Preview")
+        self._view_preview_btn.setToolTip(
+            "Show only the planned result, updating as settings change."
+        )
+        self._view_split_btn = QPushButton("Compare")
+        self._view_split_btn.setToolTip(
+            "Show the source and the planned result side by side."
+        )
         self._view_group = QButtonGroup(self)
         self._view_group.setExclusive(True)
         for view_id, button in enumerate(
-            (self._view_source_btn, self._view_preview_btn)
+            (self._view_source_btn, self._view_preview_btn, self._view_split_btn)
         ):
             button.setObjectName("ViewToggle")
             button.setCheckable(True)
@@ -993,6 +1003,7 @@ class MainWindow(QMainWindow):
         toggle_layout.setSpacing(0)
         toggle_layout.addWidget(self._view_source_btn)
         toggle_layout.addWidget(self._view_preview_btn)
+        toggle_layout.addWidget(self._view_split_btn)
         stage_header.addWidget(toggle)
 
         self._preview_spinner = QProgressBar()
@@ -1008,11 +1019,19 @@ class MainWindow(QMainWindow):
         stage_header.addWidget(self._preview_meta)
         stage_layout.addLayout(stage_header)
 
-        self._preview = ImagePreview()
-        self._preview.fileDropped.connect(self._load_local_path)
-        self._preview.remoteDropped.connect(self._load_dropped_url)
-        self._preview.rawDropped.connect(self._load_dropped_bytes)
-        stage_layout.addWidget(self._preview, 1)
+        # Two labelled panes: source on the left, plan on the right, so
+        # "Compare" is a true before/after and the preview reads as a result.
+        panes = QHBoxLayout()
+        panes.setSpacing(8)
+        self._source_pane, self._source_view = self._build_preview_pane(
+            "Source", "The loaded image, unchanged.", droppable=True
+        )
+        self._preview_pane, self._preview = self._build_preview_pane(
+            "Preview result", "Live plan of the strokes Pyaint will draw."
+        )
+        panes.addWidget(self._source_pane, 1)
+        panes.addWidget(self._preview_pane, 1)
+        stage_layout.addLayout(panes, 1)
 
         # Dim the frame (rather than blanking it) while planning.
         self._preview_opacity = QGraphicsOpacityEffect(self._preview)
@@ -1022,8 +1041,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(stage, 1)
 
         hint = QLabel(
-            "Tip: drag an image from a browser or a file onto this preview to "
-            "load it, or use the field above."
+            "Switch to Preview to see exactly what will be drawn, or Compare "
+            "to check it against the source. Drag an image here to load it."
         )
         hint.setObjectName("StageHint")
         hint.setWordWrap(True)
@@ -1031,6 +1050,27 @@ class MainWindow(QMainWindow):
         layout.addWidget(hint)
         self._preview_page = page
         return page
+
+    def _build_preview_pane(self, title: str, hint: str, droppable: bool = False):
+        """Build a titled image pane; returns ``(pane, ImagePreview)``.
+
+        Only the source pane accepts dropped images; the result pane is output.
+        """
+        pane = QWidget()
+        pane_layout = QVBoxLayout(pane)
+        pane_layout.setContentsMargins(0, 0, 0, 0)
+        pane_layout.setSpacing(2)
+        label = QLabel(title)
+        label.setObjectName("PaneLabel")
+        label.setToolTip(hint)
+        pane_layout.addWidget(label)
+        view = ImagePreview()
+        if droppable:
+            view.fileDropped.connect(self._load_local_path)
+            view.remoteDropped.connect(self._load_dropped_url)
+            view.rawDropped.connect(self._load_dropped_bytes)
+        pane_layout.addWidget(view, 1)
+        return pane, view
 
     # ------------------------------------------------------------------
     # Live preview
@@ -1076,7 +1116,7 @@ class MainWindow(QMainWindow):
 
     def _schedule_preview(self, immediate: bool = False) -> None:
         """Debounce (or immediately run) a preview when one is being shown."""
-        if self._preview_view != "preview":
+        if self._preview_view not in ("preview", "split"):
             return
         if not self._preview_usable():
             if not self._initializing:
@@ -1089,7 +1129,10 @@ class MainWindow(QMainWindow):
             self._preview_timer.start()
 
     def _run_preview(self) -> None:
-        if self._preview_view != "preview" or not self._preview_usable():
+        if (
+            self._preview_view not in ("preview", "split")
+            or not self._preview_usable()
+        ):
             return
         self._preview_generation += 1
         generation = self._preview_generation
@@ -1118,24 +1161,48 @@ class MainWindow(QMainWindow):
         self._preview_opacity.setOpacity(0.55 if busy else 1.0)
 
     def _on_preview_ready(self, generation: int, qimage, meta: str) -> None:
-        if generation != self._preview_generation or self._preview_view != "preview":
+        if (
+            generation != self._preview_generation
+            or self._preview_view not in ("preview", "split")
+        ):
             return
         self._set_preview_busy(False)
         self._preview.set_pixmap(QPixmap.fromImage(qimage))
-        self._preview_meta.setText(f"Preview \u00b7 {meta}")
+        self._preview_meta.setText(f"Preview result \u00b7 {meta}")
 
     def _on_preview_failed(self, generation: int, message: str) -> None:
-        if generation != self._preview_generation or self._preview_view != "preview":
+        if (
+            generation != self._preview_generation
+            or self._preview_view not in ("preview", "split")
+        ):
             return
         self._set_preview_busy(False)
         self._preview_meta.setText(f"Preview failed: {message}")
 
+    def _sync_view_visibility(self) -> None:
+        """Show the source and/or result panes for the current view."""
+        show_source = self._preview_view in ("source", "split")
+        show_preview = self._preview_view in ("preview", "split")
+        self._source_pane.setVisible(show_source)
+        self._preview_pane.setVisible(show_preview)
+
+    def _update_compare_available(self) -> None:
+        """Compare needs a source image; disable the choice when there is none."""
+        available = self._has_image()
+        self._view_split_btn.setEnabled(available)
+        if not available and self._preview_view == "split":
+            self._on_view_changed(0)
+
     def _on_view_changed(self, view_id: int) -> None:
-        self._preview_view = "preview" if view_id == 1 else "source"
-        self._view_source_btn.setChecked(view_id == 0)
-        self._view_preview_btn.setChecked(view_id == 1)
+        self._preview_view = {0: "source", 1: "preview", 2: "split"}.get(
+            view_id, "source"
+        )
+        self._view_source_btn.setChecked(self._preview_view == "source")
+        self._view_preview_btn.setChecked(self._preview_view == "preview")
+        self._view_split_btn.setChecked(self._preview_view == "split")
+        self._sync_view_visibility()
         self.tools["preview_view"] = self._preview_view
-        if self._preview_view == "preview":
+        if self._preview_view in ("preview", "split"):
             self._schedule_preview(immediate=True)
         else:
             self._preview_generation += 1  # drop any in-flight result
@@ -1144,7 +1211,7 @@ class MainWindow(QMainWindow):
 
     def _restore_source_preview(self) -> None:
         if self._source_pixmap is not None:
-            self._preview.set_pixmap(self._source_pixmap)
+            self._source_view.set_pixmap(self._source_pixmap)
         self._preview_meta.setText(self._source_meta or "No image")
 
     def _tool_button(
@@ -1435,10 +1502,15 @@ class MainWindow(QMainWindow):
         self._refresh_detection_status()
         preview_view = str(self.tools.get("preview_view", "source"))
         self._preview_view = (
-            preview_view if preview_view in ("source", "preview") else "source"
+            preview_view
+            if preview_view in ("source", "preview", "split")
+            else "source"
         )
         self._view_source_btn.setChecked(self._preview_view == "source")
         self._view_preview_btn.setChecked(self._preview_view == "preview")
+        self._view_split_btn.setChecked(self._preview_view == "split")
+        self._sync_view_visibility()
+        self._update_compare_available()
         self._apply_theme()
 
     def _restore_environment(self) -> None:
@@ -2146,8 +2218,12 @@ class MainWindow(QMainWindow):
             if path and os.path.exists(path):
                 self._set_image_path(path)
                 return
-        self._preview.set_placeholder("Drag an image here, or use the field above.")
+        self._source_view.set_placeholder(
+            "Drag an image here, or use the field above."
+        )
+        self._preview.set_placeholder("The planned strokes appear here.")
         self._preview_meta.setText("No image")
+        self._update_compare_available()
         self._image_stack.setCurrentWidget(self._preview_page)
 
     def _on_url_changed(self, text: str) -> None:
@@ -2370,10 +2446,12 @@ class MainWindow(QMainWindow):
         self._remember_last_image(path)
         self._source_pixmap = pil_to_qpixmap(image)
         self._source_meta = f"{image.width} \u00d7 {image.height} px"
-        if self._preview_view == "preview":
+        # Keep the source pane current so Compare and Source stay in sync.
+        self._source_view.set_pixmap(self._source_pixmap)
+        self._update_compare_available()
+        if self._preview_view in ("preview", "split"):
             self._schedule_preview(immediate=True)
         else:
-            self._preview.set_pixmap(self._source_pixmap)
             self._preview_meta.setText(self._source_meta)
         self._image_stack.setCurrentWidget(self._preview_page)
         note = self._pending_source
