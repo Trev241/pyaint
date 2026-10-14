@@ -65,3 +65,10 @@ include = ["pyaint*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_default_fixture_loop_scope = "function"
+# Default to the fast, headless suite. The ``ui`` group builds real Qt widgets
+# (offscreen) and is the slow one, so it runs on demand with ``pytest -m ui``
+# and in CI -- not on every edit.
+addopts = "-m 'not ui'"
+markers = [
+    "ui: builds real Qt widgets (offscreen); excluded from the default run",
+]

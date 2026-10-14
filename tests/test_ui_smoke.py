@@ -19,6 +19,11 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from pyaint.bot import Bot  # noqa: E402
 from pyaint.ui.main_window import MainWindow  # noqa: E402
 
+#: Every test here builds real Qt widgets, so the module is one ``ui`` group.
+#: The default test run excludes it (see ``[tool.pytest.ini_options]``); run it
+#: explicitly with ``pytest -m ui``.
+pytestmark = pytest.mark.ui
+
 
 @pytest.fixture(scope="module")
 def app():
@@ -39,6 +44,33 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "PROJECT_ROOT", str(tmp_path))
     monkeypatch.setattr(paths, "CONFIG_PATH", str(tmp_path / "config.json"))
     yield
+
+
+@pytest.fixture(autouse=True)
+def destroy_windows(isolated_config):
+    """Destroy every top-level widget once a test finishes.
+
+    ``MainWindow`` calls ``theme.apply`` on construction, which sets an
+    application-wide stylesheet, and Qt re-polishes every live window when that
+    happens. ``close()`` only hides a window -- it does not destroy it -- so
+    without this teardown the suite accumulates windows and each new one
+    re-polishes all the previous ones. That grows super-linearly and eventually
+    stalls the run. Deleting the widgets keeps at most one window alive.
+
+    Depends on ``isolated_config`` so its teardown runs *before* that fixture's
+    monkeypatch is undone, keeping ``closeEvent`` pointed at the throwaway paths.
+    """
+    yield
+    from PySide6.QtCore import QEvent
+
+    application = QApplication.instance()
+    if application is None:
+        return
+    for widget in application.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    application.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    application.processEvents()
 
 
 def test_main_window_builds(app, tmp_path, monkeypatch):
