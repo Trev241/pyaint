@@ -6,7 +6,15 @@ import html
 import re
 from typing import Optional
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QPointF, Qt, Signal
+from PySide6.QtCore import (
+    QBuffer,
+    QByteArray,
+    QIODevice,
+    QPointF,
+    QRectF,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QImage, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -25,6 +33,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+from pyaint.ui import bands
 
 
 def pil_to_qpixmap(image) -> QPixmap:
@@ -447,6 +458,139 @@ class SliderField(QWidget):
             self._value_label.setText(str(int(round(value))))
         else:
             self._value_label.setText(f"{value:.2f}")
+
+    def value(self) -> float:
+        return self._slider.value() * self._resolution
+
+    def set_value(self, value: float, emit: bool = False) -> None:
+        self._block = not emit
+        self._slider.setValue(round(value / self._resolution))
+        self._update_label(value)
+        self._block = False
+
+
+class BandPips(QWidget):
+    """A small meter that lights one pip per descriptor band.
+
+    Shows at a glance which qualitative band a continuous value sits in, so a
+    slider reads like a mode without pretending to be discrete.
+    """
+
+    def __init__(self, count: int, parent=None):
+        super().__init__(parent)
+        self._count = max(1, int(count))
+        self._index = 0
+        self.setFixedSize(self._count * 11 + 2, 12)
+
+    def set_index(self, index: int) -> None:
+        index = max(0, min(self._count - 1, int(index)))
+        if index != self._index:
+            self._index = index
+            self.update()
+
+    def paintEvent(self, event):  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        on = self.palette().color(QPalette.ColorRole.Highlight)
+        off = self.palette().color(QPalette.ColorRole.Mid)
+        for i in range(self._count):
+            painter.setBrush(on if i <= self._index else off)
+            painter.drawRoundedRect(QRectF(i * 11 + 1, 4, 9, 4), 2, 2)
+        painter.end()
+
+
+class DualReadoutSlider(QWidget):
+    """A labelled slider showing ``value unit · band`` and a pip meter.
+
+    The number keeps settings reproducible from a screenshot; the band word
+    keeps them readable. ``control`` is a key in :mod:`pyaint.ui.bands`.
+    """
+
+    changed = Signal(float)
+
+    def __init__(
+        self,
+        label: str,
+        control: str,
+        minimum: float,
+        maximum: float,
+        value: float,
+        resolution: float = 0.01,
+        hint: str = "",
+        pips: bool = True,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._control = control
+        self._resolution = resolution
+        self._block = False
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 4, 0, 4)
+        outer.setSpacing(2)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
+        self._label = QLabel(label)
+        self._label.setObjectName("FieldLabel")
+        header.addWidget(self._label)
+        count = bands.band_count(control)
+        self._pips = BandPips(count) if (pips and count) else None
+        if self._pips is not None:
+            header.addWidget(self._pips)
+        header.addStretch(1)
+        self._value_label = QLabel()
+        self._value_label.setObjectName("FieldValue")
+        self._value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        header.addWidget(self._value_label)
+        self._band_label = QLabel()
+        self._band_label.setObjectName("FieldBand")
+        header.addWidget(self._band_label)
+        outer.addLayout(header)
+
+        self._slider = QSlider(Qt.Horizontal)
+        self._slider.setMinimum(round(minimum / resolution))
+        self._slider.setMaximum(round(maximum / resolution))
+        self._slider.setValue(round(value / resolution))
+        self._slider.valueChanged.connect(self._on_slider)
+        outer.addWidget(self._slider)
+
+        self._hint = QLabel()
+        self._hint.setObjectName("FieldHint")
+        self._hint.setWordWrap(True)
+        outer.addWidget(self._hint)
+        self.set_hint(hint)
+        self._update_label(value)
+
+    def set_hint(self, text: str) -> None:
+        self._hint.setText(text or "")
+        self._hint.setVisible(bool(text))
+
+    def _on_slider(self, raw: int) -> None:
+        value = raw * self._resolution
+        self._update_label(value)
+        if not self._block:
+            self.changed.emit(value)
+
+    def _format_number(self, value: float) -> str:
+        if self._resolution >= 1:
+            number = str(int(round(value)))
+        else:
+            number = f"{value:.2f}"
+        unit = bands.unit(self._control)
+        if unit == "%":
+            return f"{number}%"
+        if unit:
+            return f"{number} {unit}"
+        return number
+
+    def _update_label(self, value: float) -> None:
+        self._value_label.setText(self._format_number(value))
+        self._band_label.setText(bands.describe(self._control, value))
+        if self._pips is not None:
+            self._pips.set_index(bands.band_index(self._control, value))
 
     def value(self) -> float:
         return self._slider.value() * self._resolution

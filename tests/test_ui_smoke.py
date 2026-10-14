@@ -1448,3 +1448,17 @@ def test_drawing_settings_are_per_target(app):
         assert window.bot.settings[1] == pytest.approx(10)
     finally:
         window.close()
+
+
+def test_dual_readout_slider_shows_number_and_band(app):
+    from pyaint.ui.widgets import DualReadoutSlider
+
+    field = DualReadoutSlider("Detail", "detail", 1, 50, 12, 1)
+    try:
+        assert field._value_label.text() == "12 px"
+        assert field._band_label.text() == "Balanced"
+        field.set_value(40, emit=True)
+        assert field._value_label.text() == "40 px"
+        assert field._band_label.text() == "Coarse"
+    finally:
+        field.close()

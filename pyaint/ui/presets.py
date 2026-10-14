@@ -135,3 +135,124 @@ def match_preset(values: Dict[str, Any]) -> Optional[str]:
         ):
             return preset["key"]
     return None
+
+
+# ---------------------------------------------------------------------------
+# Drawing "Look" presets (every mode except SKETCH, which has its own above)
+# ---------------------------------------------------------------------------
+
+#: Bot fields a drawing Look controls. Pacing only -- never planner internals.
+DRAWING_PRESET_FIELDS = (
+    "delay",
+    "pixel_size",
+    "jump_delay",
+    "stroke_speed",
+    "frame_interval",
+    "travel_delay",
+)
+
+#: Canned paces, ordered from the everyday default to the quickest.
+DRAWING_PRESETS = (
+    {
+        "key": "balanced",
+        "label": "Balanced",
+        "tagline": "The everyday default",
+        "description": (
+            "A steady pace with detail that suits most images. A good place "
+            "to start before trying Smooth or Fast draft."
+        ),
+        "settings": {
+            "delay": 0.1,
+            "pixel_size": 12,
+            "jump_delay": 0.5,
+            "stroke_speed": 1500.0,
+            "frame_interval": 1.0 / 60.0,
+            "travel_delay": 0.05,
+        },
+    },
+    {
+        "key": "smooth",
+        "label": "Smooth",
+        "tagline": "Slower, finer, cleaner joins",
+        "description": (
+            "Slower and finer than Balanced, with longer pauses between "
+            "strokes so joins land cleanly. Good for photos and finished art."
+        ),
+        "settings": {
+            "delay": 0.18,
+            "pixel_size": 8,
+            "jump_delay": 0.6,
+            "stroke_speed": 1100.0,
+            "frame_interval": 0.02,
+            "travel_delay": 0.08,
+        },
+    },
+    {
+        "key": "draft",
+        "label": "Fast draft",
+        "tagline": "Quicker and coarser",
+        "description": (
+            "Fewer, coarser strokes drawn quickly. Good for a rough preview "
+            "of the shape before a careful run."
+        ),
+        "settings": {
+            "delay": 0.03,
+            "pixel_size": 20,
+            "jump_delay": 0.2,
+            "stroke_speed": 2600.0,
+            "frame_interval": 0.012,
+            "travel_delay": 0.02,
+        },
+    },
+)
+
+#: The read-only manual state shown once a Look no longer matches a preset.
+CUSTOM_LOOK = {
+    "key": "custom",
+    "label": "Custom",
+    "tagline": "Custom — you've tuned the settings",
+    "description": (
+        "The drawing settings differ from the presets. Pick a Look to reset "
+        "the pace, or keep tuning under Customize."
+    ),
+    "settings": {},
+}
+
+
+def drawing_preset_by_key(key: str) -> Dict[str, Any]:
+    """Return the drawing Look with ``key`` (``Custom`` as a fallback)."""
+    for preset in DRAWING_PRESETS:
+        if preset["key"] == key:
+            return preset
+    return CUSTOM_LOOK
+
+
+def drawing_preset_options():
+    """Selectable options for the drawing Look control."""
+    return tuple((preset["key"], preset["label"]) for preset in DRAWING_PRESETS)
+
+
+def match_drawing_preset(values: Dict[str, Any]) -> Optional[str]:
+    """Return the drawing Look key matching ``values``, or ``None``."""
+    for preset in DRAWING_PRESETS:
+        settings = preset["settings"]
+        if all(
+            field in values and _values_match(values[field], settings[field])
+            for field in settings
+        ):
+            return preset["key"]
+    return None
+
+
+def look_options(mode: str):
+    """The Look choices for ``mode`` (SKETCH keeps its own presets)."""
+    if mode == planner.SKETCH:
+        return SKETCH_PRESET_OPTIONS
+    return drawing_preset_options()
+
+
+def look_by_key(mode: str, key: str) -> Dict[str, Any]:
+    """Resolve a Look key for the given mode."""
+    if mode == planner.SKETCH:
+        return preset_by_key(key)
+    return drawing_preset_by_key(key)

@@ -277,6 +277,11 @@ def stylesheet(tokens: dict | None = None) -> str:
         font-size: 11px;
         font-weight: 600;
     }}
+    #FieldBand {{
+        color: {t['accent']};
+        font-size: 11px;
+        font-weight: 600;
+    }}
 
     /* --- Dialog text ---------------------------------------------------- */
     #DialogTitle {{
