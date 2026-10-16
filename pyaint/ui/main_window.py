@@ -124,10 +124,11 @@ class UiSignals(QObject):
 
 _PATH_LIKE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|\.{1,2}[\\/]|[\\/]|~)")
 
-#: Width of the persistent tool column, and how far the canvas sheet slides
-#: under it (the desk "tuck").
+#: Width of the persistent tool column, and the desk gutter (outer margin and
+#: the gap between the column and the artwork).
 COLUMN_WIDTH = 300
-SHEET_TUCK = 72
+MARGIN = 14
+GAP = 14
 class DeskBody(QWidget):
     """A full-width canvas with the tool column drawn over it.
 
@@ -297,21 +298,26 @@ class MainWindow(InspectorMixin, QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(MARGIN, 10, MARGIN, MARGIN)
+        root.setSpacing(10)
 
-        # Always-visible target switcher, then the persistent notice banner.
-        root.addWidget(self._build_topbar())
-        self._notice = NoticeBanner()
-        root.addWidget(self._notice)
+        # Top bar (wordmark + target + status chip), then the collapsible setup
+        # panel it toggles. Notices and the countdown are floating overlays, not
+        # layout rows, so they never move the desk.
+        self._topbar = self._build_topbar()
+        root.addWidget(self._topbar)
+        self._setup_panel = self._build_setup_panel()
+        root.addWidget(self._setup_panel)
 
-        self._countdown_banner = CountdownBanner()
+        self._notice = NoticeBanner(central)
+        self._notice.shown.connect(self._position_toasts)
+        self._countdown_banner = CountdownBanner(central)
+        self._countdown_banner.shown.connect(self._position_toasts)
         self._countdown_banner.captured.connect(self._begin_capture)
         self._countdown_banner.cancelled.connect(self._cancel_auto_detect)
-        root.addWidget(self._countdown_banner)
 
         # One desk: a full-width canvas with the tool column drawn over it,
-        # then the docked bottom bar (voice note + status + actions).
+        # then the docked voice bar.
         self._inspector = self._build_inspector()
         self._drawing_section.setVisible(False)
         canvas = self._build_canvas()  # sets self._preview_stage
@@ -341,6 +347,16 @@ class MainWindow(InspectorMixin, QMainWindow):
         layout.addWidget(self._target_combo)
 
         layout.addStretch(1)
+
+        # Status + setup, top-right: the single "are we ready?" surface.
+        self._status_btn = QPushButton("\u25b8  Not set up")
+        self._status_btn.setObjectName("StatusChip")
+        self._status_btn.setCheckable(True)
+        self._status_btn.setToolTip(
+            "Canvas and palette status \u2014 click to review setup."
+        )
+        self._status_btn.toggled.connect(self._on_setup_toggled)
+        layout.addWidget(self._status_btn)
         return bar
 
     def _build_mode_block(self) -> QWidget:
@@ -524,12 +540,12 @@ class MainWindow(InspectorMixin, QMainWindow):
         layout = QVBoxLayout(panel)
         # The stack starts under the column (the sheet tuck); the header is
         # indented so its title stays clear of the column.
-        layout.setContentsMargins(COLUMN_WIDTH - SHEET_TUCK, 12, 16, 16)
+        layout.setContentsMargins(COLUMN_WIDTH + GAP, 12, 0, 12)
         layout.setSpacing(8)
 
         header_wrap = QWidget()
         header_layout = QVBoxLayout(header_wrap)
-        header_layout.setContentsMargins(SHEET_TUCK + 10, 0, 0, 0)
+        header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(0)
         header_layout.addWidget(self._build_image_header())
         layout.addWidget(header_wrap)
@@ -551,39 +567,25 @@ class MainWindow(InspectorMixin, QMainWindow):
         return panel
 
     def _build_image_header(self) -> QWidget:
+        # One strip: title · back-to-results (when searching) · field · submit ·
+        # source. The dimensions/status meta lives on the stage header instead.
         header = QFrame()
         header.setObjectName("ImageHeader")
-        layout = QVBoxLayout(header)
+        layout = QHBoxLayout(header)
         layout.setContentsMargins(0, 0, 0, 4)
-        layout.setSpacing(9)
+        layout.setSpacing(8)
 
-        # Title on the left, search source on the right: one balanced line.
-        title_row = QHBoxLayout()
-        title_row.setSpacing(8)
         title = QLabel("Image")
         title.setObjectName("ImageTitle")
-        title_row.addWidget(title)
-        title_row.addStretch(1)
-        self._source_label = QLabel("Source")
-        self._source_label.setObjectName("SourceLabel")
-        title_row.addWidget(self._source_label)
-        self._provider_combo = QComboBox()
-        self._provider_combo.setMinimumWidth(150)
-        for provider in image_search.PROVIDERS:
-            self._provider_combo.addItem(provider.name, provider.id)
-            self._provider_combo.setItemData(
-                self._provider_combo.count() - 1, provider.description, Qt.ToolTipRole
-            )
-        self._provider_combo.setToolTip(
-            "Where online image searches look. Openverse has the broadest coverage."
-        )
-        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
-        title_row.addWidget(self._provider_combo)
-        layout.addLayout(title_row)
+        layout.addWidget(title)
 
-        # The source field and its submit action share one row.
-        row = QHBoxLayout()
-        row.setSpacing(8)
+        self._back_btn = QPushButton("← Results")
+        self._back_btn.setObjectName("ToolBarButton")
+        self._back_btn.setToolTip("Back to the search results")
+        self._back_btn.clicked.connect(self._show_results)
+        self._back_btn.setVisible(False)
+        layout.addWidget(self._back_btn)
+
         self._url_edit = QLineEdit()
         self._url_edit.setObjectName("SearchField")
         self._url_edit.setPlaceholderText(
@@ -601,29 +603,31 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._browse_action.setToolTip("Browse for an image file…")
         self._browse_action.triggered.connect(self._open_file)
         self._url_edit.textChanged.connect(self._on_url_changed)
-        row.addWidget(self._url_edit, 1)
+        layout.addWidget(self._url_edit, 1)
+
         self._load_btn = PaperButton("Load")
         self._load_btn.setObjectName("LoadButton")
         self._load_btn.setToolTip("Load the URL or path, or search for the words above")
         self._load_btn.setEnabled(False)
         self._load_btn.clicked.connect(self._on_load_clicked)
-        row.addWidget(self._load_btn)
-        layout.addLayout(row)
+        layout.addWidget(self._load_btn)
 
-        # A quiet meta line: back-to-results (when relevant) and the source.
-        info_row = QHBoxLayout()
-        info_row.setSpacing(8)
-        self._back_btn = QPushButton("← Results")
-        self._back_btn.setObjectName("ToolBarButton")
-        self._back_btn.setToolTip("Back to the search results")
-        self._back_btn.clicked.connect(self._show_results)
-        self._back_btn.setVisible(False)
-        info_row.addWidget(self._back_btn)
-        self._image_info = QLabel("No image loaded.")
-        self._image_info.setObjectName("ImageMeta")
-        self._image_info.setWordWrap(True)
-        info_row.addWidget(self._image_info, 1)
-        layout.addLayout(info_row)
+        self._source_label = QLabel("Source")
+        self._source_label.setObjectName("SourceLabel")
+        layout.addWidget(self._source_label)
+
+        self._provider_combo = QComboBox()
+        self._provider_combo.setMinimumWidth(150)
+        for provider in image_search.PROVIDERS:
+            self._provider_combo.addItem(provider.name, provider.id)
+            self._provider_combo.setItemData(
+                self._provider_combo.count() - 1, provider.description, Qt.ToolTipRole
+            )
+        self._provider_combo.setToolTip(
+            "Where online image searches look. Openverse has the broadest coverage."
+        )
+        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        layout.addWidget(self._provider_combo)
         return header
 
     def _build_preview_page(self) -> QWidget:
@@ -645,13 +649,16 @@ class MainWindow(InspectorMixin, QMainWindow):
         # The sheet runs under the column (the tuck); content is indented so the
         # image and labels always clear both the column and the jittered edge.
         stage_layout.setContentsMargins(
-            SHEET_TUCK + safe.left(), safe.top(), safe.right(), safe.bottom()
+            safe.left(), safe.top(), safe.right(), safe.bottom()
         )
         stage_layout.setSpacing(8)
 
         stage_header = QHBoxLayout()
         stage_header.setContentsMargins(2, 0, 2, 0)
         stage_header.setSpacing(8)
+        self._image_info = QLabel("No image loaded.")
+        self._image_info.setObjectName("ImageMeta")
+        stage_header.addWidget(self._image_info)
         stage_header.addStretch(1)
 
         # Source / Preview / Compare view switch. Making all three explicit
@@ -919,8 +926,54 @@ class MainWindow(InspectorMixin, QMainWindow):
         button.clicked.connect(slot)
         return button
 
+    def _build_setup_panel(self) -> QWidget:
+        """The collapsible setup panel: the readiness steps and Find / Pick."""
+        panel = QFrame()
+        panel.setObjectName("SetupPanel")
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(10)
+
+        self._readiness = ReadinessStrip()
+        self._readiness.setObjectName("ReadinessStripInline")
+        layout.addWidget(self._readiness)
+        layout.addStretch(1)
+
+        self._auto_btn = PaperButton("Find the canvas")
+        self._auto_btn.setToolTip("Find the canvas and palette from a screenshot")
+        self._auto_btn.clicked.connect(self.auto_detect)
+        layout.addWidget(self._auto_btn)
+
+        self._teach_btn = PaperButton("Pick the regions")
+        self._teach_btn.setToolTip("Click the canvas and palette corners yourself")
+        self._teach_btn.clicked.connect(self.open_setup)
+        layout.addWidget(self._teach_btn)
+
+        panel.setVisible(False)
+        return panel
+
+    def _on_setup_toggled(self, checked: bool) -> None:
+        self._setup_panel.setVisible(bool(checked))
+        self._update_status_chip()
+
+    def _position_toasts(self) -> None:
+        """Centre the floating notice / countdown under the top bar."""
+        central = self.centralWidget()
+        if central is None:
+            return
+        top = getattr(self, "_topbar", None)
+        y = (top.height() if top is not None else 56) + 12
+        for widget in (getattr(self, "_notice", None),
+                       getattr(self, "_countdown_banner", None)):
+            if widget is None or not widget.isVisible():
+                continue
+            widget.adjustSize()
+            x = max(MARGIN, (central.width() - widget.width()) // 2)
+            widget.move(x, y)
+            widget.raise_()
+
     def _build_bottom_bar(self) -> QWidget:
-        """The docked action bar: guide note (left), status + actions (right)."""
+        """The docked voice bar: guide note (left) + Start drawing (right)."""
         bar = QFrame()
         bar.setObjectName("GuideBar")
         # A fixed height so swapping the note (tooltips vary in length) never
@@ -938,25 +991,6 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._guide = GuidePanel()
         layout.addWidget(self._guide, 1)
         self._update_guide()
-
-        self._readiness = ReadinessStrip()
-        self._readiness.setObjectName("ReadinessStripInline")
-        layout.addWidget(self._readiness)
-
-        self._env_chip = QLabel("Not set up")
-        self._env_chip.setObjectName("EnvChip")
-        self._env_chip.setToolTip("Canvas and palette status")
-        layout.addWidget(self._env_chip)
-
-        self._auto_btn = PaperButton("Find the canvas")
-        self._auto_btn.setToolTip("Find the canvas and palette from a screenshot")
-        self._auto_btn.clicked.connect(self.auto_detect)
-        layout.addWidget(self._auto_btn)
-
-        self._teach_btn = PaperButton("Pick the regions")
-        self._teach_btn.setToolTip("Click the canvas and palette corners yourself")
-        self._teach_btn.clicked.connect(self.open_setup)
-        layout.addWidget(self._teach_btn)
 
         self._btn_start = PaperButton("Start drawing", primary=True)
         self._btn_start.setObjectName("Primary")
@@ -1650,12 +1684,13 @@ class MainWindow(InspectorMixin, QMainWindow):
         environment_ready = self._environment_ready()
         image_ready = self._has_image()
         self._readiness.update_steps(recipe.name, environment_ready, image_ready)
-        # The bar's checklist is noise once everything is ready; the header
-        # chip already carries the summary. Show it only when something is
-        # missing, next to the Fix action.
-        if hasattr(self, "_readiness"):
-            self._readiness.setVisible(not (environment_ready and image_ready))
-        self._update_env_chip()
+        # The setup panel opens itself while something is missing and folds away
+        # once everything is ready; the top-right chip toggles it by hand.
+        incomplete = not (environment_ready and image_ready)
+        if hasattr(self, "_status_btn"):
+            self._status_btn.setChecked(incomplete)
+            self._setup_panel.setVisible(incomplete)
+            self._update_status_chip()
         if not self._busy:
             # Keep Start clickable: clicking it explains what is missing rather
             # than leaving a greyed-out button with no reason.
@@ -1666,8 +1701,8 @@ class MainWindow(InspectorMixin, QMainWindow):
                 else "Not ready yet — click to see what is missing"
             )
 
-    def _update_env_chip(self) -> None:
-        if not hasattr(self, "_env_chip"):
+    def _update_status_chip(self) -> None:
+        if not hasattr(self, "_status_btn"):
             return
         canvas = getattr(self.bot, "_canvas", None)
         palette = getattr(self.bot, "_palette", None)
@@ -1677,11 +1712,12 @@ class MainWindow(InspectorMixin, QMainWindow):
             state, text = "partial", "Partly set up"
         else:
             state, text = "none", "Not set up"
-        self._env_chip.setText(text)
-        if self._env_chip.property("state") != state:
-            self._env_chip.setProperty("state", state)
-            self._env_chip.style().unpolish(self._env_chip)
-            self._env_chip.style().polish(self._env_chip)
+        arrow = "\u25be" if self._status_btn.isChecked() else "\u25b8"
+        self._status_btn.setText(f"{arrow}  {text}")
+        if self._status_btn.property("state") != state:
+            self._status_btn.setProperty("state", state)
+            self._status_btn.style().unpolish(self._status_btn)
+            self._status_btn.style().polish(self._status_btn)
 
     @staticmethod
     def _detection_checklist(detection) -> str:
@@ -1952,6 +1988,10 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._preview_meta.setText("No image")
         self._update_compare_available()
         self._image_stack.setCurrentWidget(self._preview_page)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._position_toasts()
 
     def _on_url_changed(self, text: str) -> None:
         text = text.strip()

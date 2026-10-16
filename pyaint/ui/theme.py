@@ -807,6 +807,28 @@ def stylesheet(tokens: dict | None = None) -> str:
         background: {t['accent']};
         border-radius: 7px;
     }}
+    #StatusChip {{
+        background: {t['bg_card']};
+        border: 1px solid {t['border']};
+        border-radius: 8px;
+        padding: 6px 12px;
+        color: {t['fg_muted']};
+    }}
+    #StatusChip:hover {{
+        background: {t['bg_hover']};
+    }}
+    #StatusChip:checked {{
+        background: {t['bg_active']};
+    }}
+    #StatusChip[state="none"], #StatusChip[state="partial"] {{
+        color: {t['accent']};
+        border-color: {t['accent']};
+    }}
+    #SetupPanel {{
+        background: {t['bg_card']};
+        border: 1px solid {t['border']};
+        border-radius: 10px;
+    }}
     #TopBarBrand {{
         background: {t['accent']};
         color: {t['accent_fg']};

@@ -360,6 +360,8 @@ def test_progress_overlay_updates(app):
 
 
 def test_countdown_banner_counts_down_and_captures(app):
+    import time
+
     from pyaint.ui.countdown import CountdownBanner
 
     banner = CountdownBanner()
@@ -368,9 +370,15 @@ def test_countdown_banner_counts_down_and_captures(app):
     try:
         banner.start(seconds=2)
         assert banner._timer.isActive()  # regression: the timer must actually run
-        banner._tick()  # 2 -> 1
+        # Under a second left: the bar is partway (smooth, not stepped) and the
+        # title reads "1s".
+        banner._deadline = time.monotonic() + 0.9
+        banner._tick()
         assert banner._title.text().endswith("1s…")
-        banner._tick()  # 1 -> captured
+        assert 0 < banner._bar.value() < 1000
+        # Past the deadline: capture fires and the timer stops.
+        banner._deadline = time.monotonic() - 0.01
+        banner._tick()
         assert captured == [True]
         assert not banner._timer.isActive()
     finally:
@@ -1521,5 +1529,34 @@ def test_guide_note_follows_hover(app, tmp_path, monkeypatch):
         assert "Image URL" in window._guide._text.text()
         window.eventFilter(window._url_edit, QEvent(QEvent.Leave))
         assert window._guide._text.text() == baseline
+    finally:
+        window.close()
+
+
+def test_notice_toast_behaviour(app, tmp_path, monkeypatch):
+    """Notices are floating toasts: info auto-dismisses, errors persist."""
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._notice.show_notice("hello", "info")
+        assert window._notice.isVisibleTo(window)
+        assert window._notice._timer.isActive()
+        window._notice.clear()
+        assert not window._notice.isVisibleTo(window)
+        # An error carries the fix, so it must not auto-dismiss.
+        window._notice.show_notice("boom", "error", "Fix", lambda: None)
+        assert not window._notice._timer.isActive()
+    finally:
+        window.close()
+
+
+def test_setup_panel_follows_the_status_chip(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._status_btn.setChecked(False)
+        assert not window._setup_panel.isVisibleTo(window)
+        window._status_btn.setChecked(True)
+        assert window._setup_panel.isVisibleTo(window)
     finally:
         window.close()

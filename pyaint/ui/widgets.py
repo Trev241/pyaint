@@ -15,6 +15,7 @@ from PySide6.QtCore import (
     QPointF,
     QRectF,
     Qt,
+    QTimer,
     Signal,
 )
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPalette, QPen, QPixmap
@@ -195,20 +196,30 @@ class SegmentedControl(QWidget):
 
 
 class NoticeBanner(QFrame):
-    """A persistent, severity-aware message bar.
+    """A floating, severity-aware toast.
 
-    Used for the things a user must not miss: what is blocking a draw, what
-    failed, or the result of a switch. It stays visible until replaced or
-    dismissed, unlike a transient status-bar message.
+    Anchored by its owner over the content (never in the layout, so showing it
+    moves nothing). Info/success auto-dismiss quickly, warnings a little later,
+    and errors persist until dismissed because they carry the fix. Hovering
+    holds it open; clicking anywhere on it dismisses it.
     """
 
+    shown = Signal()
+
     _GLYPHS = {"info": "i", "success": "\u2713", "warning": "!", "error": "\u2715"}
+    #: Auto-dismiss delay in ms; 0 means "stay until dismissed".
+    _DURATION = {"info": 4000, "success": 4000, "warning": 8000, "error": 0}
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("NoticeBanner")
         self.setProperty("severity", "info")
+        self.setFixedWidth(460)
         self._on_action = None
+        self._severity = "info"
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.clear)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
@@ -242,6 +253,7 @@ class NoticeBanner(QFrame):
     def show_notice(self, text, severity="info", action_text=None, on_action=None):
         """Show a message; ``on_action`` runs when the action button is used."""
         severity = severity if severity in self._GLYPHS else "info"
+        self._severity = severity
         self.setProperty("severity", severity)
         self._icon.setText(self._GLYPHS[severity])
         self._text.setText(text)
@@ -253,8 +265,34 @@ class NoticeBanner(QFrame):
             self._action.hide()
         self._restyle()
         self.show()
+        self.raise_()
+        self._arm()
+
+    def _arm(self) -> None:
+        delay = self._DURATION.get(self._severity, 0)
+        if delay > 0:
+            self._timer.start(delay)
+        else:
+            self._timer.stop()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.shown.emit()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self._timer.stop()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._arm()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        self.clear()
+        super().mousePressEvent(event)
 
     def clear(self):
+        self._timer.stop()
         self._on_action = None
         self.hide()
 

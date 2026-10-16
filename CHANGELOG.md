@@ -13,6 +13,21 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **Desk layout pass: status up top, floating notices, real gutters.** Readiness
+  moved out of the bottom bar into a **collapsible setup panel** under the top
+  bar, toggled by a **status chip at the top-right** (`Not set up` / `Partly set
+  up` / `Ready · N colours`); it auto-opens while something is missing and folds
+  away once ready, carrying the readiness steps and `Find the canvas` / `Pick
+  the regions`. The voice bar is now just the guide note + `Start drawing`.
+  Notices and the capture countdown are **floating, top-anchored toasts**
+  instead of layout rows, so showing one moves nothing: info/success
+  auto-dismiss (~4s), warnings later (~8s), errors persist, hovering holds and
+  clicking dismisses. The countdown bar animates smoothly off a monotonic
+  deadline instead of stepping. The image source is now a **single strip**
+  (`Image · field · Load/Search · Source`), with the duplicated meta line moved
+  onto the stage header and `← Results` inline. The desk has a consistent
+  gutter (`MARGIN` / `GAP`); the sheet-into-column tuck is gone, so the column
+  and hero sit apart like the reference mockup.
 - **Paper on a desk — the subtle pass + desk/UX pass.** Paper is now confined
   to the hero artwork sheet at reduced amplitude; every other surface (column,
   mode highlight, Look strip, buttons, docked bar) is a plain rounded rect, and

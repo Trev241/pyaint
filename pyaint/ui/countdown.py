@@ -1,12 +1,17 @@
-"""Non-modal in-window countdown banner used before a screen capture.
+"""Non-modal countdown used before a screen capture.
 
-Shown above the content area when Auto-detect is about to minimize the window.
-Unlike a modal dialog it never steals focus or floats over the target app, but
-it is large and high-contrast enough to be unmissable. It offers **Capture now**
-and **Cancel**, and auto-proceeds when the countdown ends.
+Shown as a floating, top-anchored card while Find the canvas is about to
+minimize the window. Unlike a modal dialog it never steals focus or floats over
+the target app; unlike a layout banner it takes no space, so showing it moves
+nothing. It offers **Capture now** and **Cancel**, and auto-proceeds when the
+countdown ends. The progress bar animates smoothly (a high-frequency timer over
+a monotonic deadline), not in one-second steps.
 """
 
 from __future__ import annotations
+
+import math
+import time
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
@@ -22,12 +27,13 @@ from PySide6.QtWidgets import (
 class CountdownBanner(QFrame):
     captured = Signal()
     cancelled = Signal()
+    shown = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("CountdownBanner")
         self._total = 0
-        self._remaining = 0
+        self._deadline = 0.0
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 10, 14, 10)
@@ -58,37 +64,44 @@ class CountdownBanner(QFrame):
         outer.addLayout(top)
 
         self._bar = QProgressBar()
-        self._bar.setRange(0, 1)
-        self._bar.setValue(1)
+        self._bar.setRange(0, 1000)
+        self._bar.setValue(1000)
         self._bar.setTextVisible(False)
         self._bar.setFixedHeight(4)
         outer.addWidget(self._bar)
 
+        # ~40 fps keeps the bar visibly smooth without busy-looping.
         self._timer = QTimer(self)
+        self._timer.setInterval(40)
         self._timer.timeout.connect(self._tick)
         self.hide()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.shown.emit()
+
     def start(self, seconds: int = 4) -> None:
         self._total = max(1, int(seconds))
-        self._remaining = self._total
-        self._bar.setRange(0, self._total)
-        self._bar.setValue(self._total)
-        self._title.setText(f"Capturing the screen in {self._remaining}s…")
+        self._deadline = time.monotonic() + self._total
+        self._bar.setValue(1000)
+        self._title.setText(f"Capturing the screen in {self._total}s…")
         self.show()
-        self._timer.start(1000)
+        self.raise_()
+        self._timer.start()
 
     def stop(self) -> None:
         self._timer.stop()
         self.hide()
 
     def _tick(self) -> None:
-        self._remaining -= 1
-        if self._remaining <= 0:
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
             self._timer.stop()
             self.captured.emit()
             return
-        self._title.setText(f"Capturing the screen in {self._remaining}s…")
-        self._bar.setValue(self._remaining)
+        fraction = max(0.0, min(1.0, remaining / self._total))
+        self._bar.setValue(int(round(fraction * 1000)))
+        self._title.setText(f"Capturing the screen in {math.ceil(remaining)}s…")
 
     def _capture_now(self) -> None:
         self._timer.stop()
