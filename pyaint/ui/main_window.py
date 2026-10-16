@@ -923,15 +923,17 @@ class MainWindow(InspectorMixin, QMainWindow):
         """The docked action bar: guide note (left), status + actions (right)."""
         bar = QFrame()
         bar.setObjectName("GuideBar")
+        # A fixed height so swapping the note (tooltips vary in length) never
+        # resizes the pane; long text wraps and is clipped, not reflowed.
+        bar.setFixedHeight(68)
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(10)
 
-        badge = QLabel("\u2733")
-        badge.setObjectName("GuideBadge")
-        badge.setFixedSize(38, 38)
-        badge.setAlignment(Qt.AlignCenter)
-        layout.addWidget(badge)
+        dot = QLabel("")
+        dot.setObjectName("GuideDot")
+        dot.setFixedSize(14, 14)
+        layout.addWidget(dot)
 
         self._guide = GuidePanel()
         layout.addWidget(self._guide, 1)

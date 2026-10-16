@@ -40,7 +40,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   design promised. The image field splits `Load` (a URL or path) from `Search`
   (plain words) by relabelling its button, and the `Source` picker is hidden
   while loading a URL/path. Sketch's preset is now named only once (the
-  segmented control); the duplicate title/description pair is gone.
+  segmented control); the duplicate title/description pair is gone. The docked
+  bar has a fixed height (long tooltips wrap and clip, they no longer resize the
+  pane) and its voice mark is a plain accent dot.
 - **Paper on a desk: the surface language.** Chrome is no longer made of
   rectangles. Every panel, card, chip, bar and the selected-mode highlight is
   an irregular sheet — jittered corners, each edge bowed a different amount, no

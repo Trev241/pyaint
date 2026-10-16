@@ -615,7 +615,8 @@ class GuidePanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("GuidePanel")
-        self.setMinimumHeight(44)
+        # Fixed seat: the note can change freely without resizing the layout.
+        self.setFixedHeight(52)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 4, 12, 4)
         outer.setSpacing(0)

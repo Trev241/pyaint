@@ -803,11 +803,9 @@ def stylesheet(tokens: dict | None = None) -> str:
         font-size: 11px;
         font-weight: 600;
     }}
-    #GuideBadge {{
+    #GuideDot {{
         background: {t['accent']};
-        color: {t['accent_fg']};
-        border-radius: 19px;
-        font-size: 17px;
+        border-radius: 7px;
     }}
     #TopBarBrand {{
         background: {t['accent']};
