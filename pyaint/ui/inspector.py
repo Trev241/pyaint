@@ -312,14 +312,6 @@ class InspectorMixin:
         sketch_layout = QVBoxLayout(self._sketch_controls)
         sketch_layout.setContentsMargins(0, 0, 0, 0)
         sketch_layout.setSpacing(6)
-        self._sketch_preset_title = QLabel()
-        self._sketch_preset_title.setObjectName("PresetTagline")
-        sketch_layout.addWidget(self._sketch_preset_title)
-        self._sketch_preset_desc = QLabel()
-        self._sketch_preset_desc.setObjectName("PresetHint")
-        self._sketch_preset_desc.setWordWrap(True)
-        sketch_layout.addWidget(self._sketch_preset_desc)
-
         self._sketch_advanced = CollapsibleSection("Advanced settings")
         advanced_hint = QLabel(
             "Fine-tune the chosen preset. Changing any value switches the "

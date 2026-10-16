@@ -231,6 +231,8 @@ class MainWindow(InspectorMixin, QMainWindow):
         # Per-target drawing settings/options, so each app keeps its own tuning.
         self._drawing_by_target = {}
         self._last_error = None
+        # The widget whose tooltip currently owns the guide note.
+        self._guide_owner = None
 
         # Live preview state. ``_preview_generation`` drops stale worker
         # results; the timer debounces planning while sliders move.
@@ -267,6 +269,10 @@ class MainWindow(InspectorMixin, QMainWindow):
             theme.apply(app, self.tokens)
 
         self._build_ui()
+        app = QApplication.instance()
+        if app is not None:
+            # The guide note follows the control under the pointer or keyboard.
+            app.installEventFilter(self)
         self._overlay = ProgressOverlay()
         self._detection_overlay = DetectionOverlay()
         self._detection_overlay.confirmed.connect(self._apply_detection)
@@ -377,8 +383,8 @@ class MainWindow(InspectorMixin, QMainWindow):
             self._look_options(), self._look_current_key()
         )
         self._look_control.changed.connect(self._on_look_changed)
-        # Sketch's preset control is this same control; older code and the UI
-        # tests still refer to it by that name.
+        # Sketch's preset control is this same control (the preset name is
+        # carried by the control itself, not a second label).
         self._sketch_preset_control = self._look_control
         look_layout.addWidget(self._look_control)
         layout.insertWidget(layout.count() - 1, look_box)
@@ -428,6 +434,28 @@ class MainWindow(InspectorMixin, QMainWindow):
             kicker = "About this mode"
             text = self._MODE_GUIDE.get(self._mode, "")
         panel.set_note(kicker or "", text)
+
+    @staticmethod
+    def _guide_text_for(widget) -> str:
+        try:
+            return (widget.toolTip() or "").strip()
+        except Exception:
+            return ""
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        """Swap the guide note to the hovered/focused control's own help."""
+        kind = event.type()
+        if kind in (QEvent.Enter, QEvent.FocusIn):
+            if isinstance(obj, QWidget) and obj.window() is self:
+                text = self._guide_text_for(obj)
+                if text:
+                    self._guide_owner = obj
+                    self._update_guide("", text)
+        elif kind in (QEvent.Leave, QEvent.FocusOut):
+            if self._guide_owner is obj:
+                self._guide_owner = None
+                self._update_guide()
+        return super().eventFilter(obj, event)
 
     # -- Look (mode-aware preset) -------------------------------------
     def _drawing_values(self) -> dict:
@@ -536,9 +564,9 @@ class MainWindow(InspectorMixin, QMainWindow):
         title.setObjectName("ImageTitle")
         title_row.addWidget(title)
         title_row.addStretch(1)
-        source_label = QLabel("Source")
-        source_label.setObjectName("SourceLabel")
-        title_row.addWidget(source_label)
+        self._source_label = QLabel("Source")
+        self._source_label.setObjectName("SourceLabel")
+        title_row.addWidget(self._source_label)
         self._provider_combo = QComboBox()
         self._provider_combo.setMinimumWidth(150)
         for provider in image_search.PROVIDERS:
@@ -1551,9 +1579,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         control = getattr(self, "_sketch_preset_control", None)
         if control is not None:
             control.set_value(key)
-        self._sketch_preset_title.setText(preset["tagline"])
-        self._sketch_preset_desc.setText(preset["description"])
-        # Keep the Look tiles in step (Custom appears only while it is live).
+        # Keep the Look control in step (Custom appears only while it is live).
         self._refresh_look_control()
 
     def _detect_sketch_preset(self) -> None:
@@ -1926,7 +1952,21 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._image_stack.setCurrentWidget(self._preview_page)
 
     def _on_url_changed(self, text: str) -> None:
-        self._load_btn.setEnabled(bool(text.strip()))
+        text = text.strip()
+        self._load_btn.setEnabled(bool(text))
+        # ``Load`` fetches a URL/path; ``Search`` looks online. The Source
+        # picker is only relevant to a search, so hide it while loading.
+        loading = bool(text) and (
+            text.lower().startswith(("http://", "https://"))
+            or os.path.exists(text)
+            or _looks_like_path(text)
+        )
+        self._load_btn.setText("Load" if (loading or not text) else "Search")
+        show_source = not loading
+        for widget in (getattr(self, "_source_label", None),
+                       getattr(self, "_provider_combo", None)):
+            if widget is not None:
+                widget.setVisible(show_source)
 
     def _on_load_clicked(self) -> None:
         text = self._url_edit.text().strip()
@@ -2803,6 +2843,9 @@ class MainWindow(InspectorMixin, QMainWindow):
     # Lifecycle
     # ------------------------------------------------------------------
     def closeEvent(self, event):  # noqa: N802
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
         self._overlay.hide_overlay()
         self._detection_overlay.hide_detection()
         self._countdown_banner.stop()

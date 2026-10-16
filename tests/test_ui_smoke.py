@@ -252,7 +252,6 @@ def test_sketch_presets_apply_and_detect_custom(app, tmp_path, monkeypatch):
         # tile appears only while it is the live state, and is selected.
         window._sketch_hue_threshold.set_value(12, emit=True)
         assert window._sketch_preset_control.value() == "custom"
-        assert "Custom" in window._sketch_preset_title.text()
     finally:
         window.close()
 
@@ -1489,3 +1488,38 @@ def test_mode_rail_is_a_single_choice(app):
         assert len(checked) == 1
     finally:
         rail.close()
+
+
+def test_load_field_splits_load_from_search(app, tmp_path, monkeypatch):
+    """A URL/path loads; plain words search; the Source picker only shows for a search."""
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._url_edit.setText("https://example.com/a.png")
+        assert window._load_btn.text() == "Load"
+        assert not window._source_label.isVisibleTo(window)
+
+        window._url_edit.setText("cartoon cat")
+        assert window._load_btn.text() == "Search"
+        assert window._source_label.isVisibleTo(window)
+    finally:
+        window.close()
+
+
+def test_guide_note_follows_hover(app, tmp_path, monkeypatch):
+    """Hovering/focusing a control swaps the guide note; leaving restores the mode note."""
+    from PySide6.QtCore import QEvent
+
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._url_edit.setToolTip("Image URL or file path, or search words")
+        window._update_guide()
+        baseline = window._guide._text.text()
+
+        window.eventFilter(window._url_edit, QEvent(QEvent.Enter))
+        assert "Image URL" in window._guide._text.text()
+        window.eventFilter(window._url_edit, QEvent(QEvent.Leave))
+        assert window._guide._text.text() == baseline
+    finally:
+        window.close()

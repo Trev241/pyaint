@@ -34,6 +34,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   rewritten; unused desk widgets (`LookFan`, `LookTiles`, `LookSelector`,
   `StraddleBar`, `BadgeDisc`, `_BrushMark`) were deleted. The hero shape is
   pinned by render snapshots in `tests/snapshots/`.
+- **Guide note + image-field polish.** The docked guide note now describes the
+  control under the pointer or keyboard (its tooltip), reverting to the active
+  mode's note when nothing is hovered — the "voice" finally does what the
+  design promised. The image field splits `Load` (a URL or path) from `Search`
+  (plain words) by relabelling its button, and the `Source` picker is hidden
+  while loading a URL/path. Sketch's preset is now named only once (the
+  segmented control); the duplicate title/description pair is gone.
 - **Paper on a desk: the surface language.** Chrome is no longer made of
   rectangles. Every panel, card, chip, bar and the selected-mode highlight is
   an irregular sheet — jittered corners, each edge bowed a different amount, no
