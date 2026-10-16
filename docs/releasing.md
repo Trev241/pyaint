@@ -24,7 +24,7 @@ fail to save settings.
 **Smoke-test before publishing** (the test suite cannot test the frozen build):
 
 1. Run `dist/pyaint.exe` from a writable folder.
-2. Auto-detect on a blank canvas, load an image, draw once.
+2. Find the canvas on a blank canvas, load an image, draw once.
 3. Confirm `config.json` appears next to the `.exe` and `cache/` is cleared on exit.
 4. Check the console for missing-module errors (usually a PyInstaller
    `hiddenimports` gap).

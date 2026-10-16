@@ -1028,7 +1028,7 @@ class MainWindow(InspectorMixin, QMainWindow):
             self._notice.show_notice(
                 f'"{recipe.name}" is not set up yet \u2014 find its canvas and palette.',
                 "warning",
-                "Auto-detect" if recipe.detection else "Set up",
+                "Find the canvas" if recipe.detection else "Pick the regions",
                 self.auto_detect if recipe.detection else self.open_setup,
             )
             self._set_status(f"Target set to {recipe.name} \u2014 setup needed.")
@@ -2328,7 +2328,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._countdown_banner.stop()
         self._detecting = False
         self._set_running(False)
-        self._set_status("Auto-detect cancelled.")
+        self._set_status("Find the canvas cancelled.")
 
     def _finish_auto_detect(self) -> None:
         try:
@@ -2345,7 +2345,7 @@ class MainWindow(InspectorMixin, QMainWindow):
             self.showNormal()
             self.raise_()
             self.activateWindow()
-            QMessageBox.critical(self, self.title, f"Auto-detect failed: {exc}")
+            QMessageBox.critical(self, self.title, f"Find the canvas failed: {exc}")
         finally:
             self._detecting = False
             self._set_running(False)
@@ -2400,9 +2400,9 @@ class MainWindow(InspectorMixin, QMainWindow):
         if palette_found and palette is not None and len(palette.colors) <= 1:
             self._notice.show_notice(
                 "The palette sampled as a single colour — the target app may have "
-                "been covered. Re-run Auto-detect with the app in front, or teach it.",
+                "been covered. Run Find the canvas with the app in front, or pick the regions.",
                 "error",
-                "Re-detect",
+                "Find the canvas",
                 self.auto_detect,
             )
         elif palette_expected and not palette_found:
@@ -2412,43 +2412,43 @@ class MainWindow(InspectorMixin, QMainWindow):
             if palette is not None:
                 message = (
                     "Canvas detected, but the palette couldn't be found — keeping "
-                    "the palette you taught. Re-run with the app in front, or "
-                    "teach it again to update it."
+                    "the palette you picked. Run Find the canvas with the app in front, or "
+                    "pick the regions again to update it."
                     if canvas_found
-                    else "Auto-detect couldn't find the palette — keeping the "
-                    "palette you taught. Re-run with the target app in front, or "
-                    "teach it again to update it."
+                    else "Find the canvas couldn't find the palette — keeping the "
+                    "palette you picked. Run Find the canvas with the target app in front, or "
+                    "pick the regions again to update it."
                 )
                 self._notice.show_notice(
-                    message, "warning", "Re-detect", self.auto_detect
+                    message, "warning", "Find the canvas", self.auto_detect
                 )
             else:
                 message = (
                     "Canvas detected, but the palette couldn't be found. Re-run "
-                    "Auto-detect with the target app in front, or teach it."
+                    "Find the canvas with the target app in front, or pick the regions."
                     if canvas_found
-                    else "Auto-detect didn't find a canvas or palette. Re-run with "
-                    "the target app maximized and in front, or teach it."
+                    else "Find the canvas didn't find a canvas or palette. Re-run with "
+                    "the target app maximized and in front, or pick the regions."
                 )
                 self._notice.show_notice(
-                    message, "error", "Re-detect", self.auto_detect
+                    message, "error", "Find the canvas", self.auto_detect
                 )
         elif canvas_expected and not canvas_found:
             if self.profile.canvas_rect() is not None:
                 self._notice.show_notice(
                     "Palette detected, but the canvas couldn't be found — keeping "
-                    "the canvas you taught. Re-run with a blank canvas in front, "
-                    "or teach it again to update it.",
+                    "the canvas you picked. Run Find the canvas with a blank canvas in front, "
+                    "or pick the regions again to update it.",
                     "warning",
-                    "Re-detect",
+                    "Find the canvas",
                     self.auto_detect,
                 )
             else:
                 self._notice.show_notice(
                     "Palette detected, but the canvas couldn't be found. Re-run "
-                    "Auto-detect with a blank canvas in front, or teach it.",
+                    "Find the canvas with a blank canvas in front, or pick the regions.",
                     "error",
-                    "Re-detect",
+                    "Find the canvas",
                     self.auto_detect,
                 )
         elif palette_found and canvas_found:
@@ -2459,12 +2459,12 @@ class MainWindow(InspectorMixin, QMainWindow):
             self._notice.show_notice("Canvas detected.", "success")
         else:
             self._notice.show_notice(
-                "Auto-detect didn't find a canvas or palette.",
+                "Find the canvas didn't find a canvas or palette.",
                 "error",
-                "Re-detect",
+                "Find the canvas",
                 self.auto_detect,
             )
-        self._set_status(f"Auto-detect applied ({', '.join(applied) or 'nothing'}).")
+        self._set_status(f"Find the canvas applied ({', '.join(applied) or 'nothing'}).")
 
     def _retry_detection(self) -> None:
         self._detection_overlay.hide_detection()
@@ -2529,7 +2529,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
-        self._set_status("Auto-detect dismissed — no changes made.")
+        self._set_status("Find the canvas dismissed — no changes made.")
 
     # ------------------------------------------------------------------
     # Drawing actions
@@ -2558,7 +2558,7 @@ class MainWindow(InspectorMixin, QMainWindow):
     def _on_precompute(self) -> None:
         if not self._require_image():
             return
-        self._start_task("Prepare & cache", self._precompute_work, interruptible=False)
+        self._start_task("Saving the plan", self._precompute_work, interruptible=False)
 
     def _precompute_work(self) -> None:
         cache_file = self.bot.precompute(
@@ -2599,7 +2599,7 @@ class MainWindow(InspectorMixin, QMainWindow):
     def _on_simple_test(self) -> None:
         if getattr(self.bot, "_canvas", None) is None:
             self._notice.show_notice(
-                "Canvas not set yet.", "warning", "Auto-detect", self._on_fix
+                "Canvas not set yet.", "warning", "Find the canvas", self._on_fix
             )
             return
         self._start_task(
@@ -2621,7 +2621,7 @@ class MainWindow(InspectorMixin, QMainWindow):
             issues.append(("palette not set", "Set up", self._on_fix))
         elif len(palette.colors) <= 1:
             issues.append(
-                ("palette has only one colour", "Auto-detect", self.auto_detect)
+                ("palette has only one colour", "Find the canvas", self.auto_detect)
             )
         return issues
 
@@ -2679,7 +2679,7 @@ class MainWindow(InspectorMixin, QMainWindow):
 
         if getattr(self.bot, "_canvas", None) is None:
             self._notice.show_notice(
-                "Canvas not set yet.", "warning", "Auto-detect", self._on_fix
+                "Canvas not set yet.", "warning", "Find the canvas", self._on_fix
             )
             return
         try:

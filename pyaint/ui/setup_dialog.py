@@ -91,7 +91,7 @@ class SetupDialog(QDialog):
 
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 0, 0, 0)
-        self._teach_btn = QPushButton("Teach…")
+        self._teach_btn = QPushButton("Pick…")
         self._teach_btn.setToolTip("Capture this region from the target app")
         self._teach_btn.clicked.connect(self._teach)
         action_row.addWidget(self._teach_btn)
@@ -244,7 +244,7 @@ class SetupDialog(QDialog):
         if pixmap is not None:
             self._palette_preview.set_pixmap(pixmap)
         else:
-            self._palette_preview.set_placeholder("No preview yet — click Teach…")
+            self._palette_preview.set_placeholder("No preview yet — click Pick…")
 
         if is_palette:
             coords = entry.get("color_coords") or {}
@@ -255,11 +255,11 @@ class SetupDialog(QDialog):
                 feedback = f"✓ {len(coords)} colours sampled{grid}."
             elif entry.get("status"):
                 feedback = (
-                    "Configured, but no colour preview is saved. Teach it again "
+                    "Configured, but no colour preview is saved. Pick it again "
                     "to check the swatches."
                 )
             elif pixmap is not None:
-                feedback = "Detected region shown — click Teach… to sample and confirm."
+                feedback = "Detected region shown — click Pick… to sample and confirm."
             else:
                 feedback = "Not set yet."
         else:
@@ -269,7 +269,7 @@ class SetupDialog(QDialog):
                 height = abs(int(box[3]) - int(box[1]))
                 feedback = f"✓ Canvas region captured ({width} × {height} px)."
             elif pixmap is not None:
-                feedback = "Detected region shown — click Teach… to confirm."
+                feedback = "Detected region shown — click Pick… to confirm."
             else:
                 feedback = "Not set yet."
         self._palette_feedback.setText(feedback)
@@ -410,7 +410,7 @@ class SetupDialog(QDialog):
         answer = QMessageBox.question(
             self,
             "Clear setting",
-            f"Forget the learned {_FRIENDLY[name]} position? You can teach it "
+            f"Forget the learned {_FRIENDLY[name]} position? You can pick it "
             "again at any time.",
         )
         if answer != QMessageBox.StandardButton.Yes:

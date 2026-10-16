@@ -38,10 +38,6 @@ from PySide6.QtWidgets import (
 
 from pyaint.ui import theme
 
-#: The desk stacking, bottom sheet first. A surface lower in this list is
-#: tucked *under* the ones after it (``artwork`` slides under the ``column``).
-DESK_ORDER = ("artwork", "voicebar", "column")
-
 #: Base intensity of the paper gesture (0 = plain rectangles, 1 = full lean).
 PAPER_AMOUNT = 0.6
 

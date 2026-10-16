@@ -27,13 +27,13 @@ https://github.com/user-attachments/assets/50f2f344-8ca9-439b-8722-0175356ad59e
 ## Supported apps
 
 Pyaint finds the canvas and palette on screen, then replays the image as
-horizontal brush strokes. Auto-detect needs a **blank** canvas; support level
+horizontal brush strokes. Find the canvas needs a **blank** canvas; support level
 depends on how much of the app can be detected.
 
 | App | Support | Setup |
 |-----|---------|-------|
-| **skribbl.io** | Canvas + fixed 2×13 palette auto-detected | `Auto-detect` — no manual teaching |
-| **MS Paint** (Windows 11) | Canvas + palette auto-detected when maximized at 1920×1080 | `Auto-detect`, or teach manually |
+| **skribbl.io** | Canvas + fixed 2×13 palette auto-detected | `Find the canvas` — no manual picking |
+| **MS Paint** (Windows 11) | Canvas + palette auto-detected when maximized at 1920×1080 | `Find the canvas`, or pick manually |
 | **Anything else with a palette grid** | Generic path | Teach the palette and canvas |
 
 Pyaint selects colours from an **on-screen palette**, so apps whose only colour
@@ -79,14 +79,14 @@ python main.py
 ### 2. Draw
 
 1. Pick your app in the **Drawing in** target switcher (top bar).
-2. Click **Auto-detect** — make sure the canvas is **blank**, the app is
+2. Click **Find the canvas** — make sure the canvas is **blank**, the app is
    maximized on the primary monitor at 100% scaling, then review and confirm
-   the on-screen detection overlay. Or click **Teach manually** and click the
+   the on-screen detection overlay. Or click **Pick the regions** and click the
    canvas and palette corners.
 3. Load an image from a file, a URL, or drag one in (a file *or* straight from
    a browser) — or type words like *cartoon cat* to search online. Pick the
-   **Search source** (Openverse by default, or Wikimedia Commons).
-4. Click **Start**. Press `ESC` to stop, `P` to pause/resume.
+   **Source** (Openverse by default, or Wikimedia Commons).
+4. Click **Start drawing**. Press `ESC` to stop, `P` to pause/resume.
 
 That's it. For skribbl.io the first draw should take about a minute.
 
@@ -165,19 +165,19 @@ No. Pyaint relies on Windows screen capture and `pyautogui` input, and the
 detection is tuned for Windows apps.
 
 **Colors are wrong.**
-Re-run **Auto-detect** (or **Setup**) so the palette grid is sampled from the
-swatch centres, and lower **Detail** for more detail. See
+Re-run **Find the canvas** (or **Pick the regions**) so the palette grid is
+sampled from the swatch centres, and lower **Detail** for more detail. See
 [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
 **Drawing is too slow / too fast.**
-Adjust **Time per stroke** and **Detail**. **Prepare & cache** skips processing
-on repeat runs but does not change drawing speed.
+Adjust **Time per stroke** and **Detail**. **Save the plan for next time**
+skips processing on repeat runs but does not change drawing speed.
 
-**Auto-detect found nothing.**
+**Find the canvas found nothing.**
 The canvas must be **blank** — existing artwork defeats detection. Also make
 sure the window is maximized on the primary monitor at 100% display scaling.
-Clear the canvas and retry, or teach the canvas and palette with **Teach
-manually**.
+Clear the canvas and retry, or pick the canvas and palette with **Pick the
+regions**.
 
 **Where does it save data?**
 `config.json`, `cache/`, and `targets/` sit next to the executable (the repo

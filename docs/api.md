@@ -210,7 +210,7 @@ CIEDE2000; `metric="rgb"` uses the legacy squared Euclidean distance.
 
 `pyaint.image_search` — keyless, paged lookup used when the Image field holds
 search words instead of a URL or path. Two providers are supported and the UI
-has a **Search source** selector: **Openverse** (default; broad, CC-licensed
+has a **Source** selector: **Openverse** (default; broad, CC-licensed
 coverage from Flickr, museums, and more) and **Wikimedia Commons**
 (encyclopedic — strong for diagrams). Results come back in the engine's
 relevance order (no drawing/photo bias). Openverse caps anonymous requests at

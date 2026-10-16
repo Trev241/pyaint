@@ -159,7 +159,7 @@ back to manual teaching. Applying a detection is non-destructive: a region the
 recipe did not find is left alone, so a failed auto-detect can never wipe a
 palette or canvas taught by hand. Review happens on screen: `overlay.py`
 dims the desktop, spotlights the detected canvas/palette with palette
-cell-centre dots, and offers Use / Try again / Teach manually / Not now.
+cell-centre dots, and offers Use these regions / Try again / Pick the regions / Not now.
 
 ### Caching
 

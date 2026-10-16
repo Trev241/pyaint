@@ -164,7 +164,7 @@ class DetectionOverlay(QWidget):
 
     The target app stays visible underneath while the detected canvas and
     palette are spotlighted and the palette cell centres are marked. The user
-    decides whether to use the regions, retry, teach manually, or discard.
+    decides whether to use the regions, retry, pick them by hand, or discard.
     """
 
     confirmed = Signal()
@@ -211,7 +211,7 @@ class DetectionOverlay(QWidget):
         self._confirm_btn.clicked.connect(self.confirmed.emit)
         self._retry_btn = QPushButton("Try again")
         self._retry_btn.clicked.connect(self.retry_requested.emit)
-        self._teach_btn = QPushButton("Teach manually…")
+        self._teach_btn = QPushButton("Pick the regions")
         self._teach_btn.clicked.connect(self.teach_requested.emit)
         self._dismiss_btn = QPushButton("Not now")
         self._dismiss_btn.clicked.connect(self.dismissed.emit)

@@ -2,16 +2,16 @@
 
 ## Drawing doesn't start
 
-- The **Canvas** must be configured. Run **Auto-detect**, or teach it in
-  **Setup**.
-- The **Palette** must be configured. Auto-detect or teach the grid and its
+- The **Canvas** must be configured. Click **Find the canvas**, or pick it in
+  **Pick the regions**.
+- The **Palette** must be configured. Find the canvas, or pick the grid and its
   rows/columns.
 - Load an image first (file, URL, search words, or drag-and-drop).
 - If a run is already in progress, wait for it or press `ESC`.
 
 ## Colours are wrong
 
-- Re-run **Auto-detect** (or teach the palette) so the swatch centres are
+- Re-run **Find the canvas** (or pick the palette) so the swatch centres are
   sampled correctly. The on-screen detection overlay draws a dot at each cell
   centre — check the dots sit inside the swatches.
 - Reduce **Detail** for more detail.
@@ -23,7 +23,7 @@ Pyaint only draws colours that are present in the sampled palette. If the image
 uses colours the palette doesn't contain, they map to the nearest swatch; a
 colour with no close swatch may be skipped.
 
-## Auto-detect found nothing
+## Find the canvas found nothing
 
 - **The canvas must be blank.** Detection assumes a uniform canvas (white for
   skribbl, a solid colour for MS Paint); existing artwork defeats it. Clear the
@@ -31,14 +31,14 @@ colour with no close swatch may be skipped.
 - Maximize the target app on the **primary** monitor at **100%** display
   scaling.
 - The window may have been moved or resized since the recipe was tuned; use
-  **Teach manually** to point at the palette and canvas.
-- If it finds nothing, it falls back to manual teaching rather than guessing.
+  **Pick the regions** to point at the palette and canvas.
+- If it finds nothing, it falls back to picking by hand rather than guessing.
 
 ## Drawing is slow
 
 - Increase **Detail** (fewer strokes) and/or reduce **Time per stroke**.
-- Use **Prepare & cache** so repeat runs skip processing (drawing time is
-  unchanged).
+- Use **Save the plan for next time** so repeat runs skip processing (drawing
+  time is unchanged).
 - A large **Jump Delay** or a low **Jump Threshold** adds pauses between
   strokes.
 
