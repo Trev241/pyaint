@@ -103,7 +103,7 @@ def test_mode_specific_controls_switch_with_stroke_mode(app, tmp_path, monkeypat
         window._mode_combo.setCurrentIndex(outline)
         assert window._outline_controls.isVisibleTo(window)
         assert not window._runs_controls.isVisibleTo(window)
-        assert "continuous" in window._mode_hint.text()
+        assert "outlines" in window._guide._text.text()
 
         window._stroke_speed.set_value(2000, emit=True)
         assert bot.stroke_speed == pytest.approx(2000)
@@ -248,10 +248,10 @@ def test_sketch_presets_apply_and_detect_custom(app, tmp_path, monkeypatch):
         assert window.bot.sketch_gradient_keep == pytest.approx(0.6)
         assert window._sketch_preset_control.value() == "realistic"
 
-        # Touching an advanced knob drops the selector back to Custom, which
-        # is a caption rather than a selectable segment (no button checked).
+        # Touching an advanced knob drops the selector to Custom: the Custom
+        # tile appears only while it is the live state, and is selected.
         window._sketch_hue_threshold.set_value(12, emit=True)
-        assert window._sketch_preset_control.value() is None
+        assert window._sketch_preset_control.value() == "custom"
         assert "Custom" in window._sketch_preset_title.text()
     finally:
         window.close()
@@ -926,7 +926,10 @@ def test_preflight_reports_missing_pieces(app, tmp_path, monkeypatch):
         reasons = [reason for reason, _, _ in window._preflight_issues()]
         assert "canvas not set" in reasons
         assert "palette not set" in reasons
-        assert window._fix_btn.isVisibleTo(window)
+        # The docked bar carries the status + the two setup actions.
+        assert window._readiness.isVisibleTo(window)
+        assert window._auto_btn.isVisibleTo(window)
+        assert window._teach_btn.isVisibleTo(window)
     finally:
         window.close()
 

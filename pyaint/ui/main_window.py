@@ -24,7 +24,19 @@ import urllib.request
 from typing import Optional
 
 from PIL import Image
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QEvent,
+    QObject,
+    QPoint,
+    QPropertyAnimation,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -68,11 +80,13 @@ from pyaint.ui.countdown import CountdownBanner
 from pyaint.ui.icons import icon
 from pyaint.ui.inspector import InspectorMixin
 from pyaint.ui.overlay import DetectionOverlay, ProgressOverlay
+from pyaint.ui.paper import PaperButton, PaperSegmented, PaperSurface
 from pyaint.ui.plan_tasks import PlanPreviewTask
 from pyaint.ui.presets import (
     SKETCH_PRESET_FIELDS,
     SKETCH_PRESET_OPTIONS,
     drawing_preset_by_key,
+    look_by_key,
     look_options,
     match_drawing_preset,
     match_preset,
@@ -83,16 +97,13 @@ from pyaint.ui.widgets import (
     CheckBox,
     CheckBoxField,
     CollapsibleSection,
+    GuidePanel,
     ImagePreview,
-    LookSelector,
     MasonryGallery,
     ModeRail,
     NoticeBanner,
     ReadinessStrip,
     Section,
-    SegmentedControl,
-    SliderField,
-    accepts_image_drop,
     local_path_from_mime,
     pil_to_qpixmap,
     raw_image_from_mime,
@@ -112,6 +123,33 @@ class UiSignals(QObject):
 
 
 _PATH_LIKE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|\.{1,2}[\\/]|[\\/]|~)")
+
+#: Width of the persistent tool column, and how far the canvas sheet slides
+#: under it (the desk "tuck").
+COLUMN_WIDTH = 300
+SHEET_TUCK = 72
+class DeskBody(QWidget):
+    """A full-width canvas with the tool column drawn over it.
+
+    The canvas spans the whole width so the hero sheet can extend under the
+    column (the desk "tuck"); the column is a plain full-height sheet raised
+    above it.
+    """
+
+    def __init__(self, column: QWidget, canvas: QWidget, parent=None):
+        super().__init__(parent)
+        self._column = column
+        self._canvas = canvas
+        self._canvas.setParent(self)
+        self._column.setParent(self)
+        self._column.raise_()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        width, height = self.width(), self.height()
+        self._canvas.setGeometry(0, 0, width, height)
+        self._column.setGeometry(0, 0, COLUMN_WIDTH, height)
+        self._column.raise_()
+        super().resizeEvent(event)
 #: Image-search hosts that wrap the real file in a redirect/page URL.
 _REDIRECT_HOSTS = ("google.", "bing.", "duckduckgo.", "yandex.", "search.brave.")
 
@@ -184,7 +222,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._redraw_region = None
         self._recipes = []
         self._recipes_by_name = {}
-        self._imname = os.path.join(paths.PROJECT_ROOT, "assets", "sample.png")
+        self._imname = ""
         self._detecting = False
         self._detection_result = None
         self._detection_image = None
@@ -266,63 +304,49 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._countdown_banner.cancelled.connect(self._cancel_auto_detect)
         root.addWidget(self._countdown_banner)
 
-        # Easel: mode rail | canvas | settings pane (hidden until Customize).
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(0)
-        body.addWidget(self._build_mode_rail())
-        body.addWidget(self._build_canvas(), 1)
+        # One desk: a full-width canvas with the tool column drawn over it,
+        # then the docked bottom bar (voice note + status + actions).
         self._inspector = self._build_inspector()
-        self._inspector.setVisible(False)
-        body.addWidget(self._inspector)
-        root.addLayout(body, 1)
+        self._drawing_section.setVisible(False)
+        canvas = self._build_canvas()  # sets self._preview_stage
+        self._desk = DeskBody(self._inspector, canvas)
+        root.addWidget(self._desk, 1)
+        self._bottom_bar = self._build_bottom_bar()
+        root.addWidget(self._bottom_bar)
 
     def _build_topbar(self) -> QWidget:
-        bar = QFrame()
-        bar.setObjectName("TopBar")
+        bar = QWidget()
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
+
+        brand = QLabel("Pyaint")
+        brand.setObjectName("TopBarBrand")
+        layout.addWidget(brand)
 
         label = QLabel("Drawing in")
         label.setObjectName("TopBarLabel")
         layout.addWidget(label)
 
         self._target_combo = QComboBox()
-        self._target_combo.setMinimumWidth(200)
+        self._target_combo.setMinimumWidth(220)
         self._target_combo.setToolTip("Choose the app Pyaint draws in")
         self._target_combo.currentIndexChanged.connect(self._on_target_changed)
         layout.addWidget(self._target_combo)
 
-        self._auto_btn = QPushButton("Find canvas")
-        self._auto_btn.setToolTip("Find the canvas and palette from a screenshot")
-        self._auto_btn.clicked.connect(self.auto_detect)
-        layout.addWidget(self._auto_btn)
-
-        self._teach_btn = QPushButton("Set up manually\u2026")
-        self._teach_btn.setToolTip("Teach Pyaint where the canvas and palette are")
-        self._teach_btn.clicked.connect(self.open_setup)
-        layout.addWidget(self._teach_btn)
-
         layout.addStretch(1)
-        self._env_chip = QLabel("Not set up")
-        self._env_chip.setObjectName("EnvChip")
-        self._env_chip.setToolTip("Canvas and palette status")
-        layout.addWidget(self._env_chip)
         return bar
 
-    def _build_mode_rail(self) -> QWidget:
-        """The left tool rail: one single-choice mode picker.
+    def _build_mode_block(self) -> QWidget:
+        """The mode picker, built for the top of the persistent column.
 
         ``_mode_combo`` stays as the state holder (and the hidden driver used
         by config and preset code); the rail is the visible control, and the
         two stay in sync.
         """
-        frame = QFrame()
-        frame.setObjectName("Rail")
-        frame.setFixedWidth(168)
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 16, 12, 16)
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
         self._mode_combo = QComboBox()
@@ -336,13 +360,35 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._mode_rail = ModeRail(self._mode)
         self._mode_rail.modeChanged.connect(self._on_mode_rail_changed)
         layout.addWidget(self._mode_rail)
+        return box
 
-        self._mode_hint = QLabel()
-        self._mode_hint.setObjectName("ModeHint")
-        self._mode_hint.setWordWrap(True)
-        layout.addWidget(self._mode_hint)
-        layout.addStretch(1)
-        return frame
+    def _build_sidebar_head(self, layout) -> None:
+        """Insert Mode, Look and the Fine-tune toggle at the pane's top."""
+        layout.insertWidget(layout.count() - 1, self._build_mode_block())
+
+        look_box = QWidget()
+        look_layout = QVBoxLayout(look_box)
+        look_layout.setContentsMargins(0, 0, 0, 0)
+        look_layout.setSpacing(6)
+        look_label = QLabel("Look")
+        look_label.setObjectName("FieldLabel")
+        look_layout.addWidget(look_label)
+        self._look_control = PaperSegmented(
+            self._look_options(), self._look_current_key()
+        )
+        self._look_control.changed.connect(self._on_look_changed)
+        # Sketch's preset control is this same control; older code and the UI
+        # tests still refer to it by that name.
+        self._sketch_preset_control = self._look_control
+        look_layout.addWidget(self._look_control)
+        layout.insertWidget(layout.count() - 1, look_box)
+
+        self._customize_btn = QPushButton("\u25b8  Fine-tune")
+        self._customize_btn.setObjectName("Disclosure")
+        self._customize_btn.setCheckable(True)
+        self._customize_btn.setToolTip("Reveal the tuning knobs for this mode")
+        self._customize_btn.toggled.connect(self._on_customize_toggled)
+        layout.insertWidget(layout.count() - 1, self._customize_btn)
 
     def _on_mode_rail_changed(self, mode: str) -> None:
         index = self._mode_combo.findData(mode)
@@ -350,17 +396,38 @@ class MainWindow(InspectorMixin, QMainWindow):
             self._mode_combo.setCurrentIndex(index)
 
     def _build_canvas(self) -> QWidget:
-        """The canvas column: preview/gallery over the action cluster."""
+        """The canvas column: the image strip + preview/gallery stage.
+
+        The action cluster lives in the docked bottom bar, so the canvas stays
+        a clean sheet on the desk.
+        """
         host = QWidget()
         layout = QVBoxLayout(host)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self._build_content(), 1)
-        layout.addWidget(self._build_action_bar())
         return host
 
     def _on_customize_toggled(self, visible: bool) -> None:
-        self._inspector.setVisible(bool(visible))
+        # The column persists; Customize/Fine-tune only reveals the knobs.
+        visible = bool(visible)
+        section = getattr(self, "_drawing_section", None)
+        if section is not None:
+            section.setVisible(visible)
+        button = getattr(self, "_customize_btn", None)
+        if button is not None:
+            arrow = "\u25be" if visible else "\u25b8"
+            button.setText(f"{arrow}  Fine-tune")
+
+    def _update_guide(self, kicker: str | None = None, text: str | None = None) -> None:
+        """Set the voice note; with no text, describe the active mode."""
+        panel = getattr(self, "_guide", None)
+        if panel is None:
+            return
+        if text is None:
+            kicker = "About this mode"
+            text = self._MODE_GUIDE.get(self._mode, "")
+        panel.set_note(kicker or "", text)
 
     # -- Look (mode-aware preset) -------------------------------------
     def _drawing_values(self) -> dict:
@@ -381,12 +448,25 @@ class MainWindow(InspectorMixin, QMainWindow):
             return match_preset(values) or "custom"
         return match_drawing_preset(self._drawing_values()) or "custom"
 
+    def _look_options(self):
+        """Options for the Look control, with each Look's tagline attached.
+
+        ``Custom`` appears only while it is the live state, so the tiles always
+        mean "pick one of these" and never "pick Custom".
+        """
+        options = []
+        for key, label in look_options(self._mode):
+            tagline = look_by_key(self._mode, key).get("tagline", "")
+            options.append((key, label, tagline))
+        if self._look_current_key() == "custom":
+            options.append(("custom", "Custom", ""))
+        return options
+
     def _refresh_look_control(self) -> None:
         control = getattr(self, "_look_control", None)
         if control is None:
             return
-        options = list(look_options(self._mode)) + [("custom", "Custom")]
-        control.set_options(options, self._look_current_key())
+        control.set_options(self._look_options(), self._look_current_key())
 
     def _on_look_changed(self, key: str) -> None:
         if self._initializing or key == "custom":
@@ -414,10 +494,17 @@ class MainWindow(InspectorMixin, QMainWindow):
         panel = QFrame()
         panel.setObjectName("ImagePanel")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 12, 16, 12)
+        # The stack starts under the column (the sheet tuck); the header is
+        # indented so its title stays clear of the column.
+        layout.setContentsMargins(COLUMN_WIDTH - SHEET_TUCK, 12, 16, 16)
         layout.setSpacing(8)
 
-        layout.addWidget(self._build_image_header())
+        header_wrap = QWidget()
+        header_layout = QVBoxLayout(header_wrap)
+        header_layout.setContentsMargins(SHEET_TUCK + 10, 0, 0, 0)
+        header_layout.setSpacing(0)
+        header_layout.addWidget(self._build_image_header())
+        layout.addWidget(header_wrap)
 
         # The stage swaps between a committed image, the search gallery, and a
         # message (searching / no results / failed).
@@ -439,7 +526,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         header = QFrame()
         header.setObjectName("ImageHeader")
         layout = QVBoxLayout(header)
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(0, 0, 0, 4)
         layout.setSpacing(9)
 
         # Title on the left, search source on the right: one balanced line.
@@ -487,7 +574,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._browse_action.triggered.connect(self._open_file)
         self._url_edit.textChanged.connect(self._on_url_changed)
         row.addWidget(self._url_edit, 1)
-        self._load_btn = QPushButton("Load")
+        self._load_btn = PaperButton("Load")
         self._load_btn.setObjectName("LoadButton")
         self._load_btn.setToolTip("Load the URL or path, or search for the words above")
         self._load_btn.setEnabled(False)
@@ -519,24 +606,24 @@ class MainWindow(InspectorMixin, QMainWindow):
 
         # A bordered card mirrors the source header above, with the image on a
         # recessed stage so light/transparent images stay visually contained.
-        stage = QFrame()
+        # A paper sheet, not a rectangle: the artwork pane is the hero surface.
+        # The hero sheet: the only paper surface. The safe area is computed
+        # from the role, so content never leaks past the slight lean.
+        stage = PaperSurface("hero")
         stage.setObjectName("PreviewStage")
+        self._preview_stage = stage
         stage_layout = QVBoxLayout(stage)
-        stage_layout.setContentsMargins(10, 8, 10, 10)
+        safe = stage.content_margins()
+        # The sheet runs under the column (the tuck); content is indented so the
+        # image and labels always clear both the column and the jittered edge.
+        stage_layout.setContentsMargins(
+            SHEET_TUCK + safe.left(), safe.top(), safe.right(), safe.bottom()
+        )
         stage_layout.setSpacing(8)
 
         stage_header = QHBoxLayout()
         stage_header.setContentsMargins(2, 0, 2, 0)
         stage_header.setSpacing(8)
-        look_label = QLabel("Look")
-        look_label.setObjectName("FieldLabel")
-        stage_header.addWidget(look_label)
-        self._look_control = LookSelector(
-            list(look_options(self._mode)) + [("custom", "Custom")],
-            self._look_current_key(),
-        )
-        self._look_control.changed.connect(self._on_look_changed)
-        stage_header.addWidget(self._look_control)
         stage_header.addStretch(1)
 
         # Source / Preview / Compare view switch. Making all three explicit
@@ -595,6 +682,9 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._preview_pane, self._preview = self._build_preview_pane(
             "Preview result", "Live plan of the strokes Pyaint will draw."
         )
+        self._source_opacity = QGraphicsOpacityEffect(self._source_view)
+        self._source_opacity.setOpacity(1.0)
+        self._source_view.setGraphicsEffect(self._source_opacity)
         panes.addWidget(self._source_pane, 1)
         panes.addWidget(self._preview_pane, 1)
         stage_layout.addLayout(panes, 1)
@@ -606,14 +696,6 @@ class MainWindow(InspectorMixin, QMainWindow):
 
         layout.addWidget(stage, 1)
 
-        hint = QLabel(
-            "Switch to Preview to see exactly what will be drawn, or Compare "
-            "to check it against the source. Drag an image here to load it."
-        )
-        hint.setObjectName("StageHint")
-        hint.setWordWrap(True)
-        hint.setAlignment(Qt.AlignCenter)
-        layout.addWidget(hint)
         self._preview_page = page
         return page
 
@@ -767,6 +849,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._view_preview_btn.setChecked(self._preview_view == "preview")
         self._view_split_btn.setChecked(self._preview_view == "split")
         self._sync_view_visibility()
+        self._settle_view()
         self.tools["preview_view"] = self._preview_view
         if self._preview_view in ("preview", "split"):
             self._schedule_preview(immediate=True)
@@ -774,6 +857,23 @@ class MainWindow(InspectorMixin, QMainWindow):
             self._preview_generation += 1  # drop any in-flight result
             self._set_preview_busy(False)
             self._restore_source_preview()
+
+    def _settle_view(self) -> None:
+        """A short desk settle when the view changes: the pane eases in."""
+        self._view_animations = []
+        for effect in (
+            getattr(self, "_source_opacity", None),
+            getattr(self, "_preview_opacity", None),
+        ):
+            if effect is None:
+                continue
+            animation = QPropertyAnimation(effect, b"opacity", self)
+            animation.setDuration(180)
+            animation.setStartValue(0.35)
+            animation.setEndValue(1.0)
+            animation.setEasingCurve(QEasingCurve.OutCubic)
+            animation.start(QAbstractAnimation.DeleteWhenStopped)
+            self._view_animations.append(animation)
 
     def _restore_source_preview(self) -> None:
         if self._source_pixmap is not None:
@@ -791,32 +891,44 @@ class MainWindow(InspectorMixin, QMainWindow):
         button.clicked.connect(slot)
         return button
 
-    def _build_action_bar(self) -> QWidget:
+    def _build_bottom_bar(self) -> QWidget:
+        """The docked action bar: guide note (left), status + actions (right)."""
         bar = QFrame()
-        bar.setObjectName("ActionBar")
+        bar.setObjectName("GuideBar")
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(8)
+        layout.setSpacing(10)
+
+        badge = QLabel("\u2733")
+        badge.setObjectName("GuideBadge")
+        badge.setFixedSize(38, 38)
+        badge.setAlignment(Qt.AlignCenter)
+        layout.addWidget(badge)
+
+        self._guide = GuidePanel()
+        layout.addWidget(self._guide, 1)
+        self._update_guide()
 
         self._readiness = ReadinessStrip()
         self._readiness.setObjectName("ReadinessStripInline")
-        layout.addWidget(self._readiness, 1)
+        layout.addWidget(self._readiness)
 
-        self._customize_btn = QPushButton("Customize")
-        self._customize_btn.setObjectName("ToolBarButton")
-        self._customize_btn.setCheckable(True)
-        self._customize_btn.setToolTip("Show or hide the drawing settings")
-        self._customize_btn.toggled.connect(self._on_customize_toggled)
-        layout.addWidget(self._customize_btn)
+        self._env_chip = QLabel("Not set up")
+        self._env_chip.setObjectName("EnvChip")
+        self._env_chip.setToolTip("Canvas and palette status")
+        layout.addWidget(self._env_chip)
 
-        self._fix_btn = QPushButton("Finish setup")
-        self._fix_btn.setObjectName("FixButton")
-        self._fix_btn.setToolTip("Set up what is missing")
-        self._fix_btn.clicked.connect(self._on_fix)
-        self._fix_btn.setVisible(False)
-        layout.addWidget(self._fix_btn)
+        self._auto_btn = PaperButton("Find the canvas")
+        self._auto_btn.setToolTip("Find the canvas and palette from a screenshot")
+        self._auto_btn.clicked.connect(self.auto_detect)
+        layout.addWidget(self._auto_btn)
 
-        self._btn_start = QPushButton("Start drawing")
+        self._teach_btn = PaperButton("Pick the regions")
+        self._teach_btn.setToolTip("Click the canvas and palette corners yourself")
+        self._teach_btn.clicked.connect(self.open_setup)
+        layout.addWidget(self._teach_btn)
+
+        self._btn_start = PaperButton("Start drawing", primary=True)
         self._btn_start.setObjectName("Primary")
         self._btn_start.setIcon(icon("play", self.tokens["accent_fg"], 16))
         self._btn_start.setIconSize(QSize(16, 16))
@@ -1327,22 +1439,24 @@ class MainWindow(InspectorMixin, QMainWindow):
     # ------------------------------------------------------------------
     # Widget <-> state sync
     # ------------------------------------------------------------------
-    #: One-line explainer shown under the stroke-mode picker.
-    _MODE_HINTS = {
+    _MODE_GUIDE = {
         Bot.LAYERED: (
-            "Merges a colour's runs where later colours paint over them \u2014 "
-            "fewer strokes, smoother joins."
+            "Layered paints each colour as smooth runs and lets later colours "
+            "cover the joins, so you get fewer, cleaner strokes."
         ),
         Bot.SLOTTED: (
-            "Draws every run exactly as-is \u2014 no overdraw, but more strokes."
+            "Slotted draws every run exactly, with no overdraw \u2014 precise, "
+            "but more strokes to watch."
         ),
         Bot.OUTLINE: (
-            "Traces region outlines as continuous, human-shaped strokes and "
-            "thins shared borders to one clean line."
+            "Outline traces the outlines of colour regions \u2014 it suits "
+            "drawings and flat art. Pick a Look, then press Start drawing. "
+            "Fine-tune only if the lines need it."
         ),
         Bot.SKETCH: (
-            "Sketches the image's edges into black line art. Pick a preset "
-            "for the look, then open Advanced only if you need to tune it."
+            "Edge tracing turns the image's edges into black line art. Pick "
+            "Cartoon for flat art or Realistic for photos, then tune only if "
+            "the result needs it."
         ),
     }
 
@@ -1405,7 +1519,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._outline_controls.setVisible(outline)
         self._sketch_controls.setVisible(sketch)
         self._continuous_controls.setVisible(outline or sketch)
-        self._mode_hint.setText(self._MODE_HINTS.get(self._mode, ""))
+        self._update_guide()
         if getattr(self, "_mode_rail", None) is not None:
             self._mode_rail.set_mode(self._mode)
         self._refresh_look_control()
@@ -1434,9 +1548,13 @@ class MainWindow(InspectorMixin, QMainWindow):
 
     def _set_sketch_preset_ui(self, key: str) -> None:
         preset = preset_by_key(key)
-        self._sketch_preset_control.set_value(key)
+        control = getattr(self, "_sketch_preset_control", None)
+        if control is not None:
+            control.set_value(key)
         self._sketch_preset_title.setText(preset["tagline"])
         self._sketch_preset_desc.setText(preset["description"])
+        # Keep the Look tiles in step (Custom appears only while it is live).
+        self._refresh_look_control()
 
     def _detect_sketch_preset(self) -> None:
         """Show the preset the live knobs currently match, else Custom."""
@@ -1504,8 +1622,11 @@ class MainWindow(InspectorMixin, QMainWindow):
         environment_ready = self._environment_ready()
         image_ready = self._has_image()
         self._readiness.update_steps(recipe.name, environment_ready, image_ready)
-        if hasattr(self, "_fix_btn"):
-            self._fix_btn.setVisible(not environment_ready)
+        # The bar's checklist is noise once everything is ready; the header
+        # chip already carries the summary. Show it only when something is
+        # missing, next to the Fix action.
+        if hasattr(self, "_readiness"):
+            self._readiness.setVisible(not (environment_ready and image_ready))
         self._update_env_chip()
         if not self._busy:
             # Keep Start clickable: clicking it explains what is missing rather
@@ -1788,12 +1909,14 @@ class MainWindow(InspectorMixin, QMainWindow):
     # Image loading
     # ------------------------------------------------------------------
     def _load_default_image(self) -> None:
-        # Prefer the image selected last session (a durable copy next to
-        # ``config.json``); fall back to the bundled sample.
-        for path in (self._last_image_path, self._imname):
-            if path and os.path.exists(path):
-                self._set_image_path(path)
-                return
+        # Restore the image selected last session (a durable copy next to
+        # ``config.json``). On a first run the pane stays empty rather than
+        # silently loading a bundled sample.
+        path = self._last_image_path
+        if path and os.path.exists(path):
+            self._set_image_path(path)
+            return
+        self._imname = ""
         self._source_view.set_placeholder(
             "Drag an image here, or use the field above."
         )
@@ -2661,7 +2784,7 @@ class MainWindow(InspectorMixin, QMainWindow):
             self._last_url = ""
             self._last_image_path = ""
             self._url_edit.clear()
-            self._imname = os.path.join(paths.PROJECT_ROOT, "assets", "sample.png")
+            self._imname = ""
             self.load_config()
             self._load_default_image()
         except Exception as exc:  # noqa: BLE001

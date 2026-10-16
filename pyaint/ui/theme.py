@@ -11,20 +11,23 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
+# Soft dark: panes sit *above* the desk (never darker), ink is off pure-white.
 DARK = {
-    "bg": "#1E1B19",
-    "bg_activity": "#171513",
-    "bg_side": "#171513",
-    "bg_status": "#171513",
-    "bg_input": "#2E2926",
-    "bg_hover": "#2A2623",
-    "bg_active": "#332E2A",
-    "bg_card": "#262220",
-    "border": "#3A342F",
+    "bg": "#211E1B",
+    "bg_activity": "#2A2521",
+    "bg_side": "#2A2521",
+    "bg_status": "#2A2521",
+    "bg_input": "#332E29",
+    "bg_hover": "#302B27",
+    "bg_active": "#3A342F",
+    "bg_card": "#2A2521",
+    "border": "#403A34",
     "border_input": "#4A423C",
-    "fg": "#ECE5DC",
-    "fg_muted": "#B3A79A",
-    "fg_dim": "#948A7E",
+    "fg": "#E0D8CE",
+    "fg_muted": "#B4A89B",
+    "fg_dim": "#978D81",
+    "shadow": "#000000",
+    "shadow_alpha": "150",
     "accent": "#E07856",
     "accent_hover": "#D66B49",
     "accent_pressed": "#C55F3F",
@@ -49,6 +52,8 @@ LIGHT = {
     "bg_hover": "#EDE6DC",
     "bg_active": "#E4DACD",
     "bg_card": "#FFFDFA",
+    "shadow": "#3C3228",
+    "shadow_alpha": "70",
     "border": "#E6DED2",
     "border_input": "#D9CFC1",
     "fg": "#2B2622",
@@ -71,6 +76,15 @@ LIGHT = {
 
 THEME_MODES = ("auto", "dark", "light")
 THEME_LABELS = {"auto": "Auto (follow system)", "dark": "Dark", "light": "Light"}
+
+# One shape scale and one type scale, so nothing drifts between surfaces again.
+RADIUS_CARD = 8
+RADIUS_INPUT = 6
+TYPE_BODY = 13
+TYPE_TITLE = 13
+TYPE_PANE = 15
+TYPE_HINT = 12
+TYPE_VALUE = 12
 
 # Backwards-compatible default (the dark set). Prefer ``resolve_tokens``.
 TOKENS = DARK
@@ -108,7 +122,11 @@ def stylesheet(tokens: dict | None = None) -> str:
     * {{
         font-family: "Segoe UI", "SF Pro Text", "Ubuntu", sans-serif;
         font-size: 13px;
-        outline: none;
+    }}
+    /* Keyboard focus must be visible (no global outline: none). */
+    QPushButton:focus, QLineEdit:focus, QComboBox:focus,
+    QSpinBox:focus, QDoubleSpinBox:focus {{
+        border: 1px solid {t['accent']};
     }}
 
     QMainWindow, QDialog {{
@@ -153,10 +171,14 @@ def stylesheet(tokens: dict | None = None) -> str:
         border-right: 1px solid {t['border']};
     }}
     #SideBarTitle {{
-        color: {t['fg_muted']};
-        font-size: 11px;
+        color: {t['fg']};
+        font-size: 15px;
         font-weight: 600;
-        padding: 10px 12px 4px 12px;
+        padding: 0;
+    }}
+    #ColCard {{
+        background: {t['bg_side']};
+        border-right: 1px solid {t['border']};
     }}
     QScrollArea {{
         border: none;
@@ -225,8 +247,8 @@ def stylesheet(tokens: dict | None = None) -> str:
     }}
     #SectionTitle {{
         color: {t['fg']};
-        font-size: 11px;
-        font-weight: 700;
+        font-size: 13px;
+        font-weight: 600;
         padding: 12px 12px 2px 12px;
     }}
     #SectionHint {{
@@ -238,8 +260,8 @@ def stylesheet(tokens: dict | None = None) -> str:
         background: transparent;
         border: none;
         color: {t['fg_muted']};
-        font-size: 11px;
-        font-weight: 700;
+        font-size: 13px;
+        font-weight: 600;
         padding: 12px 10px 2px 8px;
         text-align: left;
     }}
@@ -251,16 +273,15 @@ def stylesheet(tokens: dict | None = None) -> str:
         border-bottom: 1px solid {t['border']};
     }}
     #ReadyChip {{
-        color: {t['fg_dim']};
-        font-size: 11px;
+        color: {t['fg_muted']};
+        font-size: 12px;
         padding: 2px 4px;
     }}
     #ReadyChip[done="true"] {{
-        color: {t['success']};
-        font-weight: 600;
+        color: {t['fg_muted']};
     }}
     #ReadyChip[state="missing"] {{
-        color: {t['warning']};
+        color: {t['accent']};
         font-weight: 600;
     }}
     #ReadySep {{ color: {t['fg_dim']}; }}
@@ -295,7 +316,8 @@ def stylesheet(tokens: dict | None = None) -> str:
         spacing: 8px;
     }}
     QRadioButton#ModeRailItem:hover {{
-        background: {t['bg_hover']};
+        /* The hover highlight is the same irregular quad as the selection,
+           painted by ModeRail; no QSS background here. */
         color: {t['fg']};
     }}
     QRadioButton#ModeRailItem:checked {{
@@ -395,10 +417,6 @@ def stylesheet(tokens: dict | None = None) -> str:
         border-top: 1px solid {t['border']};
     }}
     #ReadinessStripInline {{ background: transparent; border: none; }}
-    #ReadinessStripInline[ready="false"] {{
-        background: {t['notice_warning_bg']};
-        border-top: 1px solid {t['warning']};
-    }}
     #FixButton {{ color: {t['warning']}; border-color: {t['warning']}; }}
 
     /* --- Overlay severity ---------------------------------------------- */
@@ -408,9 +426,14 @@ def stylesheet(tokens: dict | None = None) -> str:
     QPushButton {{
         background: {t['bg_input']};
         border: 1px solid {t['border_input']};
-        border-radius: 2px;
-        padding: 5px 12px;
+        border-radius: 8px;
+        padding: 7px 16px;
         color: {t['fg']};
+    }}
+    /* The hand-painted paper chips need room so the jittered edge never crowds
+       the label. */
+    QPushButton[paperRole] {{
+        padding: 9px 18px;
     }}
     QPushButton:hover {{
         background: {t['bg_active']};
@@ -450,7 +473,7 @@ def stylesheet(tokens: dict | None = None) -> str:
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
         background: {t['bg_input']};
         border: 1px solid {t['border_input']};
-        border-radius: 2px;
+        border-radius: 6px;
         padding: 4px 6px;
         selection-background-color: {t['accent']};
         min-height: 18px;
@@ -482,7 +505,7 @@ def stylesheet(tokens: dict | None = None) -> str:
         width: 16px;
         height: 16px;
         border: 1px solid {t['border_input']};
-        border-radius: 2px;
+        border-radius: 5px;
         background: {t['bg_input']};
     }}
     QCheckBox::indicator:hover {{
@@ -496,18 +519,19 @@ def stylesheet(tokens: dict | None = None) -> str:
 
     /* --- Sliders -------------------------------------------------------- */
     QSlider::groove:horizontal {{
-        height: 3px;
+        height: 4px;
         background: {t['border_input']};
-        border-radius: 1px;
+        border-radius: 2px;
     }}
     QSlider::sub-page:horizontal {{
         background: {t['accent']};
+        border-radius: 2px;
     }}
     QSlider::handle:horizontal {{
-        background: {t['fg']};
-        width: 10px;
-        margin: -5px 0;
-        border-radius: 8px;
+        background: {t['accent']};
+        width: 14px;
+        margin: -6px 0;
+        border-radius: 7px;
     }}
     QSlider::handle:horizontal:hover {{
         background: {t['accent']};
@@ -563,14 +587,13 @@ def stylesheet(tokens: dict | None = None) -> str:
         background: {t['bg']};
     }}
     #ImageHeader {{
-        background: {t['bg_card']};
-        border: 1px solid {t['border']};
-        border-radius: 8px;
+        background: transparent;
+        border: none;
     }}
     #ImageTitle {{
         color: {t['fg']};
-        font-size: 11px;
-        font-weight: 700;
+        font-size: 13px;
+        font-weight: 600;
     }}
     #SourceLabel {{
         color: {t['fg_dim']};
@@ -591,7 +614,7 @@ def stylesheet(tokens: dict | None = None) -> str:
         border: 1px solid {t['accent']};
     }}
     #LoadButton {{
-        padding: 6px 16px;
+        padding: 9px 18px;
         border-radius: 8px;
         font-weight: 600;
     }}
@@ -760,6 +783,80 @@ def stylesheet(tokens: dict | None = None) -> str:
         padding: 0 4px;
         color: {t['fg_muted']};
     }}
+
+    /* --- Voice bar / guide panel --------------------------------------- */
+    #GuideBar {{
+        background: {t['bg_card']};
+        border: 1px solid {t['border']};
+        border-radius: 10px;
+    }}
+    #GuidePanel {{
+        background: transparent;
+        border: none;
+    }}
+    #GuideText {{
+        color: {t['fg']};
+        font-size: 13px;
+    }}
+    #GuideKicker {{
+        color: {t['fg_dim']};
+        font-size: 11px;
+        font-weight: 600;
+    }}
+    #GuideBadge {{
+        background: {t['accent']};
+        color: {t['accent_fg']};
+        border-radius: 19px;
+        font-size: 17px;
+    }}
+    #TopBarBrand {{
+        background: {t['accent']};
+        color: {t['accent_fg']};
+        border-radius: 8px;
+        padding: 7px 15px;
+        font-size: 15px;
+        font-weight: 600;
+    }}
+    QFrame#LookTile {{
+        background: {t['bg_input']};
+        border: 1px solid {t['border_input']};
+        border-radius: 8px;
+    }}
+    QFrame#LookTile[selected="true"] {{
+        background: {t['bg_hover']};
+        border: 2px solid {t['accent']};
+    }}
+    QLabel#LookTitle {{
+        color: {t['fg']};
+        font-size: 13px;
+        font-weight: 600;
+    }}
+    QLabel#LookTag {{
+        color: {t['fg_dim']};
+        font-size: 12px;
+    }}
+    QPushButton#Disclosure {{
+        background: transparent;
+        border: none;
+        color: {t['fg_muted']};
+        font-size: 13px;
+        font-weight: 600;
+        padding: 12px 0 4px 0;
+        text-align: left;
+    }}
+    QPushButton#Disclosure:hover {{ color: {t['fg']}; }}
+    QPushButton#Disclosure:checked {{ color: {t['fg']}; }}
+    QPushButton#Readout {{
+        background: {t['bg_input']};
+        border: 1px solid {t['border_input']};
+        border-radius: 8px;
+        padding: 5px 10px;
+        color: {t['fg_muted']};
+    }}
+    QPushButton#Readout:hover {{
+        color: {t['fg']};
+        border-color: {t['accent']};
+    }}
     """
 
 
@@ -779,3 +876,5 @@ def apply(app, tokens: dict | None = None) -> None:
     palette.setColor(palette.ColorRole.HighlightedText, QColor(t["accent_fg"]))
     app.setPalette(palette)
     app.setStyleSheet(stylesheet(t))
+    # The hand-painted paper surfaces read the active tokens from here.
+    app.setProperty("pyaint_tokens", t)

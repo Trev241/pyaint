@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from pyaint.bot import Bot
 from pyaint.palette import METRIC_CIEDE2000, METRIC_RGB
 from pyaint.ui import theme
+from pyaint.ui.paper import PaperSurface
 from pyaint.ui.presets import SKETCH_PRESET_OPTIONS
 from pyaint.ui.widgets import (
     CheckBox,
@@ -72,40 +73,26 @@ class InspectorMixin:
         return scroll, layout
 
     def _build_inspector(self) -> QWidget:
-        side = QFrame()
-        side.setObjectName("SideBar")
-        side.setFixedWidth(320)
+        # "Customize" is a regular quad: it holds the most text and controls,
+        # so it stays a clean rounded panel (the mode highlight carries the
+        # irregular character instead).
+        side = PaperSurface("column", regular=True)
+        side.setFixedWidth(300)
         side_layout = QVBoxLayout(side)
-        side_layout.setContentsMargins(0, 0, 0, 0)
+        # Keep every control inside the declared content-safe inset, or the
+        # column's bowed edge would eat into the labels and sliders.
+        safe = side.content_margins()
+        side_layout.setContentsMargins(safe.left(), 10, safe.right(), 10)
         side_layout.setSpacing(0)
-
-        title = QLabel("SETTINGS")
-        title.setObjectName("SideBarTitle")
-        side_layout.addWidget(title)
 
         scroll, layout = self._scroll_panel()
 
-        env = Section(
-            "Environment",
-            "Where Pyaint finds the canvas and palette. Switch targets above.",
-        )
-        self._detection_label = QLabel("Pyaint doesn't know where your canvas is yet.")
-        self._detection_label.setObjectName("SectionHint")
-        self._detection_label.setWordWrap(True)
-        env.add(self._detection_label)
-        needs = QLabel(
-            "Finding the canvas needs a blank canvas and the target app visible "
-            "on the primary monitor at 100% display scaling."
-        )
-        needs.setObjectName("SectionHint")
-        needs.setWordWrap(True)
-        env.add(needs)
-        layout.insertWidget(layout.count() - 1, env)
-
-        # Mode selection lives on the main-surface rail, not the pane; see
-        # MainWindow._build_mode_rail.
+        # Mode + Look + the Fine-tune toggle lead the column, so the decision
+        # and the knobs that refine it are never separated.
+        self._build_sidebar_head(layout)
 
         drawing = Section("Drawing", "How slowly and how finely Pyaint paints.")
+        self._drawing_section = drawing
 
         # Kept in this order: index matches ``Bot.settings`` (delay, step, jump).
         delay = DualReadoutSlider("Time per stroke", "time_per_stroke", 0.0, 1.0, 0.1, 0.01)
@@ -307,13 +294,6 @@ class InspectorMixin:
         outline_layout = QVBoxLayout(self._outline_controls)
         outline_layout.setContentsMargins(0, 0, 0, 0)
         outline_layout.setSpacing(4)
-        self._outline_notice = NoticeBanner()
-        self._outline_notice.show_notice(
-            "Shading cleanup drops soft tonal contours; Smoothing and Join "
-            "distance remove fragmented lines. The defaults suit most images.",
-            "info",
-        )
-        outline_layout.addWidget(self._outline_notice)
         self._chk_double_edges = CheckBoxField(
             "Double-paint edges",
             "Off keeps each shared border as one clean line; on draws every "
@@ -332,24 +312,6 @@ class InspectorMixin:
         sketch_layout = QVBoxLayout(self._sketch_controls)
         sketch_layout.setContentsMargins(0, 0, 0, 0)
         sketch_layout.setSpacing(6)
-        self._sketch_notice = NoticeBanner()
-        self._sketch_notice.show_notice(
-            "Sketch traces the image's edges into black line art. Start with a "
-            "preset, then open Advanced only if the result needs tuning.",
-            "info",
-        )
-        sketch_layout.addWidget(self._sketch_notice)
-
-        preset_label = QLabel("Line quality preset")
-        preset_label.setObjectName("FieldLabel")
-        sketch_layout.addWidget(preset_label)
-        self._sketch_preset_control = SegmentedControl(
-            SKETCH_PRESET_OPTIONS, columns=2
-        )
-        self._sketch_preset_control.changed.connect(
-            self._on_sketch_preset_changed
-        )
-        sketch_layout.addWidget(self._sketch_preset_control)
         self._sketch_preset_title = QLabel()
         self._sketch_preset_title.setObjectName("PresetTagline")
         sketch_layout.addWidget(self._sketch_preset_title)
@@ -410,43 +372,6 @@ class InspectorMixin:
         drawing.add_layout(trigger_row)
         layout.insertWidget(layout.count() - 1, drawing)
 
-        options = Section("Options")
-        metric_row = QHBoxLayout()
-        metric_label = QLabel("Colour matching")
-        metric_label.setObjectName("FieldHint")
-        self._metric_combo = QComboBox()
-        self._metric_combo.setSizeAdjustPolicy(
-            QComboBox.AdjustToMinimumContentsLengthWithIcon
-        )
-        self._metric_combo.setMinimumContentsLength(8)
-        self._metric_combo.addItem("Perceptual (CIEDE2000)", METRIC_CIEDE2000)
-        self._metric_combo.addItem("Legacy (squared RGB)", METRIC_RGB)
-        self._metric_combo.setItemData(
-            0,
-            "Matches colours by perceived difference in CIELAB; picks the "
-            "visually closest swatch (default).",
-            Qt.ToolTipRole,
-        )
-        self._metric_combo.setItemData(
-            1,
-            "Original squared-distance RGB matching; kept for comparison.",
-            Qt.ToolTipRole,
-        )
-        self._metric_combo.currentIndexChanged.connect(self._on_metric_changed)
-        metric_row.addWidget(metric_label)
-        metric_row.addStretch(1)
-        metric_row.addWidget(self._metric_combo)
-        options.add_layout(metric_row)
-        # The only remaining target-specific action: some desktop palettes need
-        # a double-click to select a colour. Hidden unless the recipe uses it.
-        self._chk_mspaint = CheckBox("MS Paint double-click")
-        self._chk_mspaint.setToolTip(
-            "Some palettes need a double-click to select a colour."
-        )
-        self._chk_mspaint.toggled.connect(self._on_mspaint_toggled)
-        options.add(self._chk_mspaint)
-        layout.insertWidget(layout.count() - 1, options)
-
         diagnostics = CollapsibleSection("Diagnostics")
         diag_note = QLabel(
             "Calibration aids. For normal use, just press Start drawing."
@@ -485,12 +410,61 @@ class InspectorMixin:
         row2.addWidget(pick)
         row2.addWidget(draw)
         redraw.add_layout(row2)
-        diagnostics.add(redraw)
         layout.insertWidget(layout.count() - 1, diagnostics)
+        layout.insertWidget(layout.count() - 1, redraw)
 
         advanced = CollapsibleSection("Advanced")
         self._build_advanced_into(advanced)
         layout.insertWidget(layout.count() - 1, advanced)
+
+        # The global material is demoted below the mode work.
+        env = Section(
+            "Environment",
+            "Where Pyaint finds the canvas and palette. Switch targets above.",
+        )
+        self._detection_label = QLabel("Pyaint doesn't know where your canvas is yet.")
+        self._detection_label.setObjectName("SectionHint")
+        self._detection_label.setWordWrap(True)
+        env.add(self._detection_label)
+        # Target-specific: some desktop palettes need a double-click to select.
+        self._chk_mspaint = CheckBox("MS Paint double-click")
+        self._chk_mspaint.setToolTip(
+            "Some palettes need a double-click to select a colour."
+        )
+        self._chk_mspaint.toggled.connect(self._on_mspaint_toggled)
+        env.add(self._chk_mspaint)
+        needs = QLabel(
+            "Finding the canvas needs a blank canvas and the target app visible "
+            "on the primary monitor at 100% display scaling."
+        )
+        needs.setObjectName("SectionHint")
+        needs.setWordWrap(True)
+        env.add(needs)
+        layout.insertWidget(layout.count() - 1, env)
+
+        # Appearance is a common preference, so it sits at the top level, not
+        # buried inside Advanced.
+        appearance = Section(
+            "Appearance", "Follow the system theme or choose one explicitly."
+        )
+        self._theme_combo = QComboBox()
+        self._theme_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon
+        )
+        self._theme_combo.setMinimumContentsLength(8)
+        for mode in theme.THEME_MODES:
+            self._theme_combo.addItem(theme.THEME_LABELS[mode], mode)
+        self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        appearance.add(self._theme_combo)
+        layout.insertWidget(layout.count() - 1, appearance)
+
+        # A destructive global action on its own, at the very bottom.
+        reset_section = Section("Reset")
+        reset = QPushButton("Reset all settings")
+        reset.setObjectName("Danger")
+        reset.clicked.connect(self._on_reset_config)
+        reset_section.add(reset)
+        layout.insertWidget(layout.count() - 1, reset_section)
 
         side_layout.addWidget(scroll, 1)
         self._guard_scroll_wheel(scroll)
@@ -504,19 +478,34 @@ class InspectorMixin:
                 widget.installEventFilter(guard)
 
     def _build_advanced_into(self, container) -> None:
-        appearance = Section(
-            "Appearance", "Follow the system theme or choose one explicitly."
-        )
-        self._theme_combo = QComboBox()
-        self._theme_combo.setSizeAdjustPolicy(
+        matching = Section("Matching")
+        metric_row = QHBoxLayout()
+        metric_label = QLabel("Colour matching")
+        metric_label.setObjectName("FieldHint")
+        self._metric_combo = QComboBox()
+        self._metric_combo.setSizeAdjustPolicy(
             QComboBox.AdjustToMinimumContentsLengthWithIcon
         )
-        self._theme_combo.setMinimumContentsLength(8)
-        for mode in theme.THEME_MODES:
-            self._theme_combo.addItem(theme.THEME_LABELS[mode], mode)
-        self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
-        appearance.add(self._theme_combo)
-        container.add(appearance)
+        self._metric_combo.setMinimumContentsLength(8)
+        self._metric_combo.addItem("Perceptual (CIEDE2000)", METRIC_CIEDE2000)
+        self._metric_combo.addItem("Legacy (squared RGB)", METRIC_RGB)
+        self._metric_combo.setItemData(
+            0,
+            "Matches colours by perceived difference in CIELAB; picks the "
+            "visually closest swatch (default).",
+            Qt.ToolTipRole,
+        )
+        self._metric_combo.setItemData(
+            1,
+            "Original squared-distance RGB matching; kept for comparison.",
+            Qt.ToolTipRole,
+        )
+        self._metric_combo.currentIndexChanged.connect(self._on_metric_changed)
+        metric_row.addWidget(metric_label)
+        metric_row.addStretch(1)
+        metric_row.addWidget(self._metric_combo)
+        matching.add_layout(metric_row)
+        container.add(matching)
 
         keys = Section("Input")
         key_row = QHBoxLayout()
@@ -531,10 +520,3 @@ class InspectorMixin:
         key_row.addWidget(self._pause_edit)
         keys.add_layout(key_row)
         container.add(keys)
-
-        files = Section("Files")
-        reset = QPushButton("Reset all settings")
-        reset.setObjectName("Danger")
-        reset.clicked.connect(self._on_reset_config)
-        files.add(reset)
-        container.add(files)

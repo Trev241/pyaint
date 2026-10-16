@@ -12,6 +12,96 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Paper on a desk — the subtle pass + desk/UX pass.** Paper is now confined
+  to the hero artwork sheet at reduced amplitude; every other surface (column,
+  mode highlight, Look strip, buttons, docked bar) is a plain rounded rect, and
+  the dog-ear fold is gone. `PAPER_AMOUNT` (env `PYAINT_PAPER`, `0`–`1` or
+  `off`) scales the gesture and doubles as an off switch; seeds are stable
+  (`zlib.crc32` over `(role, seed_key)`, never Python's salted `hash()`), so a
+  shape is identical across construction orders and runs. The action cluster
+  moved out of the top bar into a **docked bottom bar** (guide note · readiness
+  · `Ready · N colours` · `Find the canvas` / `Pick the regions` ·
+  `Start drawing`), using the previously empty bottom band; the floating voice
+  card and `Finish setup` are gone and the top bar is the wordmark + target.
+  Setup verbs are now `Find` / `Pick`. The inspector was regrouped: colour
+  matching lives in Advanced, the target-specific MS Paint toggle in
+  Environment, `Redraw region` is promoted out of Diagnostics, Appearance is
+  top-level, and `Reset all settings` sits alone at the bottom. The app starts
+  empty instead of preloading a sample. Keyboard focus is visible again (the
+  global `outline: none` is gone; custom-painted buttons and the segmented
+  control draw a focus ring and support arrow keys). `pyaint/ui/paper.py` was
+  rewritten; unused desk widgets (`LookFan`, `LookTiles`, `LookSelector`,
+  `StraddleBar`, `BadgeDisc`, `_BrushMark`) were deleted. The hero shape is
+  pinned by render snapshots in `tests/snapshots/`.
+- **Paper on a desk: the surface language.** Chrome is no longer made of
+  rectangles. Every panel, card, chip, bar and the selected-mode highlight is
+  an irregular sheet — jittered corners, each edge bowed a different amount, no
+  two sides parallel — tossed, overlapping and tucked under one another. The
+  largest normal rectangle (the artwork pane) becomes the hero sheet with a
+  single dog-ear fold; unselected modes carry no surface at all, so four shapes
+  never sit side by side; the tool column is one tall sheet with an opaque
+  header band and hairline so the scrollbar and first row are never clipped
+  under it. Surfaces lean, information does not: text, icons and inputs stay
+  square. Shapes are a fixed, deterministic silhouette library, not runtime
+  randomness. New `pyaint/ui/paper.py` (`paper_path`, `paint_paper`,
+  `PaperSurface`, `PaperButton`); Qt stylesheets cannot paint a non-rectangle,
+  so chrome is custom-painted while inputs keep their QSS. Edges bow inward or
+  flat (never outward), so a sheet never puffs at its middle; jitter/bow/radius
+  scale with the surface's short side, so a chip collapses toward a rounded
+  rectangle (its text stays legible) while a hero sheet gets the full
+  silhouette and stands out. `PaperSurface.content_rect()` derives the safe
+  inner rectangle from the role, so padding is computed rather than guessed,
+  and the desk stacking is declared once in `DESK_ORDER`. The Look control is
+  now a single segmented sheet (`PaperSegmented`) with a selected fill clipped
+  to the sheet's irregular edge and each preset's tagline moved to a tooltip;
+  the shadow is a theme token (soft dark gets a black shadow); paper buttons
+  carry extra padding so the jittered edge never crowds a label; the voice-bar
+  badge is gone and the readiness steps use short labels; and the duplicate
+  mode/Look readouts are gone. The selected-mode highlight is irregular with
+  **sharp** corners, and hovering a mode reuses that same quad in a quiet tone
+  rather than a different rounded rectangle. The voice card is an irregular
+  sheet resting on the hero's bottom-right corner. The `Pyaint` wordmark, the
+  `Customize` column heading, the mode kicker and the stage hint line are all
+  gone, and the readiness steps are restyled to muted/accent text so they match
+  the theme. Top bar keeps only paper-chip buttons; `Start drawing` /
+  `Finish setup` are paper buttons. Reference
+  renders are the real window (`build/render_paper.py` →
+  `build/paper_light.png` / `build/paper_dark.png`). Presentation only.
+- **UI conformance pass: one desk, one voice.** The settings pane and the
+  mode rail became a single persistent left column (`Mode` families → `Look`
+  tiles → collapsed `Fine-tune` → `Advanced` → the global `Environment`),
+  with the canvas beside it and an isolated voice card resting on the artwork.
+  This removes the old split where the mode lived on the left and its knobs on
+  the right. The top bar carries the readiness steps and `Start drawing`; the
+  voice card carries only the guide note. `Customize`
+  is now a `Fine-tune` disclosure inside the column, so mode selection can
+  never be hidden. The shape and type scales are centralized (`RADIUS_CARD`,
+  `RADIUS_INPUT`, `TYPE_*`) and applied across every surface; the
+  tracked-uppercase `SETTINGS` title and the 2px buttons/inputs are gone. The
+  dual-readout sliders drop their pip meters (the `value · band` read stays)
+  and their hint sentences move to the voice panel. `Look` is a segmented paper
+  strip whose `Custom` tab appears only while the live values match no preset. The
+  dark theme becomes **soft dark**: panes sit above the desk instead of below
+  it, ink is off pure-white, and the preview sheet is theme-aware rather than
+  hard-coded white. The desk also gets its overlap layer: the selected mode
+  carries the only irregular mode highlight, and the canvas sheet **tucks
+  under** the column: the
+  canvas spans the full width, the column floats over its left edge, and the
+  preview sheet's content is indented so nothing hides. The Find-image panel
+  (the canvas source strip) loses its card border and becomes a plain strip on
+  the desk, matching every other surface. The rule throughout is
+  *overlap surfaces, never ink*: card and highlight surfaces lean, but every
+  label stays horizontal. The voice card is one flat floating sheet resting on
+  the hero artwork's bottom-right corner, jutting past its right and bottom
+  edges; the `Customize` column is a regular rounded quad, while the selected
+  mode keeps the irregular highlight. The readiness checklist is hidden
+  while everything is ready (the header chip already carries the summary) and
+  appears only when something needs fixing, next to `Finish setup`. Switching
+  Source/Preview/Compare eases the pane in (a 180ms settle). UI smoke
+  assertions updated for the new `Custom` tile semantics. Presentation only —
+  no planner, detection, or drawing changes.
+
 ### Added
 - **"Studio Warm" look and an "easel" layout.** The UI moves off the VS Code
   palette to warm-paper / warm-charcoal surfaces with a single clay accent

@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import html
+import math
 import re
 from typing import Optional
 
 from PySide6.QtCore import (
     QBuffer,
     QByteArray,
+    QEvent,
     QIODevice,
     QPointF,
     QRectF,
     Qt,
     Signal,
 )
-from PySide6.QtGui import QImage, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -37,6 +39,7 @@ from PySide6.QtWidgets import (
 
 
 from pyaint.ui import bands, modes
+from pyaint.ui.paper import paper_path, tokens
 
 
 def pil_to_qpixmap(image) -> QPixmap:
@@ -266,7 +269,7 @@ class NoticeBanner(QFrame):
 
 
 class ReadinessStrip(QFrame):
-    """A compact step indicator: Target › Canvas & palette › Image › Draw."""
+    """A compact step indicator: Target › Canvas › Image › Draw."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -275,7 +278,8 @@ class ReadinessStrip(QFrame):
         layout.setContentsMargins(12, 6, 12, 6)
         layout.setSpacing(6)
         self._chips = []
-        for index, text in enumerate(("Target", "Canvas & palette", "Image", "Draw")):
+        # Short labels keep the strip from stealing the voice note's width.
+        for index, text in enumerate(("Target", "Canvas", "Image", "Draw")):
             if index:
                 separator = QLabel("›")
                 separator.setObjectName("ReadySep")
@@ -296,8 +300,8 @@ class ReadinessStrip(QFrame):
         chip.style().polish(chip)
 
     def update_steps(self, target_name: str, environment_ready: bool, image_ready: bool) -> None:
-        self._set_step(0, f"Target · {target_name}", True)
-        self._set_step(1, "Canvas & palette", environment_ready)
+        self._set_step(0, "Target", True)
+        self._set_step(1, "Canvas", environment_ready)
         self._set_step(2, "Image", image_ready)
         self._set_step(3, "Draw", environment_ready and image_ready)
         ready = environment_ready and image_ready
@@ -502,10 +506,14 @@ class BandPips(QWidget):
 
 
 class DualReadoutSlider(QWidget):
-    """A labelled slider showing ``value unit · band`` and a pip meter.
+    """A labelled slider showing ``value unit · band``.
 
     The number keeps settings reproducible from a screenshot; the band word
     keeps them readable. ``control`` is a key in :mod:`pyaint.ui.bands`.
+
+    The pip meter was removed on purpose: the value and the band word already
+    carry the read, and the pips only added row noise (see the conformance
+    review).
     """
 
     changed = Signal(float)
@@ -537,10 +545,6 @@ class DualReadoutSlider(QWidget):
         self._label = QLabel(label)
         self._label.setObjectName("FieldLabel")
         header.addWidget(self._label)
-        count = bands.band_count(control)
-        self._pips = BandPips(count) if (pips and count) else None
-        if self._pips is not None:
-            header.addWidget(self._pips)
         header.addStretch(1)
         self._value_label = QLabel()
         self._value_label.setObjectName("FieldValue")
@@ -590,8 +594,6 @@ class DualReadoutSlider(QWidget):
     def _update_label(self, value: float) -> None:
         self._value_label.setText(self._format_number(value))
         self._band_label.setText(bands.describe(self._control, value))
-        if self._pips is not None:
-            self._pips.set_index(bands.band_index(self._control, value))
 
     def value(self) -> float:
         return self._slider.value() * self._resolution
@@ -601,6 +603,34 @@ class DualReadoutSlider(QWidget):
         self._slider.setValue(round(value / self._resolution))
         self._update_label(value)
         self._block = False
+
+
+class GuidePanel(QFrame):
+    """A docked "voice" note with a fixed seat and a fixed minimum height.
+
+    It talks to the user in plain prose; the note is swapped as the cursor
+    moves, but the panel never resizes with its copy, so nothing jumps.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("GuidePanel")
+        self.setMinimumHeight(44)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 4, 12, 4)
+        outer.setSpacing(0)
+        self._text = QLabel()
+        self._text.setObjectName("GuideText")
+        self._text.setWordWrap(True)
+        outer.addWidget(self._text)
+
+    def set_mark_color(self, color: str) -> None:
+        """Kept for compatibility; the mark now lives on the straddling badge."""
+
+    def set_note(self, kicker: str, text: str) -> None:
+        # The "About this mode" kicker was removed by request; only the note is
+        # shown. The argument is kept so existing callers need no change.
+        self._text.setText(text or "")
 
 
 class ModeRail(QWidget):
@@ -647,10 +677,42 @@ class ModeRail(QWidget):
                 button.toggled.connect(
                     lambda checked, m=mode: self._on_toggled(checked, m)
                 )
+                button.installEventFilter(self)
                 self._group.addButton(button)
                 self._buttons[mode] = button
                 layout.addWidget(button)
         layout.addStretch(1)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        # Repaint so the hover highlight tracks the pointer; the shape is the
+        # same irregular quad as the selection, only the fill differs.
+        if event.type() in (QEvent.Enter, QEvent.Leave):
+            self.update()
+        return super().eventFilter(obj, event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """One rounded highlight behind the selected *or* hovered mode.
+
+        Both states use the same shape: hovering shows it in a quiet tone,
+        selecting fills it with the accent. Unselected modes carry no surface
+        at all, so four blocks never sit side by side.
+        """
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        t = tokens(self)
+        accent = QColor(t.get("accent", "#E07856"))
+        hover = QColor(t.get("bg_hover", "#302B27"))
+        for mode, button in self._buttons.items():
+            selected = button.isChecked()
+            if not (selected or button.underMouse()):
+                continue
+            rect = QRectF(button.geometry()).adjusted(-5, 0, 5, 0)
+            seed = 6100 + (sum(ord(c) for c in mode) % 500)
+            path = paper_path(rect, "mode", seed_key=seed, inset=0.0)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(accent if selected else hover)
+            painter.drawPath(path)
+        painter.end()
 
     def _on_toggled(self, checked: bool, mode: str) -> None:
         if checked:
@@ -669,44 +731,6 @@ class ModeRail(QWidget):
         if button is not None and not button.isChecked():
             button.setChecked(True)
 
-
-class LookSelector(QWidget):
-    """A mode-aware preset selector: one row of exclusive pills.
-
-    ``options`` can be rebuilt when the stroke mode changes (SKETCH shows its
-    own presets), while the current selection is preserved when still present.
-    """
-
-    changed = Signal(str)
-
-    def __init__(self, options, current=None, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        self._layout = layout
-        self._control = None
-        self.set_options(options, current)
-
-    def set_options(self, options, current=None) -> None:
-        if current is None and self._control is not None:
-            current = self._control.value()
-        if self._control is not None:
-            self._layout.removeWidget(self._control)
-            self._control.deleteLater()
-        control = SegmentedControl(options, columns=len(options))
-        control.changed.connect(self.changed)
-        self._control = control
-        self._layout.addWidget(control)
-        if current is not None:
-            control.set_value(current)
-
-    def value(self):
-        return self._control.value() if self._control is not None else None
-
-    def set_value(self, key) -> None:
-        if self._control is not None:
-            self._control.set_value(key)
 
 
 # ---------------------------------------------------------------------------
