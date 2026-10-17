@@ -10,12 +10,14 @@ from typing import Optional
 from PySide6.QtCore import (
     QBuffer,
     QByteArray,
+    QEasingCurve,
     QEvent,
     QIODevice,
     QPointF,
     QRectF,
     Qt,
     QTimer,
+    QVariantAnimation,
     Signal,
 )
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPalette, QPen, QPixmap
@@ -23,6 +25,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QFrame,
+    QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -195,13 +198,43 @@ class SegmentedControl(QWidget):
         self._group.setExclusive(True)
 
 
-class NoticeBanner(QFrame):
-    """A floating, severity-aware toast.
+class SheetCard(QFrame):
+    """A QSS-styled card that lifts itself off the desk with a real shadow.
 
-    Anchored by its owner over the content (never in the layout, so showing it
-    moves nothing). Info/success auto-dismiss quickly, warnings a little later,
-    and errors persist until dismissed because they carry the fix. Hovering
-    holds it open; clicking anywhere on it dismisses it.
+    A stylesheet cannot paint a box-shadow, and a shadow drawn by hand is
+    clipped by the widget's own rect -- which is exactly how the old notices
+    ended up with a hard-edged slab. The elevation is therefore a widget
+    effect: it renders outside the frame, so the falloff follows the rounded
+    corners instead of being cut into a rectangle.
+    """
+
+    def __init__(self, name: str, parent=None):
+        super().__init__(parent)
+        self.setObjectName(name)
+
+    def _refresh_shadow(self) -> None:
+        t = tokens(self)
+        color = QColor(t.get("shadow", "#3C3228"))
+        color.setAlpha(min(255, int(t.get("shadow_alpha", 70)) + 40))
+        effect = QGraphicsDropShadowEffect(self)
+        effect.setBlurRadius(20.0)
+        effect.setOffset(0.0, 3.0)
+        effect.setColor(color)
+        self.setGraphicsEffect(effect)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._refresh_shadow()
+
+
+class NoticeBanner(SheetCard):
+    """A floating, severity-aware notice.
+
+    Anchored by its owner over the desk (never in the layout, so showing it
+    moves nothing). The card is opaque: a translucent notice lets the artwork
+    show through its own text. Info/success auto-dismiss quickly, warnings a
+    little later, and errors persist until dismissed because they carry the
+    fix. Hovering holds it open; clicking anywhere on it dismisses it.
     """
 
     shown = Signal()
@@ -210,11 +243,13 @@ class NoticeBanner(QFrame):
     #: Auto-dismiss delay in ms; 0 means "stay until dismissed".
     _DURATION = {"info": 4000, "success": 4000, "warning": 8000, "error": 0}
 
+    #: Fixed card width; only the height follows the message.
+    WIDTH = 460
+
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("NoticeBanner")
+        super().__init__("NoticeBanner", parent)
         self.setProperty("severity", "info")
-        self.setFixedWidth(460)
+        self.setFixedWidth(self.WIDTH)
         self._on_action = None
         self._severity = "info"
         self._timer = QTimer(self)
@@ -264,9 +299,58 @@ class NoticeBanner(QFrame):
         else:
             self._action.hide()
         self._restyle()
+        self._fit_height()
         self.show()
         self.raise_()
         self._arm()
+
+    def _text_width(self) -> int:
+        """The width the layout will give the label, without needing a layout.
+
+        A notice can be raised before its window has ever been laid out (a
+        startup warning, a failed restore). Asking the label for its current
+        width then returns nonsense, so the card is measured from its own fixed
+        width and the parts around the label instead.
+        """
+        layout = self.layout()
+        if layout is None:
+            return self.WIDTH
+        margins = layout.contentsMargins()
+        gap = max(0, layout.spacing())
+        gaps = 2  # icon | text, text | close
+        used = (
+            margins.left()
+            + margins.right()
+            + self._icon.width()
+            + self._close.sizeHint().width()
+            + gap * gaps
+        )
+        if not self._action.isHidden():
+            used += self._action.sizeHint().width() + gap
+        return max(120, self.WIDTH - used)
+
+    def _fit_height(self) -> None:
+        """Grow the card to the wrapped message instead of clipping it.
+
+        ``adjustSize()`` sizes from ``sizeHint()``, which measures the label at
+        the *hint's* width -- so a message needing a third line at the card's
+        real width overflowed the bottom edge.
+        """
+        layout = self.layout()
+        if layout is None:
+            return
+        self._text.setMinimumHeight(0)
+        width = self._text_width()
+        if self.isVisible() and self._text.width() > 20:
+            # Once laid out, the label's real width is the one it will wrap at.
+            width = min(width, self._text.width())
+        needed = self._text.heightForWidth(width)
+        if needed <= 0:
+            needed = self._text.fontMetrics().height()
+        self._text.setMinimumHeight(needed)
+        layout.activate()
+        margins = layout.contentsMargins()
+        self.setFixedHeight(max(36, needed + margins.top() + margins.bottom()))
 
     def _arm(self) -> None:
         delay = self._DURATION.get(self._severity, 0)
@@ -277,6 +361,8 @@ class NoticeBanner(QFrame):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
+        # Fonts and DPI are only final once the widget is on screen.
+        self._fit_height()
         self.shown.emit()
 
     def enterEvent(self, event) -> None:  # noqa: N802
@@ -306,46 +392,197 @@ class NoticeBanner(QFrame):
         self.style().polish(self)
 
 
-class ReadinessStrip(QFrame):
-    """A compact step indicator: Target › Canvas › Image › Draw."""
+class SetupRow(QWidget):
+    """The setup disclosure row: the control *is* the panel's top edge.
+
+    The whole row is one click target (pointer cursor, hover tint, focus ring,
+    Space/Enter), so the chevron never has to be aimed at. The readiness steps
+    inside it are **status only** -- no fill, no border, no hover: a check for
+    done, a hollow ring for pending. Nothing in the row may look tappable.
+    """
+
+    toggled = Signal(bool)
+
+    HEIGHT = 44
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("ReadinessStrip")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 6)
-        layout.setSpacing(6)
-        self._chips = []
-        # Short labels keep the strip from stealing the voice note's width.
-        for index, text in enumerate(("Target", "Canvas", "Image", "Draw")):
-            if index:
-                separator = QLabel("›")
-                separator.setObjectName("ReadySep")
-                layout.addWidget(separator)
-            chip = QLabel(text)
-            chip.setObjectName("ReadyChip")
-            chip.setProperty("done", False)
-            layout.addWidget(chip)
-            self._chips.append(chip)
-        layout.addStretch(1)
+        self.setObjectName("SetupRow")
+        self.setFixedHeight(self.HEIGHT)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setToolTip("Canvas and palette status — click to review setup.")
+        self.setAccessibleName("Setup")
+        self.setAccessibleDescription(
+            "Shows which setup steps are done. Press to reveal the setup actions."
+        )
+        self._steps = [("Target", True), ("Canvas", False),
+                       ("Image", False), ("Draw", False)]
+        self._open = False
+        self._hover = False
+        self._angle = 0.0
 
-    def _set_step(self, index: int, text: str, done: bool) -> None:
-        chip = self._chips[index]
-        chip.setText(("✓ " if done else "✗ ") + text)
-        chip.setProperty("done", bool(done))
-        chip.setProperty("state", "done" if done else "missing")
-        chip.style().unpolish(chip)
-        chip.style().polish(chip)
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(120)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.valueChanged.connect(self._on_angle)
 
-    def update_steps(self, target_name: str, environment_ready: bool, image_ready: bool) -> None:
-        self._set_step(0, "Target", True)
-        self._set_step(1, "Canvas", environment_ready)
-        self._set_step(2, "Image", image_ready)
-        self._set_step(3, "Draw", environment_ready and image_ready)
-        ready = environment_ready and image_ready
-        self.setProperty("ready", bool(ready))
-        self.style().unpolish(self)
-        self.style().polish(self)
+    # -- state ---------------------------------------------------------
+    def steps(self):
+        return list(self._steps)
+
+    def update_steps(self, target_name: str, environment_ready: bool,
+                     image_ready: bool) -> None:
+        """The four readiness checks, in order."""
+        self._steps = [
+            ("Target", True),
+            ("Canvas", bool(environment_ready)),
+            ("Image", bool(image_ready)),
+            ("Draw", bool(environment_ready and image_ready)),
+        ]
+        self.update()
+
+    def is_open(self) -> bool:
+        return self._open
+
+    def set_open(self, open_: bool) -> None:
+        """Set the disclosure state without emitting ``toggled``."""
+        open_ = bool(open_)
+        if open_ == self._open:
+            return
+        self._open = open_
+        target = 180.0 if open_ else 0.0
+        if self.isVisible():
+            self._anim.stop()
+            self._anim.setStartValue(self._angle)
+            self._anim.setEndValue(target)
+            self._anim.start()
+        else:
+            self._angle = target
+            self.update()
+
+    def toggle(self) -> None:
+        self.set_open(not self._open)
+        self.toggled.emit(self._open)
+
+    def _on_angle(self, value) -> None:
+        self._angle = float(value)
+        self.update()
+
+    # -- events --------------------------------------------------------
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton and self.rect().contains(
+                event.position().toPoint()):
+            self.toggle()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter):
+            self.toggle()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    # -- painting ------------------------------------------------------
+    @staticmethod
+    def _check(painter: QPainter, cx: float, cy: float, colour: QColor) -> None:
+        h = 6.0
+        path = QPainterPath(QPointF(cx - h * 0.85, cy))
+        path.lineTo(QPointF(cx - h * 0.15, cy + h * 0.65))
+        path.lineTo(QPointF(cx + h * 0.9, cy - h * 0.7))
+        pen = QPen(colour, 1.7)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(pen)
+        painter.drawPath(path)
+
+    @staticmethod
+    def _ring(painter: QPainter, cx: float, cy: float, colour: QColor) -> None:
+        pen = QPen(colour, 1.4)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(pen)
+        painter.drawEllipse(QPointF(cx, cy), 5.5, 5.5)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        t = tokens(self)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+
+        card = QColor(t.get("bg_card", "#FFFDFA"))
+        painter.fillRect(
+            QRectF(self.rect()),
+            QColor(t.get("bg_hover", card.name())) if self._hover else card,
+        )
+        painter.setPen(QPen(QColor(t.get("border", "#E6DED2")), 1.0))
+        painter.drawLine(QPointF(0, self.height() - 0.5),
+                         QPointF(self.width(), self.height() - 0.5))
+
+        ink = QColor(t.get("fg", "#2B2622"))
+        muted = QColor(t.get("fg_muted", "#6B6157"))
+        success = QColor(t.get("success", "#4F7A4A"))
+        pending = QColor(t.get("warning", "#C58A1E"))
+
+        font = QFont(self.font())
+        font.setPixelSize(13)
+        font.setWeight(QFont.DemiBold)
+        painter.setFont(font)
+        painter.setPen(ink)
+        painter.drawText(QRectF(16, 0, 64, self.height()),
+                         int(Qt.AlignLeft | Qt.AlignVCenter), "Setup")
+
+        x = 78.0
+        cy = self.height() / 2.0
+        for label, done in self._steps:
+            if done:
+                self._check(painter, x + 7, cy, success)
+            else:
+                self._ring(painter, x + 6, cy, pending)
+            font.setPixelSize(12)
+            font.setWeight(QFont.Normal if done else QFont.DemiBold)
+            painter.setFont(font)
+            painter.setPen(muted if done else ink)
+            width = painter.fontMetrics().horizontalAdvance(label)
+            painter.drawText(QRectF(x + 18, 0, width + 8, self.height()),
+                             int(Qt.AlignLeft | Qt.AlignVCenter), label)
+            x += 18 + width + 22
+
+        painter.save()
+        painter.translate(self.width() - 24.0, cy)
+        painter.rotate(self._angle)
+        chevron = QPainterPath(QPointF(-8, -4.0))
+        chevron.lineTo(QPointF(0, 4.0))
+        chevron.lineTo(QPointF(8, -4.0))
+        pen = QPen(ink, 1.8)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(pen)
+        painter.drawPath(chevron)
+        painter.restore()
+
+        if self.hasFocus():
+            pen = QPen(QColor(t.get("accent", "#B8542F")), 2.0)
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(pen)
+            painter.drawRoundedRect(
+                QRectF(self.rect()).adjusted(2, 2, -2, -2), 8, 8)
+        painter.end()
 
 
 class CollapsibleSection(QFrame):

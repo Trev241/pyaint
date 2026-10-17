@@ -12,7 +12,43 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Long notices no longer spill out of their card.** The card was sized from
+  `sizeHint()`, which measures the wrapped label at the *hint's* width; a
+  message that needed a third line at the real 460px width ran past the bottom
+  edge (the `"…" is not set up yet` warning was the usual offender). The label
+  is now measured at the width the layout actually gives it, and the card grows
+  to fit, shrinking back for short messages. A notice raised **before the
+  window is laid out** (startup warnings) is now measured from the card's fixed
+  width and placed from `MainWindow.showEvent`, so it no longer appears
+  compressed in the top-left corner. Regression tests:
+  `test_notice_grows_to_fit_a_long_message`,
+  `test_notice_raised_before_show_lands_bottom_right`.
+
 ### Changed
+- **Setup is now a disclosure row, and notices are opaque.** The status chip
+  became a **full-width `Setup` row** under the top bar: the chevron lives in
+  the surface it reveals, the whole 44px row is the click target, and the panel
+  opens from the row's own bottom edge as an **overlay** (it stops at the tool
+  column), so revealing setup never moves the desk. Readiness inside the row is
+  **status only** — a drawn check for done, a hollow ring for pending, no
+  fills, no borders, nothing that reads as a button — and the panel carries one
+  sentence naming the blocker plus `Find the canvas` / `Pick the regions`. The
+  panel auto-opens while something is missing, but only until you touch the
+  row; after that your state wins and a readiness refresh can no longer
+  re-open it under the pointer.
+- **Notices are opaque cards at the bottom-right.** The old translucent toast
+  (`rgba(…, 0.10–0.16)`) let the artwork show through its own text; notices now
+  use solid warm tints with a hairline, a severity edge and a real drop shadow,
+  and they stack above the voice bar instead of covering the centre of the
+  artwork. Errors still persist; info/success still auto-dismiss.
+- **Elevation is for sheets only.** `paint_paper` no longer draws two hard
+  offset copies of the shape (which the widget rect clipped into a square
+  slab); the hero sheet gets a real stroked falloff, and only roles in
+  `paper.SHADOW_ROLES` carry a shadow at all. Buttons and the Look strip are
+  flat with a hairline, so a rounded control can no longer cast a
+  square-cornered shadow.
+
 - **Desk layout pass: status up top, floating notices, real gutters.** Readiness
   moved out of the bottom bar into a **collapsible setup panel** under the top
   bar, toggled by a **status chip at the top-right** (`Not set up` / `Partly set
@@ -127,6 +163,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   no planner, detection, or drawing changes.
 
 ### Added
+- `icons.chevron` and `SetupRow` (accessible name/description, focus ring,
+  Space/Enter, 120ms chevron rotation); `SheetCard` for QSS cards that need
+  elevation; `paper.soft_shadow`.
+
 - **"Studio Warm" look and an "easel" layout.** The UI moves off the VS Code
   palette to warm-paper / warm-charcoal surfaces with a single clay accent
   (`#B8542F` / `#E07856`, AA-verified), 13px sentence-case type, 8px shapes, and

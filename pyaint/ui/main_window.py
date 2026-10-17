@@ -102,8 +102,9 @@ from pyaint.ui.widgets import (
     MasonryGallery,
     ModeRail,
     NoticeBanner,
-    ReadinessStrip,
     Section,
+    SetupRow,
+    SheetCard,
     local_path_from_mime,
     pil_to_qpixmap,
     raw_image_from_mime,
@@ -247,6 +248,10 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._preview_timer.setInterval(300)
         self._preview_timer.timeout.connect(self._run_preview)
 
+        # Setup disclosure: auto until the user takes over, then theirs.
+        self._setup_touched = False
+        self._setting_setup = False
+
         self.signals = UiSignals()
         self.signals.progress.connect(self._on_progress)
         self.signals.status.connect(self._set_status)
@@ -301,18 +306,24 @@ class MainWindow(InspectorMixin, QMainWindow):
         root.setContentsMargins(MARGIN, 10, MARGIN, MARGIN)
         root.setSpacing(10)
 
-        # Top bar (wordmark + target + status chip), then the collapsible setup
-        # panel it toggles. Notices and the countdown are floating overlays, not
-        # layout rows, so they never move the desk.
+        # Header = wordmark/target bar plus the setup disclosure row directly
+        # beneath it. The row *is* the panel's top edge; the panel itself is a
+        # child overlay, so revealing it never moves the desk.
         self._topbar = self._build_topbar()
-        root.addWidget(self._topbar)
-        self._setup_panel = self._build_setup_panel()
-        root.addWidget(self._setup_panel)
+        self._setup_row = SetupRow()
+        self._setup_row.toggled.connect(self._on_setup_toggled)
+        header = QWidget()
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
+        header_layout.addWidget(self._topbar)
+        header_layout.addWidget(self._setup_row)
+        root.addWidget(header)
 
         self._notice = NoticeBanner(central)
-        self._notice.shown.connect(self._position_toasts)
+        self._notice.shown.connect(self._position_overlays)
         self._countdown_banner = CountdownBanner(central)
-        self._countdown_banner.shown.connect(self._position_toasts)
+        self._countdown_banner.shown.connect(self._position_overlays)
         self._countdown_banner.captured.connect(self._begin_capture)
         self._countdown_banner.cancelled.connect(self._cancel_auto_detect)
 
@@ -325,6 +336,10 @@ class MainWindow(InspectorMixin, QMainWindow):
         root.addWidget(self._desk, 1)
         self._bottom_bar = self._build_bottom_bar()
         root.addWidget(self._bottom_bar)
+
+        # Built last so it can sit above the desk without a raise() dance.
+        self._setup_panel = self._build_setup_panel(central)
+        self._setup_panel.hide()
 
     def _build_topbar(self) -> QWidget:
         bar = QWidget()
@@ -348,15 +363,6 @@ class MainWindow(InspectorMixin, QMainWindow):
 
         layout.addStretch(1)
 
-        # Status + setup, top-right: the single "are we ready?" surface.
-        self._status_btn = QPushButton("\u25b8  Not set up")
-        self._status_btn.setObjectName("StatusChip")
-        self._status_btn.setCheckable(True)
-        self._status_btn.setToolTip(
-            "Canvas and palette status \u2014 click to review setup."
-        )
-        self._status_btn.toggled.connect(self._on_setup_toggled)
-        layout.addWidget(self._status_btn)
         return bar
 
     def _build_mode_block(self) -> QWidget:
@@ -926,18 +932,18 @@ class MainWindow(InspectorMixin, QMainWindow):
         button.clicked.connect(slot)
         return button
 
-    def _build_setup_panel(self) -> QWidget:
-        """The collapsible setup panel: the readiness steps and Find / Pick."""
-        panel = QFrame()
-        panel.setObjectName("SetupPanel")
+    def _build_setup_panel(self, parent=None) -> QWidget:
+        """The revealed panel: why setup is not finished, and the two verbs."""
+        panel = SheetCard("SetupPanel", parent)
+        panel.setFixedHeight(56)
         layout = QHBoxLayout(panel)
-        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(10)
 
-        self._readiness = ReadinessStrip()
-        self._readiness.setObjectName("ReadinessStripInline")
-        layout.addWidget(self._readiness)
-        layout.addStretch(1)
+        self._setup_reason = QLabel("")
+        self._setup_reason.setObjectName("SetupReason")
+        self._setup_reason.setWordWrap(True)
+        layout.addWidget(self._setup_reason, 1)
 
         self._auto_btn = PaperButton("Find the canvas")
         self._auto_btn.setToolTip("Find the canvas and palette from a screenshot")
@@ -949,28 +955,82 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._teach_btn.clicked.connect(self.open_setup)
         layout.addWidget(self._teach_btn)
 
-        panel.setVisible(False)
         return panel
 
     def _on_setup_toggled(self, checked: bool) -> None:
-        self._setup_panel.setVisible(bool(checked))
-        self._update_status_chip()
+        """A click on the row itself: from here on, the user owns the state."""
+        if self._setting_setup:
+            return
+        self._setup_touched = True
+        self._set_setup_open(checked)
 
-    def _position_toasts(self) -> None:
-        """Centre the floating notice / countdown under the top bar."""
+    def _set_setup_open(self, open_: bool) -> None:
+        self._setting_setup = True
+        try:
+            self._setup_row.set_open(open_)
+        finally:
+            self._setting_setup = False
+        if open_:
+            self._update_setup_reason()
+            self._setup_panel.show()
+            self._position_overlays()
+            self._setup_panel.raise_()
+        else:
+            self._setup_panel.hide()
+
+    def _update_setup_reason(self) -> None:
+        canvas = getattr(self.bot, "_canvas", None)
+        palette = getattr(self.bot, "_palette", None)
+        if canvas is None or palette is None or len(palette.colors) <= 1:
+            reason = "Pyaint doesn't know where your canvas is yet."
+        elif not self._has_image():
+            reason = "No image yet — drop one here, or search above."
+        else:
+            reason = "Set up. Start drawing, or review the regions first."
+        self._setup_reason.setText(reason)
+
+    def _position_overlays(self) -> None:
+        """Place the floating children: notice, countdown, setup panel.
+
+        None of them are in a layout, so showing one never moves the desk.
+        """
         central = self.centralWidget()
-        if central is None:
+        if central is None or central.width() <= 2:
+            # Not laid out yet (a startup notice): showEvent will place it.
             return
         top = getattr(self, "_topbar", None)
-        y = (top.height() if top is not None else 56) + 12
-        for widget in (getattr(self, "_notice", None),
-                       getattr(self, "_countdown_banner", None)):
-            if widget is None or not widget.isVisible():
-                continue
-            widget.adjustSize()
-            x = max(MARGIN, (central.width() - widget.width()) // 2)
-            widget.move(x, y)
-            widget.raise_()
+        top_y = (top.height() if top is not None else 56) + 12
+
+        countdown = getattr(self, "_countdown_banner", None)
+        if countdown is not None and countdown.isVisible():
+            countdown.adjustSize()
+            countdown.move(max(MARGIN, (central.width() - countdown.width()) // 2),
+                           top_y)
+            countdown.raise_()
+
+        notice = getattr(self, "_notice", None)
+        if notice is not None and notice.isVisible():
+            # Bottom-right, above the voice bar: never over the artwork.
+            notice.adjustSize()
+            bar = getattr(self, "_bottom_bar", None)
+            floor = bar.mapTo(central, QPoint(0, 0)).y() if bar is not None else central.height()
+            x = central.width() - MARGIN - notice.width()
+            y = floor - 10 - notice.height()
+            notice.move(max(MARGIN, x), max(top_y, y))
+            notice.raise_()
+
+        panel = getattr(self, "_setup_panel", None)
+        row = getattr(self, "_setup_row", None)
+        if panel is not None and row is not None and panel.isVisible():
+            # Full width of the row, but it stops at the tool column so the
+            # column header stays visible while setup is open. The row's
+            # bottom edge is still the panel's top edge.
+            origin = row.mapTo(central, QPoint(0, 0))
+            left = origin.x() + COLUMN_WIDTH + GAP
+            panel.setGeometry(left, origin.y() + row.height(),
+                              max(240, row.width() - COLUMN_WIDTH - GAP),
+                              panel.height())
+            panel.raise_()
 
     def _build_bottom_bar(self) -> QWidget:
         """The docked voice bar: guide note (left) + Start drawing (right)."""
@@ -1683,14 +1743,15 @@ class MainWindow(InspectorMixin, QMainWindow):
         recipe = get_recipe(self.profile.target)
         environment_ready = self._environment_ready()
         image_ready = self._has_image()
-        self._readiness.update_steps(recipe.name, environment_ready, image_ready)
-        # The setup panel opens itself while something is missing and folds away
-        # once everything is ready; the top-right chip toggles it by hand.
+        self._setup_row.update_steps(recipe.name, environment_ready, image_ready)
+        # The row opens by itself while something is missing -- but only until
+        # the user has touched it. After that the user's state wins, so the
+        # panel never re-opens under the pointer mid-session.
         incomplete = not (environment_ready and image_ready)
-        if hasattr(self, "_status_btn"):
-            self._status_btn.setChecked(incomplete)
-            self._setup_panel.setVisible(incomplete)
-            self._update_status_chip()
+        if not self._setup_touched:
+            self._set_setup_open(incomplete)
+        elif self._setup_row.is_open():
+            self._update_setup_reason()
         if not self._busy:
             # Keep Start clickable: clicking it explains what is missing rather
             # than leaving a greyed-out button with no reason.
@@ -1700,24 +1761,6 @@ class MainWindow(InspectorMixin, QMainWindow):
                 if (environment_ready and image_ready)
                 else "Not ready yet — click to see what is missing"
             )
-
-    def _update_status_chip(self) -> None:
-        if not hasattr(self, "_status_btn"):
-            return
-        canvas = getattr(self.bot, "_canvas", None)
-        palette = getattr(self.bot, "_palette", None)
-        if canvas is not None and palette is not None and len(palette.colors) > 1:
-            state, text = "ready", f"Ready \u00b7 {len(palette.colors)} colours"
-        elif canvas is not None or palette is not None:
-            state, text = "partial", "Partly set up"
-        else:
-            state, text = "none", "Not set up"
-        arrow = "\u25be" if self._status_btn.isChecked() else "\u25b8"
-        self._status_btn.setText(f"{arrow}  {text}")
-        if self._status_btn.property("state") != state:
-            self._status_btn.setProperty("state", state)
-            self._status_btn.style().unpolish(self._status_btn)
-            self._status_btn.style().polish(self._status_btn)
 
     @staticmethod
     def _detection_checklist(detection) -> str:
@@ -1989,9 +2032,15 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._update_compare_available()
         self._image_stack.setCurrentWidget(self._preview_page)
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        # A notice raised while the window was still hidden has no layout to
+        # anchor to yet; place everything now that the desk has a real size.
+        self._position_overlays()
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        self._position_toasts()
+        self._position_overlays()
 
     def _on_url_changed(self, text: str) -> None:
         text = text.strip()

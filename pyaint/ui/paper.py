@@ -45,12 +45,16 @@ PAPER_AMOUNT = 0.6
 #: paper is confined to the artwork sheet -- small/text surfaces stay legible.
 PAPER_ROLES = frozenset({"hero"})
 
+#: Roles that carry elevation. Only sheets sit above the desk; controls never do,
+#: which is why a button cannot end up with a slab shadow cut off at its corner.
+SHADOW_ROLES = frozenset({"hero"})
+
 #: Per-role silhouette parameters. ``seed`` is the fallback stable seed for a
 #: role with no ``seed_key``; ``inset`` leaves room for the soft shadow;
 #: ``margin`` is the content-safe inset (clear of jitter, bow and radius). For
 #: non-paper roles the jitter/bow are ignored -- only ``radius`` applies.
 SILHOUETTES: dict[str, dict] = {
-    "hero": {"jitter": 8.0, "bow": 14.0, "radius": 18.0, "seed": 1100, "inset": 8.0,
+    "hero": {"jitter": 8.0, "bow": 14.0, "radius": 18.0, "seed": 1100, "inset": 10.0,
              "margin": 22},
     "column": {"jitter": 0.0, "bow": 0.0, "radius": 10.0, "seed": 2100, "inset": 0.0,
                "margin": 16},
@@ -199,25 +203,49 @@ def content_rect(rect: QRectF, role: str = "card") -> QRectF:
     return r.adjusted(pad, pad, -pad, -pad)
 
 
+def soft_shadow(painter: QPainter, path: QPainterPath, color: QColor,
+                offset: float = 2.0, spread: float = 7.0,
+                passes: int = 8) -> None:
+    """Paint a soft falloff under ``path``.
+
+    Qt has no blur for direct painting, so the shadow is *stroked*: each pass
+    widens the outline and fades, and round joins keep the corners soft. The
+    result is a real gradient rather than the hard-edged offset copies this
+    used to draw, which read as a second, square-cornered rectangle.
+    """
+    painter.save()
+    painter.setBrush(Qt.NoBrush)
+    shifted = QPainterPath(path)
+    shifted.translate(0, offset)
+    for step in range(passes - 1, -1, -1):
+        width = spread * 2.0 * (step + 1) / passes
+        fade = 1.0 - (step + 1) / (passes + 1)
+        shade = QColor(color)
+        shade.setAlpha(max(1, int(color.alpha() * fade ** 2.4 * 0.55)))
+        pen = QPen(shade, width)
+        pen.setJoinStyle(Qt.RoundJoin)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawPath(shifted)
+    painter.restore()
+
+
 def paint_paper(painter: QPainter, path: QPainterPath, t: dict,
                 fill: str | None = None, border: str | None = None,
-                shadow: bool = True, shadow_color: QColor | None = None,
+                shadow: bool = False, shadow_color: QColor | None = None,
                 width: float = 1.0) -> None:
-    """Paint a shadowed sheet: one soft offset shadow, fill, hairline."""
+    """Paint a sheet: optional soft shadow, fill, hairline.
+
+    ``shadow`` is off by default and only :data:`SHADOW_ROLES` turn it on, so a
+    control can never paint itself a drop shadow.
+    """
     if shadow:
         if shadow_color is not None:
             color = QColor(shadow_color)
         else:
             color = QColor(t.get("shadow", "#3C3228"))
             color.setAlpha(int(t.get("shadow_alpha", 70)))
-        painter.setPen(Qt.NoPen)
-        for offset, mul in ((2, 0.35), (6, 0.75)):
-            c = QColor(color)
-            c.setAlpha(int(color.alpha() * mul))
-            painter.setBrush(c)
-            shifted = QPainterPath(path)
-            shifted.translate(0, offset)
-            painter.drawPath(shifted)
+        soft_shadow(painter, path, color)
     if fill is not None:
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(fill))
@@ -281,7 +309,8 @@ class PaperSurface(QFrame):
         border = self._border if self._border is not None else (
             t.get(border_key) if border_key else None
         )
-        paint_paper(painter, self._path, t, fill, border)
+        paint_paper(painter, self._path, t, fill, border,
+                    shadow=self._role in SHADOW_ROLES)
         painter.end()
 
 
@@ -333,7 +362,7 @@ class PaperButton(QPushButton):
         painter.setRenderHint(QPainter.Antialiasing, True)
         fill = self._colors(t)
         border = None if self._primary else t.get("border")
-        paint_paper(painter, self._path, t, fill, border, shadow=not self._primary)
+        paint_paper(painter, self._path, t, fill, border, shadow=False)
         if self.hasFocus():
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(QColor(t.get("accent", "#E07856")), 2.0))

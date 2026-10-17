@@ -35,10 +35,10 @@ DARK = {
     "danger": "#E07068",
     "success": "#7FB07A",
     "warning": "#E0B84E",
-    "notice_info_bg": "rgba(224, 120, 86, 0.16)",
-    "notice_success_bg": "rgba(127, 176, 122, 0.16)",
-    "notice_warning_bg": "rgba(224, 184, 78, 0.16)",
-    "notice_error_bg": "rgba(224, 112, 104, 0.16)",
+    "notice_info_bg": "#402F27",
+    "notice_success_bg": "#34362C",
+    "notice_warning_bg": "#403726",
+    "notice_error_bg": "#402E2A",
     "scrollbar": "rgba(150, 140, 128, 0.40)",
     "scrollbar_hover": "rgba(170, 160, 148, 0.70)",
 }
@@ -66,10 +66,10 @@ LIGHT = {
     "danger": "#B23A34",
     "success": "#4F7A4A",
     "warning": "#C58A1E",
-    "notice_info_bg": "rgba(184, 84, 47, 0.10)",
-    "notice_success_bg": "rgba(79, 122, 74, 0.12)",
-    "notice_warning_bg": "rgba(197, 138, 30, 0.14)",
-    "notice_error_bg": "rgba(178, 58, 52, 0.12)",
+    "notice_info_bg": "#F8ECE6",
+    "notice_success_bg": "#EAEDE5",
+    "notice_warning_bg": "#F7EDDB",
+    "notice_error_bg": "#F6E6E2",
     "scrollbar": "rgba(120, 105, 92, 0.35)",
     "scrollbar_hover": "rgba(120, 105, 92, 0.60)",
 }
@@ -267,24 +267,8 @@ def stylesheet(tokens: dict | None = None) -> str:
     }}
     #CollapsibleHeader:hover {{ color: {t['fg']}; }}
 
-    /* --- Readiness strip ------------------------------------------------ */
-    #ReadinessStrip {{
-        background: {t['bg_side']};
-        border-bottom: 1px solid {t['border']};
-    }}
-    #ReadyChip {{
-        color: {t['fg_muted']};
-        font-size: 12px;
-        padding: 2px 4px;
-    }}
-    #ReadyChip[done="true"] {{
-        color: {t['fg_muted']};
-    }}
-    #ReadyChip[state="missing"] {{
-        color: {t['accent']};
-        font-weight: 600;
-    }}
-    #ReadySep {{ color: {t['fg_dim']}; }}
+    /* --- Setup row / panel ---------------------------------------------- */
+    #SetupReason {{ color: {t['fg_muted']}; font-size: 12px; }}
     #FieldLabel {{
         color: {t['fg_muted']};
         font-size: 11px;
@@ -366,8 +350,9 @@ def stylesheet(tokens: dict | None = None) -> str:
     /* --- Persistent notice banner -------------------------------------- */
     #NoticeBanner {{
         background: {t['notice_info_bg']};
-        border-bottom: 1px solid {t['border']};
-        border-left: 4px solid {t['accent']};
+        border: 1px solid {t['border']};
+        border-left: 3px solid {t['accent']};
+        border-radius: 10px;
     }}
     #NoticeBanner[severity="success"] {{
         background: {t['notice_success_bg']};
@@ -416,7 +401,6 @@ def stylesheet(tokens: dict | None = None) -> str:
         background: {t['bg_side']};
         border-top: 1px solid {t['border']};
     }}
-    #ReadinessStripInline {{ background: transparent; border: none; }}
     #FixButton {{ color: {t['warning']}; border-color: {t['warning']}; }}
 
     /* --- Overlay severity ---------------------------------------------- */
@@ -806,23 +790,6 @@ def stylesheet(tokens: dict | None = None) -> str:
     #GuideDot {{
         background: {t['accent']};
         border-radius: 7px;
-    }}
-    #StatusChip {{
-        background: {t['bg_card']};
-        border: 1px solid {t['border']};
-        border-radius: 8px;
-        padding: 6px 12px;
-        color: {t['fg_muted']};
-    }}
-    #StatusChip:hover {{
-        background: {t['bg_hover']};
-    }}
-    #StatusChip:checked {{
-        background: {t['bg_active']};
-    }}
-    #StatusChip[state="none"], #StatusChip[state="partial"] {{
-        color: {t['accent']};
-        border-color: {t['accent']};
     }}
     #SetupPanel {{
         background: {t['bg_card']};

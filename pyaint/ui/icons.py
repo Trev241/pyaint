@@ -122,6 +122,11 @@ def _draw_refresh(p: QPainter, s: float) -> None:
     p.drawPolygon(_poly(s, (0.62, 0.06), (0.84, 0.26), (0.58, 0.32)))
 
 
+def _draw_chevron(p: QPainter, s: float) -> None:
+    p.setBrush(Qt.NoBrush)
+    p.drawPolyline(_poly(s, (0.28, 0.38), (0.5, 0.62), (0.72, 0.38)))
+
+
 _DRAWERS = {
     "play": _draw_play,
     "pause": _draw_pause,
@@ -135,6 +140,7 @@ _DRAWERS = {
     "zap": _draw_zap,
     "trash": _draw_trash,
     "refresh": _draw_refresh,
+    "chevron": _draw_chevron,
 }
 
 

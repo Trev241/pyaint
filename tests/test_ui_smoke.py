@@ -399,18 +399,40 @@ def test_countdown_banner_cancel_emits(app):
         banner.close()
 
 
-def test_readiness_strip_states(app):
-    from pyaint.ui.widgets import ReadinessStrip
+def test_setup_row_states(app):
+    from PySide6.QtCore import Qt
 
-    strip = ReadinessStrip()
+    from pyaint.ui.widgets import SetupRow
+
+    row = SetupRow()
     try:
-        strip.update_steps("skribbl", environment_ready=True, image_ready=False)
-        assert strip._chips[0].property("done") is True
-        assert strip._chips[1].property("done") is True
-        assert strip._chips[2].property("done") is False
-        assert strip._chips[3].property("done") is False
+        row.update_steps("skribbl", environment_ready=True, image_ready=False)
+        steps = row.steps()
+        assert [done for _, done in steps] == [True, True, False, False]
+        # Status only: the row is the click target, its children are not.
+        assert row.focusPolicy() == Qt.FocusPolicy.StrongFocus
+        row.update_steps("skribbl", environment_ready=True, image_ready=True)
+        assert [done for _, done in row.steps()] == [True, True, True, True]
     finally:
-        strip.close()
+        row.close()
+
+
+def test_setup_row_toggles_itself(app):
+    from pyaint.ui.widgets import SetupRow
+
+    row = SetupRow()
+    seen = []
+    row.toggled.connect(seen.append)
+    try:
+        assert row.is_open() is False
+        row.toggle()
+        assert row.is_open() is True
+        row.set_open(True)  # no emission, no flap
+        row.toggle()
+        assert row.is_open() is False
+        assert seen == [True, False]
+    finally:
+        row.close()
 
 
 def test_detection_checklist(app):
@@ -933,8 +955,11 @@ def test_preflight_reports_missing_pieces(app, tmp_path, monkeypatch):
         reasons = [reason for reason, _, _ in window._preflight_issues()]
         assert "canvas not set" in reasons
         assert "palette not set" in reasons
-        # The docked bar carries the status + the two setup actions.
-        assert window._readiness.isVisibleTo(window)
+        # The row carries the status; the panel it reveals carries the verbs.
+        assert window._setup_row.steps()[1][1] is False
+        window.show()
+        app.processEvents()
+        assert window._setup_row.is_open() is True
         assert window._auto_btn.isVisibleTo(window)
         assert window._teach_btn.isVisibleTo(window)
     finally:
@@ -1533,6 +1558,50 @@ def test_guide_note_follows_hover(app, tmp_path, monkeypatch):
         window.close()
 
 
+def test_notice_grows_to_fit_a_long_message(app):
+    """A wrapped message must grow the card, not spill out of its bottom edge."""
+    from pyaint.ui.widgets import NoticeBanner
+
+    banner = NoticeBanner()
+    try:
+        banner.show_notice(
+            '"Generic / other app" is not set up yet — find its canvas and '
+            "palette, or pick both regions by hand if detection cannot see them.",
+            "warning", "Find the canvas", lambda: None,
+        )
+        app.processEvents()
+        label = banner._text
+        assert label.height() >= label.heightForWidth(label.width())
+        assert label.geometry().bottom() < banner.height()
+    finally:
+        banner.close()
+
+
+def test_notice_raised_before_show_lands_bottom_right(app, tmp_path, monkeypatch):
+    """A startup notice is measured and placed before the window is laid out."""
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        # Raised while the window is still hidden, as a startup warning is.
+        window._notice.show_notice(
+            '"Generic / other app" is not set up yet — find its canvas and '
+            "palette.",
+            "warning", "Find the canvas", lambda: None,
+        )
+        window.show()
+        app.processEvents()
+        notice = window._notice
+        central = window.centralWidget()
+        assert notice.isVisibleTo(window)
+        assert notice.x() > central.width() // 2          # bottom-right, not 0,0
+        assert notice.geometry().bottom() < central.height()
+        label = notice._text
+        assert label.height() >= label.heightForWidth(label.width())
+        assert label.geometry().bottom() < notice.height()
+    finally:
+        window.close()
+
+
 def test_notice_toast_behaviour(app, tmp_path, monkeypatch):
     """Notices are floating toasts: info auto-dismisses, errors persist."""
     monkeypatch.chdir(tmp_path)
@@ -1550,13 +1619,47 @@ def test_notice_toast_behaviour(app, tmp_path, monkeypatch):
         window.close()
 
 
-def test_setup_panel_follows_the_status_chip(app, tmp_path, monkeypatch):
+def test_setup_panel_hangs_off_the_row(app, tmp_path, monkeypatch):
+    from PySide6.QtCore import QPoint
+
     monkeypatch.chdir(tmp_path)
     window = MainWindow(Bot())
     try:
-        window._status_btn.setChecked(False)
-        assert not window._setup_panel.isVisibleTo(window)
-        window._status_btn.setChecked(True)
+        window.show()
+        app.processEvents()
+        if window._setup_row.is_open():
+            window._setup_row.toggle()
+        window._setup_row.toggle()
+        app.processEvents()
         assert window._setup_panel.isVisibleTo(window)
+        from pyaint.ui.main_window import COLUMN_WIDTH, GAP
+
+        row = window._setup_row.mapTo(window.centralWidget(), QPoint(0, 0))
+        panel = window._setup_panel.geometry()
+        # The clicked edge is the revealed edge: the panel starts exactly at the
+        # row's bottom and reaches its right edge, and nothing in the layout
+        # moved for it. It stops at the tool column so the column stays usable.
+        assert panel.y() == row.y() + window._setup_row.height()
+        assert panel.x() + panel.width() == row.x() + window._setup_row.width()
+        assert panel.x() == row.x() + COLUMN_WIDTH + GAP
+        assert window._setup_panel.parent() is window.centralWidget()
+
+        window._setup_row.toggle()
+        app.processEvents()
+        assert not window._setup_panel.isVisibleTo(window)
+    finally:
+        window.close()
+
+
+def test_setup_panel_stays_shut_after_the_user_closes_it(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        assert window._setup_row.is_open()  # nothing set up yet: auto-open
+        window._setup_row.toggle()          # user folds it away
+        assert not window._setup_row.is_open()
+        window._refresh_readiness()         # a refresh must not re-open it
+        assert not window._setup_row.is_open()
+        assert window._setup_touched is True
     finally:
         window.close()
