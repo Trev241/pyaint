@@ -13,6 +13,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Section headings sit centred in their own hover/focus box.** The header's
+  vertical insets were 12px above the title and 2px below, so the accent focus
+  ring and hover tint looked bottom-heavy. Both insets are now 8px.
 - **Long notices no longer spill out of their card.** The card was sized from
   `sizeHint()`, which measures the wrapped label at the *hint's* width; a
   message that needed a third line at the real 460px width ran past the bottom

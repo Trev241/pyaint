@@ -647,10 +647,12 @@ class SectionHeader(QWidget):
         # share one rail. A nested header adds no inset: its parent body already
         # provides it.
         layout = QHBoxLayout(self)
+        # Symmetric vertical insets: the hover tint and focus ring enclose the
+        # title, so an asymmetric box would make the heading look off-centre.
         if nested:
-            layout.setContentsMargins(0, 8, 0, 2)
+            layout.setContentsMargins(0, 6, 0, 6)
         else:
-            layout.setContentsMargins(12, 12, 12, 2)
+            layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(6)
 
         self._title = QLabel(title)
@@ -739,7 +741,7 @@ class CollapsibleSection(QFrame):
         self.setObjectName("Section")
         self.setProperty("nested", nested)
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 4 if nested else 8)
+        self._layout.setContentsMargins(0, 0 if nested else 4, 0, 4 if nested else 8)
         self._layout.setSpacing(2)
 
         self._header = SectionHeader(title, collapsible=True, nested=nested)
@@ -804,7 +806,7 @@ class Section(QFrame):
         self.setObjectName("Section")
         self.setProperty("nested", nested)
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 4 if nested else 8)
+        self._layout.setContentsMargins(0, 0 if nested else 4, 0, 4 if nested else 8)
         self._layout.setSpacing(2)
 
         self._header = SectionHeader(title, nested=nested)
