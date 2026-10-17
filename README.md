@@ -39,6 +39,14 @@ https://github.com/user-attachments/assets/50f2f344-8ca9-439b-8722-0175356ad59e
 It is for drawing your own images in apps you control: art, accessibility,
 offline demos, and testing. See [Intended use](#intended-use).
 
+## Legacy version
+
+The original Tk-based app — the `0.0.0` baseline this rewrite started from — is
+preserved on the
+[`legacy` branch](https://github.com/Trev241/pyaint/tree/legacy). It is kept
+as-is for anyone who prefers the old interface; active development happens on
+the current app.
+
 ## Quick start
 
 **Requirements:** Windows 10/11 and a drawing app with an on-screen palette.

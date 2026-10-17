@@ -13,6 +13,12 @@ and this project uses calendar versioning with a
 
 ## [Unreleased]
 
+### Changed
+- README now points to the
+  [`legacy` branch](https://github.com/Trev241/pyaint/tree/legacy) for the
+  original Tk-based app, so people who prefer it can still find the
+  pre-rewrite version.
+
 ## [2026.1.0] - 2026-10-17
 
 ### Fixed
