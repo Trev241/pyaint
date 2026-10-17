@@ -26,6 +26,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   `test_notice_raised_before_show_lands_bottom_right`.
 
 ### Changed
+- **Docs collapsed back to one README.** Deleted the `docs/` tree (index, API
+  reference, configuration, architecture, releasing, troubleshooting) and the
+  duplicate summaries that came with it. The README is now the hook + how-to +
+  FAQ + a short architecture/tools map; `CONTRIBUTING.md` carries setup, tests,
+  build, release and demo instructions; `targets/README.md` keeps the recipe
+  schema. Nothing tracked links into `docs/` any more.
 - **Setup is now a disclosure row, and notices are opaque.** The status chip
   became a **full-width `Setup` row** under the top bar: the chevron lives in
   the surface it reveals, the whole 44px row is the click target, and the panel

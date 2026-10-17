@@ -1,23 +1,23 @@
 # Target recipes
 
 Drop a `*.json` recipe in this folder (or in `~/.pyaint/targets/`) and it will
-appear in the **Target App** dropdown the next time Pyaint starts. Recipes here
+appear in the **Drawing in** selector the next time Pyaint starts. Recipes here
 are loaded after the built-ins and may override a built-in with the same `id`.
 
-A recipe tells Pyaint which tools a drawing app needs, what colour strategy to
-use, and how to auto-detect the canvas/palette.
+A recipe tells Pyaint which tools a drawing app needs and how to auto-detect its
+canvas and palette.
 
 ## Fields
 
 | Field | Meaning |
 |-------|---------|
 | `id` | Unique identifier (required) |
-| `name` | Display name in the dropdown |
+| `name` | Display name in the Drawing in selector |
 | `description` | Short description |
 | `extends` | Optional parent `id`; parent fields are deep-merged then overridden by this recipe |
 | `hidden` | If true the recipe is infrastructure (a base) and is not shown in the dropdown |
 | `schema_version` | Recipe schema version (current: 1) |
-| `tools` | Which taught tools Setup should show, from: `Palette`, `Canvas`, `New Layer`, `Color Button`, `Color Button Okay` |
+| `tools` | Which taught tools the setup flow should show, from: `Palette`, `Canvas`, `New Layer`, `Color Button`, `Color Button Okay` |
 | `supports_layers` / `supports_mspaint_mode` | Capability flags |
 | `drawing_settings` | Defaults applied on selection: `delay`, `pixel_size`, `jump_delay`, `jump_threshold` |
 | `drawing_options` | `ignore_white_pixels`, `ignore_transparent_pixels` |
@@ -97,6 +97,4 @@ so the child only specifies what it changes.
 ```
 
 To build a `color_signature` palette, capture a screenshot of the app with the
-palette visible and sample the centre pixel of each swatch. The dev helper
-`AGENTS/tools/detect_screenshot.py` can test detection against a saved
-screenshot without running the GUI.
+palette visible and sample the centre pixel of each swatch.
