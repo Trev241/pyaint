@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyaint"
-version = "0.1.0"
+# CalVer: YYYY.MINOR.PATCH. The single source of truth is pyaint.__version__;
+# see CONTRIBUTING.md#releasing before bumping it.
+dynamic = ["version"]
 description = "Transform images into automated brush strokes"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -61,6 +63,9 @@ pyaint = "pyaint.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["pyaint*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "pyaint.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

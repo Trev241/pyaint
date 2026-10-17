@@ -42,30 +42,44 @@ pip install -e ".[build]"
 python scripts/build_exe.py    # wraps: pyinstaller --noconfirm --clean pyaint.spec
 ```
 
-The result is a single `dist/pyaint.exe`. `pyaint.spec` is checked in, so the
-local build and a release build agree. When frozen, `config.json`, `cache/` and
-`targets/` are written next to the executable, so smoke-test it from a writable
-folder. The test suite cannot test the frozen build: run it, find a canvas,
-load an image, draw once, and check the console for missing-module errors.
+The result is a single `dist/pyaint.exe` plus `dist/pyaint.exe.sha256`.
+`pyaint.spec` is checked in, so the local build and a release build agree. When
+frozen, `config.json`, `cache/` and `targets/` are written next to the
+executable, so smoke-test it from a writable folder. The test suite cannot test
+the frozen build: run it, find a canvas, load an image, draw once, and check the
+console for missing-module errors.
 
 ## Releasing
 
-1. Bump `version` in `pyproject.toml`.
+Releases use calendar versioning, `YYYY.MINOR.PATCH` (for example `2026.1.0`):
+the release year, the feature-release number within that year (starting at 1),
+and a hotfix number (starting at 0). Tags take a `v` prefix (`v2026.1.0`). This
+is CalVer, not SemVer: a new year does not promise a breaking change.
+
+1. Bump `__version__` in `pyaint/__init__.py`. `pyproject.toml` reads it
+dynamically, so there is one source of truth.
 2. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new
-   `## [x.y.z] - YYYY-MM-DD` heading (Keep a Changelog format).
-3. Commit (`Release vX.Y.Z`), tag and push:
+   `## [YYYY.MINOR.PATCH] - YYYY-MM-DD` heading (Keep a Changelog format).
+3. Build the release; the script also writes `dist/pyaint.exe.sha256`:
 
    ```bash
-   git tag -a vX.Y.Z -m "vX.Y.Z"
-   git push origin <branch>
-   git push origin vX.Y.Z
+   python scripts/build_exe.py
    ```
 
-4. On GitHub, **Releases → Draft a new release**, choose the tag, use the
-   changelog as the notes, attach `dist/pyaint.exe` (and its `.sha256` if you
-   generate one), and publish. Do the same with `gh release create
-   vX.Y.Z dist/pyaint.exe --title "vX.Y.Z" --notes-file CHANGELOG.md --latest`.
-5. Verify the release page shows the asset and that
+4. Commit (`Release vYYYY.MINOR.PATCH`), tag and push:
+
+   ```bash
+   git tag -a vYYYY.MINOR.PATCH -m "vYYYY.MINOR.PATCH"
+   git push origin <branch>
+   git push origin vYYYY.MINOR.PATCH
+   ```
+
+5. On GitHub, **Releases → Draft a new release**, choose the tag, use the
+   changelog as the notes, attach `dist/pyaint.exe` and its `.sha256`, and
+   publish. Do the same with `gh release create
+   vYYYY.MINOR.PATCH dist/pyaint.exe dist/pyaint.exe.sha256 --title
+   "vYYYY.MINOR.PATCH" --notes-file CHANGELOG.md --latest`.
+6. Verify the release page shows the asset and that
    `.../releases/latest/download/pyaint.exe` resolves.
 
 ### Updating the demo

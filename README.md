@@ -85,11 +85,12 @@ python main.py
 That's it. For skribbl.io the first draw takes about a minute.
 
 > **Display scaling / multi-monitor:** Pyaint captures the **primary monitor**
-> at physical pixels. It works at 125%/150% scaling, but saved canvas/palette
-> boxes are absolute pixels: after changing scaling or moving to another
-> monitor, re-run **Find the canvas** or **Pick the regions**. Mixed-DPI
-> multi-monitor setups (a target on a different monitor from the primary) are
-> not supported.
+> at physical pixels and is per-monitor DPI aware, so its own window reflows
+> when Windows scaling changes or the window moves between displays. Saved
+> canvas/palette boxes are absolute pixels though: after changing scaling or
+> moving to another monitor, re-run **Find the canvas** or **Pick the regions**.
+> Mixed-DPI multi-monitor setups (a target on a different monitor from the
+> primary) are not supported.
 
 > **Honest note:** auto-detection is tuned against specific window layouts and
 > resolutions. When it cannot find a region it falls back to manual teaching,
@@ -202,11 +203,14 @@ means fewer, bigger strokes. **Save the plan for next time** skips processing
 on repeat runs but does not change drawing speed.
 
 **Does it work at 125% / 150% scaling?**
-Yes, on the primary monitor. Pyaint is per-monitor DPI aware and converts manual
-picks to physical pixels, so it does not inherit the old scale. Saved canvas and
-palette boxes are not rescaled when you change Windows scaling, though: re-run
-**Find the canvas** or **Pick the regions** afterwards. A target on a different
-monitor from the primary is not supported.
+Yes, on the primary monitor. Pyaint tells Windows it is per-monitor DPI aware
+before any automation library loads, so changing Windows scaling or moving the
+window between displays reflows it immediately instead of leaving it stretched
+at the old scale. Manual picks are stored as physical pixels, so they do not
+inherit the old scale either. Saved canvas and palette boxes are not rescaled
+when you change Windows scaling, though: re-run **Find the canvas** or **Pick
+the regions** afterwards. A target on a different monitor from the primary is
+not supported.
 
 **How do I stop or pause?**
 `ESC` stops the current run and `P` pauses/resumes. The UI stays responsive

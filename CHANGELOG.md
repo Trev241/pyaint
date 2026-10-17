@@ -3,7 +3,8 @@
 All notable changes to Pyaint are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project aims to follow [Semantic Versioning](https://semver.org/).
+and this project uses calendar versioning with a
+[`YYYY.MINOR.PATCH`](https://calver.org/) scheme for releases.
 
 > **Maintenance note:** add new entries under `[Unreleased]` as work happens.
 > When releasing, move those entries under a new version heading with the date.
@@ -12,7 +13,22 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2026.1.0] - 2026-10-17
+
 ### Fixed
+- **Pyaint now stays per-monitor DPI aware, so it reflows after a display
+  change.** `pyautogui` and `pyscreeze` call `SetProcessDPIAware()` when they
+  are imported, which pins the whole process to *system* DPI awareness before
+  Qt can ask for per-monitor v2. Windows then bitmap-stretches the window after
+  a scaling or monitor change: the layout keeps the old widths (wrapped text and
+  dead space), Qt never receives `WM_DPICHANGED`, and screen metrics can stay in
+  the scale that was active when the process started. The package now claims
+  `PER_MONITOR_AWARE_V2` from `pyaint/__init__.py`, before `pyautogui` can run
+  its import-time call, so the window and the physical cursor/screenshot space
+  follow the display automatically. Startup logs the claimed level and warns if
+  an unusual import order pinned a lesser one. Regression tests:
+  `test_pyaint_claims_per_monitor_dpi_before_pyautogui_loads`,
+  `test_claim_is_idempotent`.
 - **Manual teaching no longer inherits a previous display's scale.** Picks were
   built from Qt's logical global point and mapped through
   `QGuiApplication.primaryScreen()`; after changing which monitor is primary (or
@@ -38,6 +54,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   `test_notice_raised_before_show_lands_bottom_right`.
 
 ### Changed
+- **Releases now use calendar versioning (`YYYY.MINOR.PATCH`).** This is
+  `2026.1.0`, the first feature release of 2026. `pyproject.toml` reads the
+  version from `pyaint.__version__`, so the package, wheel and frozen build
+  agree; see `CONTRIBUTING.md` for the release steps.
 - **Edge tracing is the default; Outline is retired from the rail.** The mode
   rail now offers Layered, Slotted and Edge tracing. The Outline planner, its
   settings and its tests are untouched, and the hidden state holder still knows

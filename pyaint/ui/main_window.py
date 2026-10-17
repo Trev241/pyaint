@@ -2949,6 +2949,21 @@ class MainWindow(InspectorMixin, QMainWindow):
 
 def run(bot: Bot) -> int:
     """Create the application and show the main window (blocking)."""
+    from pyaint import dpi
+
+    # The package __init__ already claimed per-monitor awareness before
+    # pyautogui was imported; this is the belt-and-braces check in case the
+    # module was imported through an unusual path. Report it either way so a
+    # stretched window after a display change is diagnosable from the log.
+    awareness = dpi.enable_per_monitor_dpi()
+    log.info(f"[DPI] Process awareness: {awareness}.")
+    if not awareness.startswith("per-monitor"):
+        log.warning(
+            "[DPI] Pyaint is not per-monitor aware; Windows will bitmap-stretch "
+            "it after a display-scaling change. Restart Pyaint so it can claim "
+            "per-monitor awareness before pyautogui is imported."
+        )
+
     app = QApplication.instance() or QApplication([])
     app.setApplicationName("Pyaint")
     from pyaint.ui import theme
