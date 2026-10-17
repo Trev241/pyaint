@@ -21,7 +21,10 @@ a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[],
-    datas=[("assets/pyaint.ico", "assets")],
+    datas=[
+        ("assets/pyaint.ico", "assets"),
+        ("assets/koala.png", "assets"),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

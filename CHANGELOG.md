@@ -163,6 +163,14 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   no planner, detection, or drawing changes.
 
 ### Added
+- **First run opens with a bundled sample.** When there is no remembered image,
+  the source pane loads `assets/koala.png`, so a new user can press Start
+  immediately instead of hunting for a picture first. The fallback is never
+  copied into `last_image.png` (it is not the user's "last image"), a remembered
+  image always wins, and the sample is bundled in `pyaint.spec` so the frozen
+  exe has it too. Art by Ahmed Hossam via Unsplash (Unsplash License).
+  `DEFAULT_SAMPLE` is blanked by the UI test fixture, with regression tests for
+  the fallback and for remembered-image precedence.
 - `icons.chevron` and `SetupRow` (accessible name/description, focus ring,
   Space/Enter, 120ms chevron rotation); `SheetCard` for QSS cards that need
   elevation; `paper.soft_shadow`.
@@ -849,6 +857,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   post-stroke path previously returned `'terminated'` but left `drawing` set).
 
 ### Removed
+- The old colour-wheel demo image (`assets/sample.png`). It was only ever a
+  README illustration and a sketch-mode fixture; the bundled koala replaces it
+  in both roles.
 - **Custom-colour capability retired.** The long-standing colour-dialog path
   (built for the Windows 10 Paint "Edit Colors" dialog) is gone: deleted
   `pyaint/calibration.py` (`calibrate_custom_colors`,

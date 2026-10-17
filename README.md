@@ -22,7 +22,11 @@ https://github.com/user-attachments/assets/50f2f344-8ca9-439b-8722-0175356ad59e
 
 <sub>MS Paint — sampled palette and double-click colour mode.</sub>
 
-![A picture drawn by Pyaint](assets/sample.png)
+![The bundled koala sample](assets/koala.png)
+
+<sub>The bundled sample Pyaint opens with — a koala by Ahmed Hossam via
+[Unsplash](https://unsplash.com/illustrations/a-cute-koala-climbs-a-tree-branch-5csXP8McYiA)
+(Unsplash License).</sub>
 
 ## Supported apps
 
@@ -127,7 +131,9 @@ source checkout) and are written whenever you change something in the UI.
 
 The last image you load is remembered too: it is copied to `last_image.png`
 next to `config.json` and restored on the next launch, whether you picked it
-from the gallery or uploaded it. **Reset config** clears it.
+from the gallery or uploaded it. **Reset config** clears it. On a first run (or
+after a reset) Pyaint falls back to the bundled `assets/koala.png` sample; that
+fallback is never copied into `last_image.png`.
 
 | Setting | Range | Meaning |
 |---------|-------|---------|

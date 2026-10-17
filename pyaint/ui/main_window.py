@@ -130,6 +130,13 @@ _PATH_LIKE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|\.{1,2}[\\/]|[\\/]|~)")
 COLUMN_WIDTH = 300
 MARGIN = 14
 GAP = 14
+
+#: The bundled sample shown when there is no remembered image. A frozen build
+#: unpacks it to ``RESOURCE_ROOT`` (see ``pyaint.spec``); a source checkout
+#: reads it straight from ``assets/``.
+DEFAULT_SAMPLE = os.path.join(paths.RESOURCE_ROOT, "assets", "koala.png")
+
+
 class DeskBody(QWidget):
     """A full-width canvas with the tool column drawn over it.
 
@@ -2017,11 +2024,17 @@ class MainWindow(InspectorMixin, QMainWindow):
     # ------------------------------------------------------------------
     def _load_default_image(self) -> None:
         # Restore the image selected last session (a durable copy next to
-        # ``config.json``). On a first run the pane stays empty rather than
-        # silently loading a bundled sample.
+        # ``config.json``), else fall back to the bundled sample so a first run
+        # still has something to draw. The sample is never *remembered*: it
+        # stays a fallback rather than becoming the user's "last image", so a
+        # new bundle reaches existing installs and ``last_image.png`` is only
+        # ever a real pick.
         path = self._last_image_path
         if path and os.path.exists(path):
             self._set_image_path(path)
+            return
+        if DEFAULT_SAMPLE and os.path.exists(DEFAULT_SAMPLE):
+            self._set_image_path(DEFAULT_SAMPLE, remember=False)
             return
         self._imname = ""
         self._source_view.set_placeholder(
@@ -2266,14 +2279,15 @@ class MainWindow(InspectorMixin, QMainWindow):
             self._url_edit.setText(path)
         self._set_image_path(path)
 
-    def _set_image_path(self, path: str) -> None:
+    def _set_image_path(self, path: str, remember: bool = True) -> None:
         try:
             image = Image.open(path)
         except Exception as exc:
             self._set_status(f"Could not open image: {exc}")
             return
         self._imname = path
-        self._remember_last_image(path)
+        if remember:
+            self._remember_last_image(path)
         self._source_pixmap = pil_to_qpixmap(image)
         self._source_meta = f"{image.width} \u00d7 {image.height} px"
         # Keep the source pane current so Compare and Source stay in sync.

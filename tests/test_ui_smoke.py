@@ -40,9 +40,13 @@ def isolated_config(tmp_path, monkeypatch):
     config (and delete the real cache) on close.
     """
     from pyaint import paths
+    from pyaint.ui import main_window as main_window_module
 
     monkeypatch.setattr(paths, "PROJECT_ROOT", str(tmp_path))
     monkeypatch.setattr(paths, "CONFIG_PATH", str(tmp_path / "config.json"))
+    # Keep the old "first run is empty" semantics for every test that does not
+    # opt in to the bundled sample explicitly.
+    monkeypatch.setattr(main_window_module, "DEFAULT_SAMPLE", "")
     yield
 
 
@@ -143,8 +147,33 @@ def test_outline_settings_persist(app, tmp_path, monkeypatch):
         restored.close()
 
 
-def test_last_selected_image_restores_on_restart(app, tmp_path, monkeypatch):
+def test_bundled_sample_loads_when_nothing_is_remembered(app, tmp_path, monkeypatch):
+    from pyaint.ui import main_window as main_window_module
+
     monkeypatch.chdir(tmp_path)
+    sample = tmp_path / "koala.png"
+    Image.new("RGB", (8, 6), (200, 120, 40)).save(sample)
+    monkeypatch.setattr(main_window_module, "DEFAULT_SAMPLE", str(sample))
+
+    window = MainWindow(Bot())
+    try:
+        assert window._imname == str(sample)
+        assert window._has_image()
+        # A fallback must not masquerade as the user's last image.
+        assert window._last_image_path == ""
+        assert not os.path.exists(window._last_image_file)
+    finally:
+        window.close()
+
+
+def test_last_selected_image_restores_on_restart(app, tmp_path, monkeypatch):
+    from pyaint.ui import main_window as main_window_module
+
+    monkeypatch.chdir(tmp_path)
+    # A bundled sample is present, but a remembered image must still win.
+    sample = tmp_path / "sample.png"
+    Image.new("RGB", (8, 6), (0, 0, 255)).save(sample)
+    monkeypatch.setattr(main_window_module, "DEFAULT_SAMPLE", str(sample))
     source = tmp_path / "picked.png"
     Image.new("RGBA", (6, 4), (255, 0, 0, 255)).save(source)
 
