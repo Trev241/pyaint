@@ -337,7 +337,6 @@ class MainWindow(InspectorMixin, QMainWindow):
         # One desk: a full-width canvas with the tool column drawn over it,
         # then the docked voice bar.
         self._inspector = self._build_inspector()
-        self._drawing_section.setVisible(False)
         canvas = self._build_canvas()  # sets self._preview_stage
         self._desk = DeskBody(self._inspector, canvas)
         root.addWidget(self._desk, 1)
@@ -398,7 +397,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         return box
 
     def _build_sidebar_head(self, layout) -> None:
-        """Insert Mode, Look and the Fine-tune toggle at the pane's top."""
+        """Insert Mode and Look at the pane's top."""
         layout.insertWidget(layout.count() - 1, self._build_mode_block())
 
         look_box = QWidget()
@@ -418,13 +417,6 @@ class MainWindow(InspectorMixin, QMainWindow):
         look_layout.addWidget(self._look_control)
         layout.insertWidget(layout.count() - 1, look_box)
 
-        self._customize_btn = QPushButton("\u25b8  Fine-tune")
-        self._customize_btn.setObjectName("Disclosure")
-        self._customize_btn.setCheckable(True)
-        self._customize_btn.setToolTip("Reveal the tuning knobs for this mode")
-        self._customize_btn.toggled.connect(self._on_customize_toggled)
-        layout.insertWidget(layout.count() - 1, self._customize_btn)
-
     def _on_mode_rail_changed(self, mode: str) -> None:
         index = self._mode_combo.findData(mode)
         if index >= 0:
@@ -442,17 +434,6 @@ class MainWindow(InspectorMixin, QMainWindow):
         layout.setSpacing(0)
         layout.addWidget(self._build_content(), 1)
         return host
-
-    def _on_customize_toggled(self, visible: bool) -> None:
-        # The column persists; Customize/Fine-tune only reveals the knobs.
-        visible = bool(visible)
-        section = getattr(self, "_drawing_section", None)
-        if section is not None:
-            section.setVisible(visible)
-        button = getattr(self, "_customize_btn", None)
-        if button is not None:
-            arrow = "\u25be" if visible else "\u25b8"
-            button.setText(f"{arrow}  Fine-tune")
 
     def _update_guide(self, kicker: str | None = None, text: str | None = None) -> None:
         """Set the voice note; with no text, describe the active mode."""
@@ -932,7 +913,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         self, text: str, icon_name: str, slot, tooltip: str = ""
     ) -> QPushButton:
         button = QPushButton(text)
-        button.setObjectName("ToolBarButton")
+        button.setObjectName("InspectorButton")
         button.setIcon(icon(icon_name, self.tokens["fg"], 16))
         button.setIconSize(QSize(16, 16))
         button.setToolTip(tooltip or text)
@@ -1582,7 +1563,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         Bot.OUTLINE: (
             "Outline traces the outlines of colour regions \u2014 it suits "
             "drawings and flat art. Pick a Look, then press Start drawing. "
-            "Fine-tune only if the lines need it."
+            "Open Drawing only if the lines need it."
         ),
         Bot.SKETCH: (
             "Edge tracing turns the image's edges into black line art. Pick "

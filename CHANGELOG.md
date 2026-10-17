@@ -26,6 +26,17 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   `test_notice_raised_before_show_lands_bottom_right`.
 
 ### Changed
+- **Inspector sections share one content rail and read as headings.** Section
+  titles, hints, bodies and diagnostic buttons now all start on the same 12px
+  inset; collapsible headers use the same dark title type as plain sections and
+  carry a painted chevron at the trailing edge. Nested groups (`Matching`,
+  `Input`, Sketch's `Advanced settings`) add no second indent, body-level notes
+  use the field-hint style instead of double-padding a section hint, and the
+  diagnostic buttons are left-aligned instead of centred. The separate
+  `Fine-tune` disclosure is gone: `Drawing` is itself the collapsible section,
+  so the knobs are one clearly named group rather than a group under a second
+  heading. Regression tests: `test_collapsible_section_toggles_from_its_header`,
+  `test_section_insets_share_one_content_rail`.
 - **Docs collapsed back to one README.** Deleted the `docs/` tree (index, API
   reference, configuration, architecture, releasing, troubleshooting) and the
   duplicate summaries that came with it. The README is now the hook + how-to +

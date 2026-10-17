@@ -96,7 +96,7 @@ def test_mode_specific_controls_switch_with_stroke_mode(app, tmp_path, monkeypat
     bot = Bot()
     window = MainWindow(bot)
     try:
-        window._customize_btn.setChecked(True)  # pane is hidden by default
+        window._drawing_section.set_expanded(True)  # knobs start collapsed
         layered = window._mode_combo.findData(Bot.LAYERED)
         outline = window._mode_combo.findData(Bot.OUTLINE)
 
@@ -222,7 +222,7 @@ def test_sketch_mode_controls_switch_and_persist(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     window = MainWindow(Bot())
     try:
-        window._customize_btn.setChecked(True)  # pane is hidden by default
+        window._drawing_section.set_expanded(True)  # knobs start collapsed
         window._mode_combo.setCurrentIndex(
             window._mode_combo.findData(Bot.SKETCH)
         )
@@ -462,6 +462,42 @@ def test_setup_row_toggles_itself(app):
         assert seen == [True, False]
     finally:
         row.close()
+
+
+def test_collapsible_section_toggles_from_its_header(app):
+    from pyaint.ui.widgets import CollapsibleSection
+
+    section = CollapsibleSection("Diagnostics")
+    seen = []
+    section.toggled.connect(seen.append)
+    try:
+        assert section.is_expanded() is False
+        section.header.toggle()
+        assert section.is_expanded() is True
+        assert seen == [True]
+        section.set_expanded(False)  # programmatic: no extra emission
+        assert section.is_expanded() is False
+        assert seen == [True]
+    finally:
+        section.close()
+
+
+def test_section_insets_share_one_content_rail(app):
+    from pyaint.ui.widgets import CollapsibleSection, Section
+
+    top = Section("Top")
+    nested = Section("Nested", nested=True)
+    top_fold = CollapsibleSection("Top fold")
+    nested_fold = CollapsibleSection("Nested fold", nested=True)
+    try:
+        assert top._body_layout.contentsMargins().left() == 12
+        assert top_fold._body_layout.contentsMargins().left() == 12
+        # A nested group adds no second indent: its parent body supplies it.
+        assert nested._body_layout.contentsMargins().left() == 0
+        assert nested_fold._body_layout.contentsMargins().left() == 0
+    finally:
+        for widget in (top, nested, top_fold, nested_fold):
+            widget.close()
 
 
 def test_detection_checklist(app):
@@ -1242,7 +1278,7 @@ def test_mspaint_double_click_toggle_persists(app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     window = MainWindow(Bot())
     try:
-        window._customize_btn.setChecked(True)  # pane is hidden by default
+        window._drawing_section.set_expanded(True)  # knobs start collapsed
         # Desktop recipes expose it; browser recipes hide it.
         assert window._chk_mspaint.isVisibleTo(window)
         window.profile.target = "skribbl"

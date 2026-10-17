@@ -78,8 +78,8 @@ python main.py
    drop a file, paste a URL, or type words to search online. **Source** chooses
    Openverse (default) or Wikimedia Commons for searches.
 4. Check **Source / Preview / Compare**. Choose the mode and **Look** in the
-   column, and open **Customize** for detail and pacing. The preview updates as
-   you go.
+   column, then expand **Drawing** for detail and pacing. The preview updates
+   as you go.
 5. Click **Start drawing**. Press `ESC` to stop, `P` to pause/resume.
 
 That's it. For skribbl.io the first draw takes about a minute.
@@ -206,7 +206,8 @@ fetch an image you give it by URL, or to search Openverse / Wikimedia Commons
 when you type search words.
 
 **How do I reset everything?**
-Open **Customize → Reset → Reset all settings**. That deletes `config.json`,
+Click **Reset all settings** at the bottom of the settings column. That
+deletes `config.json`,
 the taught positions, the remembered image and the caches.
 
 **Can I use this on skribbl.io?**

@@ -585,32 +585,185 @@ class SetupRow(QWidget):
         painter.end()
 
 
-class CollapsibleSection(QFrame):
-    """A section whose body can be expanded/collapsed by clicking its header."""
+class _SectionChevron(QWidget):
+    """A small painted chevron: down when open, right when collapsed."""
 
-    def __init__(self, title: str, expanded: bool = False, parent=None):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(16, 16)
+        self._open = False
+
+    def set_open(self, open_: bool) -> None:
+        open_ = bool(open_)
+        if open_ != self._open:
+            self._open = open_
+            self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        t = tokens(self)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor(t.get("fg_muted", "#6B6157")), 1.6)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.translate(self.width() / 2.0, self.height() / 2.0)
+        painter.rotate(0.0 if self._open else -90.0)
+        path = QPainterPath(QPointF(-3.5, -2.0))
+        path.lineTo(QPointF(0.0, 1.5))
+        path.lineTo(QPointF(3.5, -2.0))
+        painter.drawPath(path)
+
+
+class SectionHeader(QWidget):
+    """A section title, with an optional disclosure chevron on the right.
+
+    Collapsible headers use the same dark title type as a plain section, so a
+    closed section still reads as a heading rather than a muted label. For an
+    interactive header the whole row is the click target (pointer cursor, hover
+    tint, Space/Enter), and the chevron sits at the trailing edge where a
+    disclosure is expected.
+    """
+
+    toggled = Signal(bool)
+
+    def __init__(
+        self,
+        title: str,
+        collapsible: bool = False,
+        nested: bool = False,
+        parent: Optional[QWidget] = None,
+    ):
+        super().__init__(parent)
+        self.setObjectName("SectionHeader")
+        self.setProperty("collapsible", collapsible)
+        self.setProperty("nested", nested)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self._collapsible = collapsible
+        self._open = False
+
+        # The header owns the section inset, so the title and the body below it
+        # share one rail. A nested header adds no inset: its parent body already
+        # provides it.
+        layout = QHBoxLayout(self)
+        if nested:
+            layout.setContentsMargins(0, 8, 0, 2)
+        else:
+            layout.setContentsMargins(12, 12, 12, 2)
+        layout.setSpacing(6)
+
+        self._title = QLabel(title)
+        self._title.setObjectName("SectionSubtitle" if nested else "SectionTitle")
+        self._title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self._title, 1)
+
+        self._chevron = _SectionChevron()
+        self._chevron.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._chevron.setVisible(collapsible)
+        layout.addWidget(self._chevron)
+
+        if collapsible:
+            self.setCursor(Qt.PointingHandCursor)
+            self.setFocusPolicy(Qt.StrongFocus)
+            self.setAccessibleName(title)
+            self.setAccessibleDescription(
+                "Press to expand or collapse this section."
+            )
+            self._set_chevron(False)
+
+    # -- state ---------------------------------------------------------
+    def is_open(self) -> bool:
+        return self._open
+
+    def set_open(self, open_: bool) -> None:
+        """Set the disclosure state without emitting ``toggled``."""
+        if not self._collapsible:
+            return
+        self._open = bool(open_)
+        self._set_chevron(self._open)
+
+    def toggle(self) -> None:
+        if not self._collapsible:
+            return
+        self.set_open(not self._open)
+        self.toggled.emit(self._open)
+
+    def _set_chevron(self, open_: bool) -> None:
+        self._chevron.set_open(open_)
+        if self._collapsible:
+            self.setAccessibleDescription(
+                "Expanded. Press to collapse this section."
+                if open_
+                else "Collapsed. Press to expand this section."
+            )
+
+    # -- events --------------------------------------------------------
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if (
+            self._collapsible
+            and event.button() == Qt.LeftButton
+            and self.rect().contains(event.position().toPoint())
+        ):
+            self.toggle()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if self._collapsible and event.key() in (
+            Qt.Key_Space,
+            Qt.Key_Return,
+            Qt.Key_Enter,
+        ):
+            self.toggle()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
+class CollapsibleSection(QFrame):
+    """A section whose body can be expanded/collapsed from its header."""
+
+    toggled = Signal(bool)
+
+    def __init__(
+        self,
+        title: str,
+        expanded: bool = False,
+        nested: bool = False,
+        hint: Optional[str] = None,
+        parent: Optional[QWidget] = None,
+    ):
         super().__init__(parent)
         self.setObjectName("Section")
+        self.setProperty("nested", nested)
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 8)
-        self._layout.setSpacing(4)
+        self._layout.setContentsMargins(0, 0, 0, 4 if nested else 8)
+        self._layout.setSpacing(2)
 
-        self._toggle = QToolButton()
-        self._toggle.setObjectName("CollapsibleHeader")
-        self._toggle.setText(title)
-        self._toggle.setCheckable(True)
-        self._toggle.setChecked(expanded)
-        self._toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self._toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
-        self._toggle.clicked.connect(self._on_toggle)
-        self._layout.addWidget(self._toggle)
+        self._header = SectionHeader(title, collapsible=True, nested=nested)
+        self._header.toggled.connect(self._on_toggle)
+        self._layout.addWidget(self._header)
+
+        if hint:
+            hint_label = QLabel(hint)
+            hint_label.setObjectName("SectionSubHint" if nested else "SectionHint")
+            hint_label.setWordWrap(True)
+            self._layout.addWidget(hint_label)
 
         self._body = QWidget()
         self._body_layout = QVBoxLayout(self._body)
-        self._body_layout.setContentsMargins(0, 0, 0, 0)
+        inset = 0 if nested else 12
+        self._body_layout.setContentsMargins(inset, 0, inset, 0)
         self._body_layout.setSpacing(4)
-        self._body.setVisible(expanded)
         self._layout.addWidget(self._body)
+
+        self.set_expanded(expanded)
+
+    @property
+    def header(self) -> SectionHeader:
+        return self._header
 
     def add(self, widget: QWidget) -> QWidget:
         self._body_layout.addWidget(widget)
@@ -619,45 +772,60 @@ class CollapsibleSection(QFrame):
     def add_layout(self, layout) -> None:
         self._body_layout.addLayout(layout)
 
+    def is_expanded(self) -> bool:
+        return self._header.is_open()
+
     def set_expanded(self, expanded: bool) -> None:
-        """Open or close the body without needing a click on the header."""
-        self._toggle.setChecked(expanded)
-        self._on_toggle(expanded)
+        """Open or close the body without emitting ``toggled``."""
+        self._header.set_open(expanded)
+        self._body.setVisible(bool(expanded))
 
     def _on_toggle(self, checked: bool) -> None:
-        self._toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
-        self._body.setVisible(checked)
+        self._body.setVisible(bool(checked))
+        self.toggled.emit(bool(checked))
 
 
 class Section(QFrame):
     """A titled group of controls with a bottom divider.
 
-    Controls live in an inner container with horizontal padding so inputs and
-    buttons no longer touch the edges of the side panel.
+    Controls live in an inner container with the same horizontal inset as the
+    title, so every section shares one content rail. ``nested`` drops the
+    inset (and the divider) for subgroups inside another section's body.
     """
 
-    def __init__(self, title: str, hint: Optional[str] = None, parent=None):
+    def __init__(
+        self,
+        title: str,
+        hint: Optional[str] = None,
+        nested: bool = False,
+        parent: Optional[QWidget] = None,
+    ):
         super().__init__(parent)
         self.setObjectName("Section")
+        self.setProperty("nested", nested)
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 8)
-        self._layout.setSpacing(4)
+        self._layout.setContentsMargins(0, 0, 0, 4 if nested else 8)
+        self._layout.setSpacing(2)
 
-        title_label = QLabel(title)
-        title_label.setObjectName("SectionTitle")
-        self._layout.addWidget(title_label)
+        self._header = SectionHeader(title, nested=nested)
+        self._layout.addWidget(self._header)
 
         if hint:
             hint_label = QLabel(hint)
-            hint_label.setObjectName("SectionHint")
+            hint_label.setObjectName("SectionSubHint" if nested else "SectionHint")
             hint_label.setWordWrap(True)
             self._layout.addWidget(hint_label)
 
         self._body = QWidget()
         self._body_layout = QVBoxLayout(self._body)
-        self._body_layout.setContentsMargins(12, 0, 12, 0)
+        inset = 0 if nested else 12
+        self._body_layout.setContentsMargins(inset, 0, inset, 0)
         self._body_layout.setSpacing(4)
         self._layout.addWidget(self._body)
+
+    @property
+    def header(self) -> SectionHeader:
+        return self._header
 
     def add(self, widget: QWidget) -> QWidget:
         self._body_layout.addWidget(widget)

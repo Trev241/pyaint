@@ -245,27 +245,41 @@ def stylesheet(tokens: dict | None = None) -> str:
         background: transparent;
         border-bottom: 1px solid {t['border']};
     }}
+    #Section[nested="true"] {{
+        border-bottom: none;
+    }}
+    #SectionHeader {{
+        background: transparent;
+    }}
+    #SectionHeader[collapsible="true"] {{
+        border-radius: 6px;
+    }}
+    #SectionHeader[collapsible="true"]:hover {{
+        background: {t['bg_hover']};
+    }}
+    #SectionHeader[collapsible="true"]:focus {{
+        border: 1px solid {t['accent']};
+    }}
     #SectionTitle {{
         color: {t['fg']};
         font-size: 13px;
         font-weight: 600;
-        padding: 12px 12px 2px 12px;
+    }}
+    #SectionSubtitle {{
+        color: {t['fg']};
+        font-size: 12px;
+        font-weight: 600;
     }}
     #SectionHint {{
         color: {t['fg_dim']};
         font-size: 11px;
         padding: 0 12px 6px 12px;
     }}
-    #CollapsibleHeader {{
-        background: transparent;
-        border: none;
-        color: {t['fg_muted']};
-        font-size: 13px;
-        font-weight: 600;
-        padding: 12px 10px 2px 8px;
-        text-align: left;
+    #SectionSubHint {{
+        color: {t['fg_dim']};
+        font-size: 11px;
+        padding: 0;
     }}
-    #CollapsibleHeader:hover {{ color: {t['fg']}; }}
 
     /* --- Setup row / panel ---------------------------------------------- */
     #SetupReason {{ color: {t['fg_muted']}; font-size: 12px; }}
@@ -450,6 +464,16 @@ def stylesheet(tokens: dict | None = None) -> str:
         padding: 4px 10px;
     }}
     QPushButton#ToolBarButton:hover {{
+        background: {t['bg_hover']};
+    }}
+    /* Inspector verbs align with the section content rail, not centre. */
+    QPushButton#InspectorButton {{
+        background: transparent;
+        border: 1px solid transparent;
+        padding: 4px 8px 4px 0;
+        text-align: left;
+    }}
+    QPushButton#InspectorButton:hover {{
         background: {t['bg_hover']};
     }}
 
@@ -822,17 +846,6 @@ def stylesheet(tokens: dict | None = None) -> str:
         color: {t['fg_dim']};
         font-size: 12px;
     }}
-    QPushButton#Disclosure {{
-        background: transparent;
-        border: none;
-        color: {t['fg_muted']};
-        font-size: 13px;
-        font-weight: 600;
-        padding: 12px 0 4px 0;
-        text-align: left;
-    }}
-    QPushButton#Disclosure:hover {{ color: {t['fg']}; }}
-    QPushButton#Disclosure:checked {{ color: {t['fg']}; }}
     QPushButton#Readout {{
         background: {t['bg_input']};
         border: 1px solid {t['border_input']};

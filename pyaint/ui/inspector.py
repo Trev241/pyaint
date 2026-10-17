@@ -73,9 +73,9 @@ class InspectorMixin:
         return scroll, layout
 
     def _build_inspector(self) -> QWidget:
-        # "Customize" is a regular quad: it holds the most text and controls,
-        # so it stays a clean rounded panel (the mode highlight carries the
-        # irregular character instead).
+        # The settings column is a regular quad: it holds the most text and
+        # controls, so it stays a clean rounded panel (the mode highlight
+        # carries the irregular character instead).
         side = PaperSurface("column", regular=True)
         side.setFixedWidth(300)
         side_layout = QVBoxLayout(side)
@@ -87,11 +87,14 @@ class InspectorMixin:
 
         scroll, layout = self._scroll_panel()
 
-        # Mode + Look + the Fine-tune toggle lead the column, so the decision
-        # and the knobs that refine it are never separated.
+        # Mode + Look lead the column; the collapsible Drawing section below
+        # them holds the knobs that refine the chosen mode.
         self._build_sidebar_head(layout)
 
-        drawing = Section("Drawing", "How slowly and how finely Pyaint paints.")
+        drawing = CollapsibleSection(
+            "Drawing",
+            hint="How slowly and how finely Pyaint paints.",
+        )
         self._drawing_section = drawing
 
         # Kept in this order: index matches ``Bot.settings`` (delay, step, jump).
@@ -312,12 +315,12 @@ class InspectorMixin:
         sketch_layout = QVBoxLayout(self._sketch_controls)
         sketch_layout.setContentsMargins(0, 0, 0, 0)
         sketch_layout.setSpacing(6)
-        self._sketch_advanced = CollapsibleSection("Advanced settings")
+        self._sketch_advanced = CollapsibleSection("Advanced settings", nested=True)
         advanced_hint = QLabel(
             "Fine-tune the chosen preset. Changing any value switches the "
             "preset to Custom."
         )
-        advanced_hint.setObjectName("SectionHint")
+        advanced_hint.setObjectName("FieldHint")
         advanced_hint.setWordWrap(True)
         self._sketch_advanced.add(advanced_hint)
         for widget in (
@@ -368,7 +371,7 @@ class InspectorMixin:
         diag_note = QLabel(
             "Calibration aids. For normal use, just press Start drawing."
         )
-        diag_note.setObjectName("SectionHint")
+        diag_note.setObjectName("FieldHint")
         diag_note.setWordWrap(True)
         diagnostics.add(diag_note)
         self._btn_precompute = self._tool_button(
@@ -391,7 +394,7 @@ class InspectorMixin:
 
         redraw = Section("Redraw region", "Draw only a rectangle you pick on screen.")
         self._region_label = QLabel("No area selected yet.")
-        self._region_label.setObjectName("SectionHint")
+        self._region_label.setObjectName("FieldHint")
         self._region_label.setWordWrap(True)
         redraw.add(self._region_label)
         row2 = QHBoxLayout()
@@ -415,7 +418,7 @@ class InspectorMixin:
             "Where Pyaint finds the canvas and palette. Switch targets above.",
         )
         self._detection_label = QLabel("Pyaint doesn't know where your canvas is yet.")
-        self._detection_label.setObjectName("SectionHint")
+        self._detection_label.setObjectName("FieldHint")
         self._detection_label.setWordWrap(True)
         env.add(self._detection_label)
         # Target-specific: some desktop palettes need a double-click to select.
@@ -429,7 +432,7 @@ class InspectorMixin:
             "Finding the canvas needs a blank canvas and the target app visible "
             "on the primary monitor at 100% display scaling."
         )
-        needs.setObjectName("SectionHint")
+        needs.setObjectName("FieldHint")
         needs.setWordWrap(True)
         env.add(needs)
         layout.insertWidget(layout.count() - 1, env)
@@ -470,7 +473,7 @@ class InspectorMixin:
                 widget.installEventFilter(guard)
 
     def _build_advanced_into(self, container) -> None:
-        matching = Section("Matching")
+        matching = Section("Matching", nested=True)
         metric_row = QHBoxLayout()
         metric_label = QLabel("Colour matching")
         metric_label.setObjectName("FieldHint")
@@ -499,7 +502,7 @@ class InspectorMixin:
         matching.add_layout(metric_row)
         container.add(matching)
 
-        keys = Section("Input")
+        keys = Section("Input", nested=True)
         key_row = QHBoxLayout()
         key_label = QLabel("Pause key")
         key_label.setObjectName("FieldLabel")

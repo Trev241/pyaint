@@ -213,7 +213,7 @@ CUSTOM_LOOK = {
     "tagline": "Custom — you've tuned the settings",
     "description": (
         "The drawing settings differ from the presets. Pick a Look to reset "
-        "the pace, or keep tuning under Customize."
+        "the pace, or keep tuning under Drawing."
     ),
     "settings": {},
 }
