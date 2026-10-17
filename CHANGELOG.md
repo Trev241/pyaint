@@ -13,6 +13,15 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Manual teaching no longer inherits a previous display's scale.** Picks were
+  built from Qt's logical global point and mapped through
+  `QGuiApplication.primaryScreen()`; after changing which monitor is primary (or
+  its scaling) with the app still open, that geometry could lag. The taught box
+  then carried the old scale into every later mouse move, and no amount of
+  re-teaching could fix it until a restart. Picks now store the physical cursor
+  position (`pyautogui.position()` / `GetCursorPos`), which is the same space as
+  the screenshot and the synthetic input. A pick outside the captured primary
+  screen is rejected with a warning instead of becoming a silently bad box.
 - **Section headings sit centred in their own hover/focus box.** The header's
   vertical insets were 12px above the title and 2px below, so the accent focus
   ring and hover tint looked bottom-heavy. Both insets are now 8px.
@@ -29,6 +38,11 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   `test_notice_raised_before_show_lands_bottom_right`.
 
 ### Changed
+- **Edge tracing is the default; Outline is retired from the rail.** The mode
+  rail now offers Layered, Slotted and Edge tracing. The Outline planner, its
+  settings and its tests are untouched, and the hidden state holder still knows
+  the constant, but fresh profiles start in Edge tracing and old configs that
+  selected Outline load as Edge tracing. README and FAQ updated.
 - **Inspector sections share one content rail and read as headings.** Section
   titles, hints, bodies and diagnostic buttons now all start on the same 12px
   inset; collapsible headers use the same dark title type as plain sections and

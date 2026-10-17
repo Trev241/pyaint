@@ -70,7 +70,7 @@ python main.py
 ### 2. Draw
 
 1. Open the target app on a **blank** canvas. Maximize it on the primary
-   monitor at **100% display scaling**, then choose it in **Drawing in**.
+   monitor, then choose it in **Drawing in**.
 2. Click **Find the canvas**, review the detected regions on screen, and confirm.
    If detection fails, click **Pick the regions** and click the canvas and
    palette corners yourself.
@@ -84,9 +84,12 @@ python main.py
 
 That's it. For skribbl.io the first draw takes about a minute.
 
-> **Display scaling / multi-monitor:** `pyautogui` captures the primary monitor
-> at physical pixels. Set Windows scaling to 100% on the target monitor, or
-> expect screenshot↔click coordinates to drift.
+> **Display scaling / multi-monitor:** Pyaint captures the **primary monitor**
+> at physical pixels. It works at 125%/150% scaling, but saved canvas/palette
+> boxes are absolute pixels: after changing scaling or moving to another
+> monitor, re-run **Find the canvas** or **Pick the regions**. Mixed-DPI
+> multi-monitor setups (a target on a different monitor from the primary) are
+> not supported.
 
 > **Honest note:** auto-detection is tuned against specific window layouts and
 > resolutions. When it cannot find a region it falls back to manual teaching,
@@ -101,14 +104,17 @@ image  →  fit + scale to the canvas
        →  replay them with pyautogui, selecting colours as it goes
 ```
 
-Four drawing modes, grouped in the **Mode** rail:
+Three drawing modes, grouped in the **Mode** rail:
 
 | Family | Mode | What it draws |
 |--------|------|---------------|
 | **Runs** | **Layered** | Colour runs, with lower layers merged away: fewer strokes, faster, smoother joins |
 | **Runs** | **Slotted** | Every run exactly as planned: no overdraw, more strokes |
-| **Contours** | **Outline** (default) | Region boundaries as continuous, human-paced polylines |
-| **Contours** | **Edge tracing** | Black line art from the image's edges (no colour fills) |
+| **Contours** | **Edge tracing** (default) | Black line art from the image's edges (no colour fills) |
+
+> **Outline** is retired from the UI in favour of Edge tracing. Its planner and
+> settings are retained for compatibility, but old configs that selected it
+> open in Edge tracing.
 
 **Look** presets: *Balanced*, *Smooth* and *Fast draft* for the fill modes set
 pacing only; *Cartoon* and *Realistic* for Edge tracing set the edge cleanup
@@ -187,13 +193,20 @@ nearest swatch, and a colour with no close match may be skipped.
 
 **Find the canvas found nothing.**
 The canvas must be **blank** — existing artwork defeats detection. Also make
-sure the window is maximized on the primary monitor at 100% display scaling.
-Clear the canvas and retry, or use **Pick the regions**.
+sure the window is maximized on the primary monitor. Clear the canvas and
+retry, or use **Pick the regions**.
 
 **Drawing is too slow / too fast.**
 Adjust **Detail**, **Time per stroke** and **Stroke speed**. Lower **Detail**
 means fewer, bigger strokes. **Save the plan for next time** skips processing
 on repeat runs but does not change drawing speed.
+
+**Does it work at 125% / 150% scaling?**
+Yes, on the primary monitor. Pyaint is per-monitor DPI aware and converts manual
+picks to physical pixels, so it does not inherit the old scale. Saved canvas and
+palette boxes are not rescaled when you change Windows scaling, though: re-run
+**Find the canvas** or **Pick the regions** afterwards. A target on a different
+monitor from the primary is not supported.
 
 **How do I stop or pause?**
 `ESC` stops the current run and `P` pauses/resumes. The UI stays responsive

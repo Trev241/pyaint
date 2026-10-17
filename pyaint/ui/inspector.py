@@ -430,7 +430,7 @@ class InspectorMixin:
         env.add(self._chk_mspaint)
         needs = QLabel(
             "Finding the canvas needs a blank canvas and the target app visible "
-            "on the primary monitor at 100% display scaling."
+            "on the primary monitor."
         )
         needs.setObjectName("FieldHint")
         needs.setWordWrap(True)

@@ -15,8 +15,7 @@ from typing import List, Optional, Tuple
 
 import pyautogui
 from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QApplication, QDialog, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMessageBox, QVBoxLayout
 
 
 @dataclass
@@ -59,8 +58,9 @@ class _PickOverlay(QDialog):
 
     def mousePressEvent(self, event):  # noqa: N802
         if event.button() == Qt.LeftButton:
-            point = event.globalPosition().toPoint()
-            self.points.append((point.x(), point.y()))
+            qt_point = event.globalPosition().toPoint()
+            point = _physical_cursor_pos((qt_point.x(), qt_point.y()))
+            self.points.append(point)
             if len(self.points) >= self._count:
                 # Accept straight away. The clean screenshot is taken before
                 # the overlay appears, so there is nothing left to do here.
@@ -147,26 +147,32 @@ def pick_points(
             widget.activateWindow()
     if not accepted:
         return None
-    return PickResult(_to_screenshot_points(overlay.points, image), image)
+    points = overlay.points
+    if image is not None and points:
+        width, height = image.size
+        if any(not (0 <= x < width and 0 <= y < height) for x, y in points):
+            QMessageBox.warning(
+                parent,
+                "Pyaint",
+                "That point is outside the captured screen. Pyaint captures the "
+                "primary monitor; move the target app there and try again.",
+            )
+            return None
+    return PickResult(points, image)
 
 
-def _to_screenshot_points(points, image):
-    """Map Qt's logical click points onto the physical screenshot pixels.
+def _physical_cursor_pos(fallback):
+    """Return the cursor position in physical screen pixels.
 
-    On a scaled display Qt reports logical coordinates while ``screenshot()``
-    returns physical pixels, so without this a manually taught box lands in the
-    wrong place (and samples the wrong colours).
+    Qt reports global positions in logical (device-independent) pixels, and
+    its screen geometry can lag behind a primary-display change. Teaching a
+    box from those coordinates then silently carries the old display's scale
+    into every later mouse move. ``pyautogui.position()`` asks Windows for the
+    physical cursor position, which is the same space as a screenshot and the
+    synthetic input calls.
     """
-    if image is None or not points:
-        return points
-    screen = QGuiApplication.primaryScreen()
-    if screen is None:
-        return points
-    geo = screen.geometry()
-    if geo.width() <= 0 or geo.height() <= 0:
-        return points
-    scale_x = image.width / geo.width()
-    scale_y = image.height / geo.height()
-    if abs(scale_x - 1.0) < 1e-6 and abs(scale_y - 1.0) < 1e-6:
-        return points
-    return [(int(round(x * scale_x)), int(round(y * scale_y))) for x, y in points]
+    try:
+        point = pyautogui.position()
+        return (int(point.x), int(point.y))
+    except Exception:
+        return fallback

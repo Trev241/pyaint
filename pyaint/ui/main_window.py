@@ -75,7 +75,7 @@ from pyaint.targets import (
     load_user_recipes,
     merge_drawing_settings,
 )
-from pyaint.ui import theme
+from pyaint.ui import modes, theme
 from pyaint.ui.countdown import CountdownBanner
 from pyaint.ui.icons import icon
 from pyaint.ui.inspector import InspectorMixin
@@ -211,7 +211,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         self.bot.profile = self.profile
         self.tools = {}
         self.draw_options = 0
-        self._mode = Bot.OUTLINE
+        self._mode = modes.DEFAULT_MODE
         # True while a preset is being pushed into the widgets, so the change
         # handlers do not immediately flip the selector back to Custom.
         self._applying_sketch_preset = False
@@ -387,6 +387,8 @@ class MainWindow(InspectorMixin, QMainWindow):
         self._mode_combo.setVisible(False)
         self._mode_combo.addItem("Layered", Bot.LAYERED)
         self._mode_combo.addItem("Slotted", Bot.SLOTTED)
+        # Outline is retired from the rail, but the state holder keeps it so
+        # old configs, tests and internal callers can still exercise it.
         self._mode_combo.addItem("Outline", Bot.OUTLINE)
         self._mode_combo.addItem("Edge tracing", Bot.SKETCH)
         self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
@@ -1190,11 +1192,10 @@ class MainWindow(InspectorMixin, QMainWindow):
         # gone so the flags are fixed at their documented defaults.
         self.draw_options = Bot.IGNORE_WHITE | Bot.IGNORE_TRANSPARENT
         self.bot.skip_first_color = bool(self.tools.get("skip_first_color", False))
-        mode = self.tools.get("draw_mode", Bot.OUTLINE)
+        mode = self.tools.get("draw_mode", modes.DEFAULT_MODE)
+        # Outline is retired from the rail; an old config opens in Edge tracing.
         self._mode = (
-            mode
-            if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE, Bot.SKETCH)
-            else Bot.OUTLINE
+            mode if mode in modes.visible_modes() else modes.DEFAULT_MODE
         )
         self.bot.stroke_speed = float(settings.get("stroke_speed", 1500.0))
         self.bot.frame_interval = max(
@@ -1478,11 +1479,9 @@ class MainWindow(InspectorMixin, QMainWindow):
         if "canny_color_edges" in data:
             self.bot.canny_color_edges = bool(data["canny_color_edges"])
         self.draw_options = Bot.IGNORE_WHITE | Bot.IGNORE_TRANSPARENT
-        mode = data.get("draw_mode", Bot.OUTLINE)
+        mode = data.get("draw_mode", modes.DEFAULT_MODE)
         self._mode = (
-            mode
-            if mode in (Bot.SLOTTED, Bot.LAYERED, Bot.OUTLINE, Bot.SKETCH)
-            else Bot.OUTLINE
+            mode if mode in modes.visible_modes() else modes.DEFAULT_MODE
         )
         self.bot.skip_first_color = bool(data.get("skip_first_color", False))
         self._jump_threshold.setValue(self.bot.jump_threshold)
@@ -2451,7 +2450,7 @@ class MainWindow(InspectorMixin, QMainWindow):
         if not detection:
             summary += (
                 "\n\nMake sure the canvas is blank and the target app is maximized "
-                "on the primary monitor at 100% display scaling."
+                "on the primary monitor."
             )
         self._detection_overlay.show_detection(detection, image.size, summary, screen)
 

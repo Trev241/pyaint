@@ -5,6 +5,7 @@ that the window builds and wires up to the bot; the drawing/automation paths
 are covered by the other suites.
 """
 
+import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -142,7 +143,7 @@ def test_outline_settings_persist(app, tmp_path, monkeypatch):
         assert restored.bot.outline_smoothing == pytest.approx(3)
         assert restored.bot.outline_join_distance == pytest.approx(8.0)
         assert restored.bot.outline_step_threshold == pytest.approx(7.0)
-        assert restored._mode == Bot.OUTLINE
+        assert restored._mode == Bot.SKETCH  # Outline is retired
     finally:
         restored.close()
 
@@ -714,6 +715,23 @@ def test_pick_points_minimizes_and_captures_before_overlay(app, monkeypatch):
         parent.close()
 
 
+def test_pick_prefers_physical_cursor_position(monkeypatch):
+    """Qt's global point is logical and its screen data can lag a display change."""
+    import pyaint.ui.capture as capture
+
+    class FakePoint:
+        x, y = 1234, 567
+
+    monkeypatch.setattr(capture.pyautogui, "position", lambda: FakePoint())
+    assert capture._physical_cursor_pos((10, 20)) == (1234, 567)
+
+    def boom():
+        raise RuntimeError("no cursor")
+
+    monkeypatch.setattr(capture.pyautogui, "position", boom)
+    assert capture._physical_cursor_pos((10, 20)) == (10, 20)
+
+
 def test_pick_points_real_overlay_accepts_on_final_click(app, monkeypatch):
     """Regression: the real overlay must return its points, not vanish.
 
@@ -729,6 +747,10 @@ def test_pick_points_real_overlay_accepts_on_final_click(app, monkeypatch):
 
     sentinel = Image.new("RGB", (10, 10), (1, 2, 3))
     monkeypatch.setattr(capture.pyautogui, "screenshot", lambda *a, **k: sentinel)
+    # Picks store the physical cursor position, not Qt's logical event point.
+    class FakePoint:
+        x, y = 4, 5
+    monkeypatch.setattr(capture.pyautogui, "position", lambda: FakePoint())
 
     real_overlay = capture._PickOverlay
 
@@ -914,28 +936,30 @@ def test_setup_clear_tool_forgets_palette(app, tmp_path, monkeypatch):
         dialog.close()
 
 
-def test_pick_points_scales_logical_clicks_to_screenshot(app, monkeypatch):
-    """A scaled display must not offset a manually taught box."""
+def test_pick_rejects_points_outside_the_captured_screen(app, monkeypatch):
+    """A pick on an uncaptured monitor must not become a silently bad box."""
     from PIL import Image
-    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QDialog
 
     import pyaint.ui.capture as capture
 
-    class FakeScreen:
-        def geometry(self):
-            return QRect(0, 0, 1280, 720)
+    sentinel = Image.new("RGB", (1280, 720))
 
+    class FakeOverlay:
+        def __init__(self, count, prompt):
+            self.points = [(1500, 900)]  # outside the primary screenshot
+
+        def exec(self):
+            return QDialog.Accepted
+
+    warnings = []
+    monkeypatch.setattr(capture, "_PickOverlay", FakeOverlay)
+    monkeypatch.setattr(capture.pyautogui, "screenshot", lambda *a, **k: sentinel)
     monkeypatch.setattr(
-        capture.QGuiApplication, "primaryScreen", staticmethod(lambda: FakeScreen())
+        capture.QMessageBox, "warning", lambda *a, **k: warnings.append(a)
     )
-    physical = Image.new("RGB", (1920, 1080))
-    assert capture._to_screenshot_points([(100, 50)], physical) == [(150, 75)]
-
-    # A 1:1 display passes clicks through untouched.
-    assert capture._to_screenshot_points(
-        [(100, 50)], Image.new("RGB", (1280, 720))
-    ) == [(100, 50)]
-    assert capture._to_screenshot_points([(1, 2)], None) == [(1, 2)]
+    assert capture.pick_points(None, 1, "prompt") is None
+    assert warnings
 
 
 def test_progress_signal_updates_overlay_bar(app, tmp_path, monkeypatch):
@@ -1570,6 +1594,35 @@ def test_dual_readout_slider_shows_number_and_band(app):
         assert field._band_label.text() == "Coarse"
     finally:
         field.close()
+
+
+def test_edge_tracing_is_default_and_outline_is_hidden(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        assert window._mode == Bot.SKETCH
+        assert window._mode_rail.mode() == Bot.SKETCH
+        assert Bot.OUTLINE not in window._mode_rail._buttons
+        # The hidden state holder keeps the retired mode runnable.
+        assert window._mode_combo.findData(Bot.OUTLINE) >= 0
+    finally:
+        window.close()
+
+
+def test_saved_outline_mode_opens_as_edge_tracing(app, tmp_path, monkeypatch):
+    from pyaint import paths
+
+    monkeypatch.chdir(tmp_path)
+    os.makedirs(os.path.dirname(paths.CONFIG_PATH), exist_ok=True)
+    with open(paths.CONFIG_PATH, "w", encoding="utf-8") as fh:
+        json.dump({"draw_mode": "outline"}, fh)
+
+    window = MainWindow(Bot())
+    try:
+        assert window._mode == Bot.SKETCH
+        assert window._mode_rail.mode() == Bot.SKETCH
+    finally:
+        window.close()
 
 
 def test_mode_rail_is_a_single_choice(app):
