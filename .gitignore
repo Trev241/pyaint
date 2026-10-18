@@ -138,9 +138,6 @@ dmypy.json
 __pycache__/
 *.py[cod]
 
-# Agent workspace (analysis, notes, specs, progress for future sessions)
-/AGENTS/
-
 # IDEs
 .vscode/
 .idea/

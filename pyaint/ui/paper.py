@@ -14,8 +14,6 @@ across repaints, construction orders and runs.
 
 The whole language can be dialled back or switched off with ``PAPER_AMOUNT`` or
 the ``PYAINT_PAPER`` environment variable (``0``-``1``, or ``off``).
-
-See ``AGENTS/proposals/ui-conformance-review.md`` for the agreed rules.
 """
 
 from __future__ import annotations

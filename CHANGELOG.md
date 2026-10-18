@@ -8,12 +8,11 @@ and this project uses calendar versioning with a
 
 > **Maintenance note:** add new entries under `[Unreleased]` as work happens.
 > When releasing, move those entries under a new version heading with the date.
-> Internal agent notes live in the gitignored `AGENTS/` folder — see
-> [`AGENTS/README.md`](AGENTS/README.md).
 
 ## [Unreleased]
 
 ### Changed
+- Docs: remove stale references.
 - README now points to the
   [`legacy` branch](https://github.com/Trev241/pyaint/tree/legacy) for the
   original Tk-based app, so people who prefer it can still find the
@@ -758,8 +757,6 @@ and this project uses calendar versioning with a
 - `_color_source()` / `_select_color()` color-selection strategy in `Bot`,
   driven by `Profile.color_selection` (`auto` | `palette` | `custom`) instead
   of ad-hoc conditionals.
-- `AGENTS/` working documentation (analysis, architecture, specs, progress,
-  notes) and this `CHANGELOG.md`.
 
 ### Changed
 - **Clearer drawing controls:** "Delay between strokes" → **Time per stroke**
@@ -844,7 +841,6 @@ and this project uses calendar versioning with a
 - `ui/window.py`: creates/loads the shared `Profile`, saves `config.json` as
   preferences merged with `profile.to_config()`, and passes the shared Profile
   into `SetupWindow` so setup mutations need no merge-back.
-- `.gitignore`: ignore `/AGENTS/`.
 - `pyaint_profile.py`: added `target` (the selected recipe id) to the shared
   profile, `from_config`/`to_config`, and the preset `to_dict`/`from_dict`.
 - `ui/setup.py`: the Setup window now only lists the tools the selected target

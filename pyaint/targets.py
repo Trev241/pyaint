@@ -3,7 +3,7 @@
 A *recipe* is data, not code. It says which parts of the taught environment a
 target actually needs, which colour-selection strategy to use, and what drawing
 defaults to apply. This lets Pyaint support several applications without a
-code branch per app (see ``AGENTS/proposals/ADR-0001-driver-strategy.md``).
+code branch per app.
 
 Built-in recipes cover the common cases; additional recipes can be dropped in
 as JSON files and loaded with :meth:`RecipeRegistry.load_dir`. The engine still
