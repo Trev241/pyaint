@@ -18,11 +18,9 @@ skribbl.io, and anything else with an on-screen palette you can teach it.
 
 ## Demo
 
-https://github.com/user-attachments/assets/50f2f344-8ca9-439b-8722-0175356ad59e
+https://github.com/user-attachments/assets/f3d7a07a-cf6e-440e-8162-57d52378d280
 
-<sub>MS Paint — sampled palette and double-click colour mode.</sub>
-
-![The bundled koala sample](assets/koala.png)
+<sub>skribbl.io — sampled palette and demo of edge-tracing and layered mode.</sub>
 
 <sub>The bundled sample Pyaint opens with — a koala by Ahmed Hossam via
 [Unsplash](https://unsplash.com/illustrations/a-cute-koala-climbs-a-tree-branch-5csXP8McYiA)
