@@ -1,0 +1,26 @@
+"""Filesystem locations used at runtime.
+
+Centralises the paths that used to be recomputed with ``os.path.dirname`` calls
+scattered through the UI, so moving modules inside the package cannot silently
+shift them.
+"""
+
+import os
+import sys
+
+if getattr(sys, "frozen", False):
+    # PyInstaller (onefile/onedir): ``__file__`` points inside the temporary
+    # extraction dir, which is deleted on exit. Persist user data next to the
+    # executable instead so config/targets survive a run.
+    PROJECT_ROOT = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    # ``<repo>/pyaint/paths.py`` -> ``<repo>``
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
+TARGETS_DIR = os.path.join(PROJECT_ROOT, "targets")
+USER_TARGETS_DIR = os.path.join(os.path.expanduser("~"), ".pyaint", "targets")
+
+#: Where read-only bundled assets live. Under PyInstaller onefile the data is
+#: unpacked to ``sys._MEIPASS``, not next to the executable.
+RESOURCE_ROOT = getattr(sys, "_MEIPASS", PROJECT_ROOT)

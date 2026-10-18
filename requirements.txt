@@ -1,5 +1,7 @@
-keyboard
 Pillow
 pyscreeze
 PyAutoGUI
 pynput
+numpy
+opencv-contrib-python
+PySide6>=6.5

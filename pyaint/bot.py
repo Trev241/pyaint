@@ -1,0 +1,793 @@
+from pyaint.log import log
+import pyautogui
+import time
+from pyaint import planner, utils
+
+from pyaint.errors import NoCanvasError, NoPaletteError
+from PIL import Image
+
+from pyaint.profile import Profile
+from pyaint.painter import ScreenPainter
+from pyaint.locators import detect_target
+from pyaint.palette import DEFAULT_METRIC, Palette
+from pyaint.cache import CacheMixin
+
+
+class Bot(CacheMixin):
+    DELAY, STEP, JUMP_DELAY = tuple(i for i in range(3))
+
+    # Canonical values live in ``pyaint.planner``; re-exported here because
+    # callers (UI, tests, recipes) still reference ``Bot.SLOTTED`` etc.
+    SLOTTED = planner.SLOTTED
+    LAYERED = planner.LAYERED
+    OUTLINE = planner.OUTLINE
+    SKETCH = planner.SKETCH
+    EDGE_CANNY = planner.EDGE_CANNY
+    EDGE_EDGEDRAWING = planner.EDGE_EDGEDRAWING
+
+    IGNORE_WHITE = planner.IGNORE_WHITE
+    IGNORE_TRANSPARENT = planner.IGNORE_TRANSPARENT
+    ALPHA_CUTOFF = planner.ALPHA_CUTOFF
+    STROKE_DISTANCE = planner.STROKE_DISTANCE
+    CANVAS_PADDING = planner.CANVAS_PADDING
+
+    def __init__(self, profile=None):
+        self.terminate = False
+        self.paused = False
+        self.pause_key = "p"
+        self.settings = [0.1, 12, 0.5]  # [delay, pixel_size, jump_delay]
+        self.drawing = False  # Flag to indicate if currently drawing
+        self.skip_first_color = False  # Skip first color when drawing
+        self.jump_threshold = (
+            5  # Pixel distance threshold for jump detection (default 5)
+        )
+        # Human-like continuous strokes (prototype): one drag per polyline,
+        # paced at ~display refresh instead of one stroke per edge.
+        self.human_strokes = True
+        self.stroke_speed = 1500.0  # px/s of cursor travel
+        self.frame_interval = 1.0 / 60.0  # seconds between moveTo events
+        self.travel_delay = 0.05  # pause when jumping between strokes
+        # Pause after selecting a colour before drawing. Without it the first
+        # mouseDown lands within the double-click window of the swatch click and
+        # some apps (MS Paint) swallow it as a focus/double-click.
+        self.color_settle = 0.4
+        # Prime the first stroke with throwaway clicks. The first synthetic
+        # interaction after a UI change can be consumed by window activation;
+        # this warms the target up without drawing the stroke twice.
+        self.prime_first_stroke = True
+        # Legacy outline knob, retained only for API/cache compatibility. The
+        # outline planner emits one polyline per contour and ignores the value,
+        # so it is no longer exposed in the UI.
+        self.stroke_distance = planner.STROKE_DISTANCE
+        # Opt-in: despeckle each outline region mask (open then close) before
+        # tracing, so anti-aliased specks do not become tiny stroke fragments.
+        # Off by default because it also erases genuine 1px detail.
+        self.outline_morphology = False
+        # When set, outline traces each region's full boundary along cell edges
+        # (shared edges drawn twice but on the same segment) instead of dropping
+        # shared edges. Avoids fragmenting a region into a run per shared edge.
+        self.outline_double_edges = False
+        # Outline cleaner knobs (INSTRUCTIONS.md). ``outline_smoothing`` is the
+        # bilateral-filter level (0 disables it) applied before quantising; the
+        # rest are the label-map merge / geometric-dedupe / join thresholds.
+        # Areas are in grid cells, distances in canvas pixels.
+        self.outline_smoothing = planner.OUTLINE_SMOOTHING
+        self.outline_join_distance = planner.OUTLINE_JOIN_DISTANCE
+        self.outline_small_area = planner.OUTLINE_SMALL_AREA
+        self.outline_tiny_area = planner.OUTLINE_TINY_AREA
+        self.outline_similar_color = planner.OUTLINE_SIMILAR_COLOR
+        # Lab step below which soft tonal boundaries merge (0 disables); this is
+        # the knob that stops shading and gradients from being traced.
+        self.outline_step_threshold = planner.OUTLINE_STEP_THRESHOLD
+        # Sketch knobs (SKETCH mode): an edge source (EdgeDrawing or Canny)
+        # yields polylines; hue merge and gates clean them up. Distances are
+        # canvas pixels.
+        self.sketch_edge_source = planner.SKETCH_EDGE_SOURCE
+        self.sketch_smoothing = planner.SKETCH_SMOOTHING
+        self.sketch_join_distance = planner.SKETCH_JOIN_DISTANCE
+        self.sketch_join_turn = planner.SKETCH_JOIN_TURN
+        self.sketch_min_stroke = planner.SKETCH_MIN_STROKE
+        self.sketch_epsilon = planner.SKETCH_EPSILON
+        self.sketch_hue_merge = planner.SKETCH_HUE_MERGE
+        self.sketch_hue_threshold = planner.SKETCH_HUE_THRESHOLD
+        self.sketch_gradient_keep = planner.SKETCH_GRADIENT_KEEP
+        # Canny-specific thresholds (only used when the Canny source is picked).
+        self.canny_low = planner.SKETCH_CANNY_LOW
+        self.canny_high = planner.SKETCH_CANNY_HIGH
+        self.canny_auto = planner.SKETCH_CANNY_AUTO
+        self.canny_aperture = planner.SKETCH_CANNY_APERTURE
+        self.canny_l2 = planner.SKETCH_CANNY_L2
+        self.canny_color_edges = planner.SKETCH_CANNY_COLOR_EDGES
+        self.color_metric = DEFAULT_METRIC  # perceptual CIEDE2000 by default
+
+        # The taught environment lives in one shared Profile (pyaint/profile.py).
+        # The UI and this bot reference the same instance, giving a single
+        # source of truth for palette/canvas/colour-selection configuration.
+        self.profile = profile if profile is not None else Profile()
+
+        # Drawing state for pause/resume
+        self.draw_state = {
+            "color_idx": 0,
+            "line_idx": 0,
+            "segment_idx": 0,
+            "current_color": None,
+            "cmap": None,
+        }
+
+        # Live palette object, derived from the profile's Palette geometry.
+        self._palette = None
+
+        # Screen-input driver: the app-specific half of the engine. The
+        # planner keeps app-agnostic logic; all synthetic input goes through
+        # this object so other transports can be substituted later.
+        self.painter = ScreenPainter(self)
+
+        # Progress reporting. The UI assigns ``progress_callback``; it is
+        # invoked from the worker thread, so the UI must marshal it onto its
+        # own event loop (the Qt UI emits a signal from it).
+        self.progress_callback = None
+        self.progress_overlay_enabled = True
+
+        pyautogui.PAUSE = 0.0
+        pyautogui.MINIMUM_DURATION = 0.01
+
+    # ------------------------------------------------------------------
+    # Environment views. The single source of truth is ``self.profile``;
+    # these keep the engine's attribute-style access working unchanged.
+    # ------------------------------------------------------------------
+    @property
+    def new_layer(self):
+        return self.profile["New Layer"]
+
+    @property
+    def color_button(self):
+        return self.profile["Color Button"]
+
+    @property
+    def color_button_okay(self):
+        return self.profile["Color Button Okay"]
+
+    @property
+    def mspaint_mode(self):
+        return self.profile.mspaint_mode
+
+    @property
+    def _canvas(self):
+        return self.profile.canvas_rect()
+
+    # ------------------------------------------------------------------
+    # Colour selection (palette swatches only)
+    # ------------------------------------------------------------------
+    def _color_source(self, target):
+        """Decide how ``target`` should be selected, without performing input.
+
+        Returns ``'palette'`` or ``'none'``.
+        """
+        return self.painter.resolve_color_source(target)
+
+    def _select_color(self, target):
+        """Select ``target`` in the painting app (from the sampled palette)."""
+        return self.painter.select_color(target)
+
+    def init_palette(
+        self, colors_pos=None, prows=None, pcols=None, pbox=None, image=None
+    ) -> Palette:
+        # ``pbox`` is (left, top, width, height) — pyautogui's format. When
+        # ``image`` is given, sample from it instead of a fresh screenshot.
+        try:
+            if colors_pos is not None:
+                self._palette = Palette(colors_pos=colors_pos)
+            elif pbox is not None and prows is not None and pcols is not None:
+                self._palette = Palette(
+                    box=pbox, rows=prows, columns=pcols, image=image
+                )
+            else:
+                raise ValueError("Invalid parameters for palette initialization")
+        except Exception as e:
+            raise NoPaletteError(
+                f"Bot could not continue because palette is either missing or its dimensions are faulty: {e}"
+            )
+
+        return self._palette
+
+    def init_canvas(self, cabox):
+        # Store the taught canvas box (corners) in the shared profile. The
+        # ``_canvas`` property derives the (x, y, w, h) view used by the engine.
+        self.profile["Canvas"]["box"] = list(cabox)
+
+    # ------------------------------------------------------------------
+    # Auto-detection (Phase 2)
+    # ------------------------------------------------------------------
+    def capture_screen(self):
+        """Return the current full-screen image as a PIL image."""
+        return pyautogui.screenshot()
+
+    def detect_target(self, recipe=None):
+        """Run the target recipe's locators against the current screen.
+
+        Returns a ``pyaint.locators.Detection`` (falsy if nothing was found).
+        """
+        if recipe is None:
+            from pyaint.targets import get_recipe
+
+            recipe = get_recipe(self.profile.target)
+        return detect_target(recipe, self.capture_screen())
+
+    def apply_detection(self, detection, image=None, clear_missing=False):
+        """Apply a Detection to the live profile/palette; return what was used.
+
+        ``image`` is the screenshot the detection was computed on. When given,
+        the palette is sampled from it rather than a fresh screenshot, so the
+        sampled colours come from the target app even if pyaint is now in
+        front.
+
+        A region the recipe never attempts is left untouched. By default a
+        region the recipe *did* attempt but did not find is also left alone, so
+        a failed auto-detect can never wipe a palette/canvas the user taught by
+        hand. Callers that explicitly want the old "authoritative" behaviour
+        (clear an expected-but-missing region) can pass ``clear_missing=True``.
+        """
+        applied = []
+        if detection.canvas:
+            x, y, w, h = detection.canvas
+            self.init_canvas((x, y, x + w, y + h))
+            self.profile["Canvas"]["status"] = True
+            applied.append("canvas")
+        elif detection.canvas_expected and clear_missing:
+            self._clear_canvas()
+        if detection.palette and detection.palette_rows and detection.palette_cols:
+            x, y, w, h = detection.palette
+            palette = self.init_palette(
+                pbox=(x, y, w, h),
+                prows=detection.palette_rows,
+                pcols=detection.palette_cols,
+                image=image,
+            )
+            entry = self.profile["Palette"]
+            entry["box"] = [x, y, x + w, y + h]
+            entry["rows"] = detection.palette_rows
+            entry["cols"] = detection.palette_cols
+            entry["color_coords"] = {str(k): v for k, v in palette.colors_pos.items()}
+            entry["status"] = True
+            applied.append("palette")
+        elif detection.palette_expected and clear_missing:
+            self._clear_palette()
+        return applied
+
+    def _clear_canvas(self) -> None:
+        """Forget the taught canvas (used when a re-detect misses it)."""
+        entry = self.profile["Canvas"]
+        entry["status"] = False
+        entry["box"] = None
+        entry["preview"] = None
+
+    def _clear_palette(self) -> None:
+        """Forget the taught palette (used when a re-detect misses it)."""
+        self._palette = None
+        entry = self.profile["Palette"]
+        entry["status"] = False
+        entry["box"] = None
+        entry["color_coords"] = None
+        entry["preview"] = None
+
+    # def test(self):
+    #     box = self._canvas
+    #     locs = [p for p in self._palette.colors_pos.values()] + [(box[0], box[1]), (box[0] + box[2], box[1] + box[3])]
+    #     for l in locs:
+    #         pyautogui.moveTo(l)
+    #         time.sleep(.25)
+
+    def process(self, file, flags=0, mode=LAYERED):
+        """
+        Processes the requested file as per the flags submitted and returns
+        a table mapping each color to a list of lines that are to be drawn on
+        the canvas. Each line contains both starting and terminating coordinates.
+
+        Thin facade: gathers the taught environment and delegates the pure
+        work to :mod:`pyaint.planner`.
+        """
+        self.terminate = False
+        step = int(self.settings[Bot.STEP])
+        image = Image.open(file).convert("RGBA")
+        try:
+            canvas = tuple(self._canvas)  # type: ignore[union-attr]
+        except Exception:
+            raise NoCanvasError(
+                "Bot could not continue because canvas is not initialized"
+            )
+        return planner.plan_image(
+            image,
+            canvas,
+            step,
+            self._palette,
+            self.color_metric,
+            flags,
+            mode,
+            self.stroke_distance,
+            self.outline_morphology,
+            self.outline_double_edges,
+            self.outline_smoothing,
+            self.outline_join_distance,
+            self.outline_small_area,
+            self.outline_tiny_area,
+            self.outline_similar_color,
+            self.outline_step_threshold,
+            self.sketch_edge_source,
+            self.sketch_smoothing,
+            self.sketch_join_distance,
+            self.sketch_join_turn,
+            self.sketch_min_stroke,
+            self.sketch_epsilon,
+            self.sketch_hue_merge,
+            self.sketch_hue_threshold,
+            self.sketch_gradient_keep,
+            self.canny_low,
+            self.canny_high,
+            self.canny_auto,
+            self.canny_aperture,
+            self.canny_l2,
+            self.canny_color_edges,
+        )
+
+    def draw(self, cmap):
+        """
+        Draws the image as per the coordinates of the processed cmap table.
+        Supports pause/resume functionality and configurable jump delays.
+        """
+
+        # Calculate total strokes for progress tracking (must be before overlay creation)
+        self.total_strokes = sum(len(lines) for lines in cmap.values())
+        self.start_time = time.time()
+        self.completed_strokes = 0
+
+        self._report_progress(0, self.total_strokes, 0)
+
+        # Reset bot state for fresh drawing session
+        self.terminate = False
+        self.paused = False
+        self.drawing = True  # Mark as actively drawing
+        # Bring the target window forward: on Windows the first click on an
+        # inactive window is consumed by activation, which silently drops the
+        # first stroke. Do this before any stroke, and tolerate painters/tests
+        # that do not implement focus_target.
+        canvas = getattr(self, "_canvas", None)
+        focus = getattr(self.painter, "focus_target", None)
+        focused = False
+        if canvas is not None and focus is not None:
+            try:
+                focused = bool(focus(tuple(canvas)))
+            except Exception:
+                focused = False
+        log.info(f"[Focus] target window foreground: {focused}")
+        first_stroke = True
+        last_stroke_end = None  # Track last stroke position for jump detection
+        self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
+        estimated_str = self._format_time(self.estimated_time_seconds)
+        log.info(f"Estimated drawing time: {estimated_str}")
+
+        for color_idx, (c, lines) in enumerate(cmap.items()):
+            # Skip the first color if skip_first_color is enabled
+            if color_idx == 0 and self.skip_first_color:
+                log.info(f"[Skip First Color] Skipping first color: {c}")
+                continue
+
+            # Skip colors already drawn if resuming
+            if color_idx < self.draw_state["color_idx"]:
+                continue
+
+            # If resuming and we have a specific color to resume with, use that instead
+            if (
+                self.draw_state["current_color"] is not None
+                and color_idx == self.draw_state["color_idx"]
+            ):
+                c = self.draw_state["current_color"]
+                log.info(f"Resuming with saved color {c}")
+
+            # Log color change with cached coordinate info
+            num_strokes = len(lines)
+            log.info(f"Switching to color {c} - {num_strokes} cached coordinate points")
+
+            # If New Layer is enabled, click the new-layer button with modifiers.
+            # Skip on first color when skip_first_color is enabled.
+            if not (color_idx == 0 and self.skip_first_color):
+                self.painter.new_layer()
+
+            # If Color Button Mode is enabled, click the color button with modifiers before palette selection
+            self.painter.color_button()
+
+            # Select the colour from the sampled palette.
+            self._select_color(c)
+
+            # If Color Button Okay Mode is enabled, click "Set Okay" button after color selection
+            self.painter.color_button_okay()
+
+            # Let the app finish the palette/dialog transition before the first
+            # stroke, otherwise it can be read as a double-click/focus click.
+            time.sleep(self.color_settle)
+
+            for line_idx, line in enumerate(lines):
+                # Skip lines already drawn if resuming
+                if (
+                    color_idx == self.draw_state["color_idx"]
+                    and line_idx < self.draw_state["line_idx"]
+                ):
+                    continue
+
+                # Update progress and calculate estimates
+                self.completed_strokes += 1
+                strokes_remaining = self.total_strokes - self.completed_strokes
+
+                # Calculate elapsed time and estimate remaining time
+                elapsed_time = time.time() - self.start_time
+                if self.completed_strokes > 0:
+                    avg_time_per_stroke = elapsed_time / self.completed_strokes
+                    estimated_remaining = strokes_remaining * avg_time_per_stroke
+
+                    # Format time remaining
+                    if estimated_remaining < 60:
+                        time_remaining = f"{estimated_remaining:.1f}s"
+                    elif estimated_remaining < 3600:
+                        minutes = int(estimated_remaining // 60)
+                        seconds = estimated_remaining % 60
+                        time_remaining = f"{minutes}:{seconds:02.0f}"
+                    else:
+                        hours = int(estimated_remaining // 3600)
+                        minutes = int((estimated_remaining % 3600) // 60)
+                        time_remaining = f"{hours}:{minutes:02.0f}h"
+                else:
+                    time_remaining = "calculating..."
+
+                # Log stroke progress with time remaining and strokes left
+                progress_percent = ((line_idx + 1) / len(lines)) * 100
+                log.info(
+                    f"Drawing stroke {line_idx + 1}/{len(lines)} for color {c} - {progress_percent:.1f}% complete"
+                )
+                log.info(
+                    f"Total progress: {self.completed_strokes}/{self.total_strokes} strokes - {time_remaining} remaining"
+                )
+
+                self._report_progress(
+                    self.completed_strokes, self.total_strokes, estimated_remaining
+                )
+
+                # Check for large cursor jumps and add delay
+                start_pos = line[0]
+                if last_stroke_end is not None:
+                    jump_distance = (
+                        (start_pos[0] - last_stroke_end[0]) ** 2
+                        + (start_pos[1] - last_stroke_end[1]) ** 2
+                    ) ** 0.5
+                    if jump_distance > self.jump_threshold:
+                        jump_delay = (
+                            self.travel_delay
+                            if self.human_strokes or len(line) > 2
+                            else self.settings[Bot.JUMP_DELAY]
+                        )
+                        log.info(
+                            f"Large jump detected ({jump_distance:.1f} pixels) - adding {jump_delay}s delay"
+                        )
+                        time.sleep(jump_delay)
+
+                # Wait if paused - detect when we come out of pause for stroke replay
+                was_paused = False
+                while self.paused and not self.terminate:
+                    was_paused = True
+                    # Ensure any stuck modifier keys are released during pause
+                    try:
+                        pyautogui.keyUp("shift")
+                        pyautogui.keyUp("alt")
+                        pyautogui.keyUp("ctrl")
+                    except Exception:
+                        pass  # Ignore errors if keys are already released
+                    time.sleep(0.1)  # Small delay to avoid busy waiting
+
+                # If we just came out of pause, mark for stroke replay
+                if was_paused:
+                    self.draw_state["was_paused"] = True
+
+                if self.terminate:
+                    pyautogui.mouseUp()
+                    self.drawing = False  # Clear drawing flag on termination
+                    return "terminated"
+
+                # Draw the stroke. Human mode replays a whole polyline as one
+                # continuous, paced drag; legacy mode replays a single run.
+                # Multi-point polylines can only be drawn as a path.
+                end_pos = line[-1]
+                prime = first_stroke and self.prime_first_stroke
+                if self.human_strokes or len(line) > 2:
+                    self.painter.execute_path(
+                        line,
+                        self.stroke_speed,
+                        self.frame_interval,
+                        prime=prime,
+                    )
+                else:
+                    self.painter.execute_stroke(
+                        start_pos, end_pos, self.settings[Bot.DELAY]
+                    )
+                first_stroke = False
+
+                # Check for pause after completing the stroke
+                if self.paused or self.terminate:
+                    # Save current state for resume
+                    self.draw_state["color_idx"] = color_idx
+                    self.draw_state["line_idx"] = line_idx
+                    self.draw_state["segment_idx"] = (
+                        0  # Stroke completed, so reset segment
+                    )
+                    self.draw_state["current_color"] = c  # Save current color
+                    if self.terminate:
+                        self.drawing = False  # Clear drawing flag on termination
+                        return "terminated"
+                    # Wait for resume
+                    log.info(
+                        "Paused after completing stroke - press resume to continue"
+                    )
+                    while self.paused and not self.terminate:
+                        time.sleep(0.1)
+                    if self.terminate:
+                        self.drawing = False  # Clear drawing flag on termination
+                        return "terminated"
+                    # Resume - replay the current stroke to ensure clean result
+                    log.info(f"Resuming - replaying current stroke for color {c}")
+                    self.draw_state["was_paused"] = True
+
+                # Update last stroke position for jump detection
+                last_stroke_end = end_pos
+
+        # Calculate actual time and show comparison
+        actual_time = time.time() - self.start_time
+        actual_str = self._format_time(actual_time)
+        estimated_str = self._format_time(self.estimated_time_seconds)
+
+        # Calculate difference (positive = saved time, negative = extra time)
+        diff_seconds = self.estimated_time_seconds - actual_time
+        if diff_seconds >= 0:
+            diff_str = f"Saved: {self._format_time(diff_seconds)}"
+        else:
+            diff_str = f"Extra: {self._format_time(abs(diff_seconds))}"
+
+        log.info("=" * 50)
+        log.info(f"Drawing completed!")
+        log.info(f"Estimated: {estimated_str}")
+        log.info(f"Actual:   {actual_str}")
+        log.info(f"{diff_str}")
+        log.info("=" * 50)
+
+        # Reset draw state on successful completion
+        self.drawing = False  # Clear drawing flag
+        self.draw_state["color_idx"] = 0
+        self.draw_state["line_idx"] = 0
+        self.draw_state["segment_idx"] = 0
+        self.draw_state["current_color"] = None
+        self.draw_state["was_paused"] = False
+        return "success"
+
+    def test_draw(self, cmap, max_lines=20):
+        """
+        Test draw the first max_lines from the coordinate map.
+        Useful for calibrating brush size before full drawing.
+        """
+        # Set drawing flag for pause/resume support during test draw
+        self.drawing = True
+        lines_drawn = 0
+        self.start_time = time.time()  # Track start time for test draw
+
+        self._report_progress(
+            0, min(max_lines, sum(len(lines) for lines in cmap.values())), 0
+        )
+
+        # Estimate time for the full cmap (not just test lines)
+        self.estimated_time_seconds = self._estimate_drawing_time_seconds(cmap)
+        estimated_str = self._format_time(self.estimated_time_seconds)
+        log.info(f"Estimated drawing time (full): {estimated_str}")
+
+        for color_idx, (c, lines) in enumerate(cmap.items()):
+            if lines_drawn >= max_lines:
+                break
+
+            # Log color change
+            log.debug(
+                f"[DEBUG] Color Button Okay enabled: {self.color_button_okay.get('enabled', False)}"
+            )
+            log.info(f"Switching to color {c} for test draw")
+
+            self._select_color(c)
+
+            # Only click okay button if Color Button Okay is enabled
+            self.painter.color_button_okay()
+
+            for line_idx, line in enumerate(lines):
+                if lines_drawn >= max_lines:
+                    break
+
+                # Log progress
+                lines_drawn += 1
+                log.info(f"Drawing test line {lines_drawn}/{max_lines} for color {c}")
+
+                self._report_progress(lines_drawn, max_lines, 0)
+
+                # Check for pause/terminate
+                if self.terminate:
+                    pyautogui.mouseUp()
+                    self.drawing = False  # Clear drawing flag on termination
+                    return "terminated"
+
+                # Draw the line (simplified, no segmentation for test draw)
+                start_pos, end_pos = line
+                self.painter.execute_test_stroke(start_pos, end_pos)
+
+        # Show time comparison for test draw
+        actual_time = time.time() - self.start_time
+        actual_str = self._format_time(actual_time)
+
+        # Calculate difference (positive = saved time, negative = extra time)
+        diff_seconds = self.estimated_time_seconds - actual_time
+        if diff_seconds >= 0:
+            diff_str = f"Saved: {self._format_time(diff_seconds)}"
+        else:
+            diff_str = f"Extra: {self._format_time(abs(diff_seconds))}"
+
+        log.info("=" * 50)
+        log.info(f"Test draw completed: {lines_drawn} lines drawn")
+        log.info(f"Estimated (full): {self._format_time(self.estimated_time_seconds)}")
+        log.info(f"Actual (test):   {actual_str}")
+        log.info(f"{diff_str}")
+        log.info("=" * 50)
+
+        self.drawing = False  # Clear drawing flag
+        return "success"
+
+    def _estimate_drawing_time_seconds(self, cmap):
+        """Estimate drawing time in seconds (internal helper method)."""
+        has_polylines = any(
+            len(stroke) > 2 for strokes in cmap.values() for stroke in strokes
+        )
+        if getattr(self, "human_strokes", False) or has_polylines:
+            return utils.estimate_path_seconds(
+                cmap,
+                self.stroke_speed,
+                self.frame_interval,
+                self.travel_delay,
+                self.jump_threshold,
+            )
+        return utils.estimate_drawing_seconds(
+            cmap,
+            self.settings[Bot.DELAY],
+            self.settings[Bot.JUMP_DELAY],
+            self.jump_threshold,
+        )
+
+    def _format_time(self, seconds):
+        """Format seconds into a human-readable time string."""
+        return utils.format_duration(seconds)
+
+    def estimate_drawing_time(self, cmap):
+        """Estimate how long drawing might take based on coordinate data."""
+        try:
+            return utils.format_estimate(self._estimate_drawing_time_seconds(cmap))
+        except Exception:
+            return "Unknown (unable to analyze)"
+
+    def process_region(self, file, region, flags=0, mode=LAYERED, canvas_target=None):
+        """
+        Processes a specific region of an image as per the flags submitted and returns
+        a table mapping each color to a list of lines that are to be drawn on
+        the canvas. Each line contains both starting and terminating coordinates.
+
+        region: (x1, y1, x2, y2) - coordinates in the reference image space
+        canvas_target: (x, y, w, h) - target canvas area where drawing should happen (optional)
+        """
+
+        self.terminate = False
+        step = int(self.settings[Bot.STEP])
+        image = Image.open(file).convert("RGBA")
+        try:
+            canvas = tuple(self._canvas)  # type: ignore[union-attr]
+        except Exception:
+            raise NoCanvasError(
+                "Bot could not continue because canvas is not initialized"
+            )
+        return planner.plan_region_image(
+            image,
+            region,
+            canvas,
+            step,
+            self._palette,
+            self.color_metric,
+            flags,
+            mode,
+            canvas_target,
+            self.stroke_distance,
+            self.outline_morphology,
+            self.outline_double_edges,
+            self.outline_smoothing,
+            self.outline_join_distance,
+            self.outline_small_area,
+            self.outline_tiny_area,
+            self.outline_similar_color,
+            self.outline_step_threshold,
+            self.sketch_edge_source,
+            self.sketch_smoothing,
+            self.sketch_join_distance,
+            self.sketch_join_turn,
+            self.sketch_min_stroke,
+            self.sketch_epsilon,
+            self.sketch_hue_merge,
+            self.sketch_hue_threshold,
+            self.sketch_gradient_keep,
+            self.canny_low,
+            self.canny_high,
+            self.canny_auto,
+            self.canny_aperture,
+            self.canny_l2,
+            self.canny_color_edges,
+        )
+
+    def simple_test_draw(self):
+        """
+        Simple test draw that draws 5 horizontal lines starting from the
+        upper-left corner of the canvas. Each line is 1/4 of the canvas width.
+        No color picking - user should manually set their desired color first.
+        Useful for quickly adjusting brush size.
+        """
+        try:
+            canvas_x, canvas_y, canvas_w, canvas_h = self._canvas
+        except Exception:
+            raise NoCanvasError(
+                "Bot could not continue because canvas is not initialized"
+            )
+
+        self.drawing = True
+        log.info("Starting simple test draw...")
+
+        # Calculate 1/4 of canvas width
+        quarter_width = canvas_w // 4
+
+        # Draw 5 horizontal lines
+        for i in range(5):
+            # Calculate vertical position (start at 0, move down by pixel_size)
+            y_offset = i * self.settings[Bot.STEP]
+
+            start_x = canvas_x
+            start_y = canvas_y + y_offset
+            end_x = canvas_x + quarter_width
+            end_y = canvas_y + y_offset
+
+            log.info(
+                f"Drawing line {i + 1}/5: from ({start_x}, {start_y}) to ({end_x}, {end_y})"
+            )
+
+            # Move to start position
+            pyautogui.moveTo(start_x, start_y)
+            time.sleep(0.1)
+
+            # Draw the line
+            pyautogui.mouseDown(button="left")
+            pyautogui.dragTo(end_x, end_y, 0.2, button="left")
+            pyautogui.mouseUp()
+
+            # Small delay between lines
+            time.sleep(0.2)
+
+        log.info("Simple test draw completed!")
+        self.drawing = False
+        return "success"
+
+    def _report_progress(self, completed, total, eta_seconds):
+        """Report drawing progress to the UI, if one has attached a callback.
+
+        Called from the drawing worker thread. The callback must not touch UI
+        objects directly; the Qt UI connects it to a signal so the update is
+        queued onto the main thread.
+        """
+        if not self.progress_overlay_enabled:
+            return
+        callback = getattr(self, "progress_callback", None)
+        if callback is None:
+            return
+        try:
+            callback(completed, total, eta_seconds)
+        except Exception as e:  # never let progress reporting break a draw
+            log.info(f"[Progress] callback error: {e}")

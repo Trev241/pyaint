@@ -1,0 +1,1783 @@
+"""Headless smoke test for the PySide6 UI.
+
+Runs with the ``offscreen`` Qt platform so it needs no display. It only checks
+that the window builds and wires up to the bot; the drawing/automation paths
+are covered by the other suites.
+"""
+
+import json
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest
+
+pytest.importorskip("PySide6")
+
+from PIL import Image  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from pyaint.bot import Bot  # noqa: E402
+from pyaint.ui.main_window import MainWindow  # noqa: E402
+
+#: Every test here builds real Qt widgets, so the module is one ``ui`` group.
+#: The default test run excludes it (see ``[tool.pytest.ini_options]``); run it
+#: explicitly with ``pytest -m ui``.
+pytestmark = pytest.mark.ui
+
+
+@pytest.fixture(scope="module")
+def app():
+    application = QApplication.instance() or QApplication([])
+    yield application
+
+
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path, monkeypatch):
+    """Point the window at a throwaway config.json for every test.
+
+    ``MainWindow.closeEvent`` flushes settings and clears the cache dir, so a
+    test that clears the profile would otherwise overwrite the developer's real
+    config (and delete the real cache) on close.
+    """
+    from pyaint import paths
+    from pyaint.ui import main_window as main_window_module
+
+    monkeypatch.setattr(paths, "PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(paths, "CONFIG_PATH", str(tmp_path / "config.json"))
+    # Keep the old "first run is empty" semantics for every test that does not
+    # opt in to the bundled sample explicitly.
+    monkeypatch.setattr(main_window_module, "DEFAULT_SAMPLE", "")
+    yield
+
+
+@pytest.fixture(autouse=True)
+def destroy_windows(isolated_config):
+    """Destroy every top-level widget once a test finishes.
+
+    ``MainWindow`` calls ``theme.apply`` on construction, which sets an
+    application-wide stylesheet, and Qt re-polishes every live window when that
+    happens. ``close()`` only hides a window -- it does not destroy it -- so
+    without this teardown the suite accumulates windows and each new one
+    re-polishes all the previous ones. That grows super-linearly and eventually
+    stalls the run. Deleting the widgets keeps at most one window alive.
+
+    Depends on ``isolated_config`` so its teardown runs *before* that fixture's
+    monkeypatch is undone, keeping ``closeEvent`` pointed at the throwaway paths.
+    """
+    yield
+    from PySide6.QtCore import QEvent
+
+    application = QApplication.instance()
+    if application is None:
+        return
+    for widget in application.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    application.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    application.processEvents()
+
+
+def test_main_window_builds(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        assert window.windowTitle() == "Pyaint"
+        # The shared profile must be the same object the bot sees.
+        assert window.bot.profile is window.profile
+        # Progress callback is wired so Bot can report from a worker thread.
+        assert bot.progress_callback is not None
+    finally:
+        window.close()
+
+
+def test_mode_specific_controls_switch_with_stroke_mode(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        window._drawing_section.set_expanded(True)  # knobs start collapsed
+        layered = window._mode_combo.findData(Bot.LAYERED)
+        outline = window._mode_combo.findData(Bot.OUTLINE)
+
+        window._mode_combo.setCurrentIndex(layered)
+        assert window._runs_controls.isVisibleTo(window)
+        assert not window._outline_controls.isVisibleTo(window)
+
+        window._mode_combo.setCurrentIndex(outline)
+        assert window._outline_controls.isVisibleTo(window)
+        assert not window._runs_controls.isVisibleTo(window)
+        assert "outlines" in window._guide._text.text()
+
+        window._stroke_speed.set_value(2000, emit=True)
+        assert bot.stroke_speed == pytest.approx(2000)
+        window._event_interval.set_value(20, emit=True)
+        assert bot.frame_interval == pytest.approx(0.02)
+        window._travel_delay.set_value(0.2, emit=True)
+        assert bot.travel_delay == pytest.approx(0.2)
+    finally:
+        window.close()
+
+
+def test_outline_settings_persist(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._mode_combo.setCurrentIndex(window._mode_combo.findData(Bot.OUTLINE))
+        window._stroke_speed.set_value(2000, emit=True)
+        window._event_interval.set_value(25, emit=True)
+        window._travel_delay.set_value(0.2, emit=True)
+        window._outline_smoothing.set_value(3, emit=True)
+        window._outline_join_distance.set_value(8.0, emit=True)
+        window._outline_step_threshold.set_value(7.0, emit=True)
+        window._save_config()
+    finally:
+        window.close()
+
+    restored = MainWindow(Bot())
+    try:
+        assert restored.bot.stroke_speed == pytest.approx(2000)
+        assert restored.bot.frame_interval == pytest.approx(0.025)
+        assert restored.bot.travel_delay == pytest.approx(0.2)
+        assert restored.bot.outline_smoothing == pytest.approx(3)
+        assert restored.bot.outline_join_distance == pytest.approx(8.0)
+        assert restored.bot.outline_step_threshold == pytest.approx(7.0)
+        assert restored._mode == Bot.SKETCH  # Outline is retired
+    finally:
+        restored.close()
+
+
+def test_bundled_sample_loads_when_nothing_is_remembered(app, tmp_path, monkeypatch):
+    from pyaint.ui import main_window as main_window_module
+
+    monkeypatch.chdir(tmp_path)
+    sample = tmp_path / "koala.png"
+    Image.new("RGB", (8, 6), (200, 120, 40)).save(sample)
+    monkeypatch.setattr(main_window_module, "DEFAULT_SAMPLE", str(sample))
+
+    window = MainWindow(Bot())
+    try:
+        assert window._imname == str(sample)
+        assert window._has_image()
+        # A fallback must not masquerade as the user's last image.
+        assert window._last_image_path == ""
+        assert not os.path.exists(window._last_image_file)
+    finally:
+        window.close()
+
+
+def test_last_selected_image_restores_on_restart(app, tmp_path, monkeypatch):
+    from pyaint.ui import main_window as main_window_module
+
+    monkeypatch.chdir(tmp_path)
+    # A bundled sample is present, but a remembered image must still win.
+    sample = tmp_path / "sample.png"
+    Image.new("RGB", (8, 6), (0, 0, 255)).save(sample)
+    monkeypatch.setattr(main_window_module, "DEFAULT_SAMPLE", str(sample))
+    source = tmp_path / "picked.png"
+    Image.new("RGBA", (6, 4), (255, 0, 0, 255)).save(source)
+
+    window = MainWindow(Bot())
+    try:
+        window._load_local_path(str(source))
+        window._save_config()
+        assert os.path.exists(window._last_image_file)
+    finally:
+        window.close()
+
+    # Drop the original so the restore has to come from the durable copy.
+    os.remove(source)
+    restored = MainWindow(Bot())
+    try:
+        assert restored._imname == restored._last_image_file
+        assert os.path.exists(restored._imname)
+    finally:
+        restored.close()
+
+
+def test_outline_double_edges_toggle_persists(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        # Doubled edges are the opt-in; the clean single line is the default.
+        assert window.bot.outline_double_edges is False
+        assert window._chk_double_edges.isChecked() is False
+        assert window.bot.outline_smoothing == pytest.approx(2)
+        assert window.bot.outline_step_threshold == pytest.approx(10.0)
+        window._chk_double_edges.setChecked(True)
+        assert window.bot.outline_double_edges is True
+        window._save_config()
+    finally:
+        window.close()
+
+    restored = MainWindow(Bot())
+    try:
+        assert restored.bot.outline_double_edges is True
+        assert restored._chk_double_edges.isChecked() is True
+    finally:
+        restored.close()
+
+
+def test_sketch_mode_controls_switch_and_persist(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._drawing_section.set_expanded(True)  # knobs start collapsed
+        window._mode_combo.setCurrentIndex(
+            window._mode_combo.findData(Bot.SKETCH)
+        )
+        assert window._sketch_controls.isVisibleTo(window)
+        assert window._continuous_controls.isVisibleTo(window)
+        assert not window._runs_controls.isVisibleTo(window)
+        assert not window._outline_controls.isVisibleTo(window)
+
+        # The edge source and the rest of the tuning live under Advanced; open
+        # it so the Canny thresholds are visible with the Canny source.
+        assert window._sketch_source.currentData() == Bot.EDGE_EDGEDRAWING
+        window._sketch_advanced.set_expanded(True)
+        window._sketch_source.setCurrentIndex(
+            window._sketch_source.findData(Bot.EDGE_CANNY)
+        )
+        assert window.bot.sketch_edge_source == Bot.EDGE_CANNY
+        assert window._canny_low.isVisibleTo(window)
+
+        window._canny_low.set_value(80, emit=True)
+        window._sketch_hue_threshold.set_value(22, emit=True)
+        window._sketch_join_distance.set_value(4.0, emit=True)
+        assert window.bot.canny_low == pytest.approx(80)
+        assert window.bot.sketch_hue_threshold == pytest.approx(22)
+        assert window.bot.sketch_join_distance == pytest.approx(4.0)
+        window._save_config()
+    finally:
+        window.close()
+
+    restored = MainWindow(Bot())
+    try:
+        assert restored.bot.sketch_edge_source == Bot.EDGE_CANNY
+        assert restored.bot.canny_low == pytest.approx(80)
+        assert restored.bot.sketch_hue_threshold == pytest.approx(22)
+        assert restored.bot.sketch_join_distance == pytest.approx(4.0)
+        assert restored._mode == Bot.SKETCH
+    finally:
+        restored.close()
+
+
+def test_sketch_presets_apply_and_detect_custom(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._mode_combo.setCurrentIndex(
+            window._mode_combo.findData(Bot.SKETCH)
+        )
+        # A fresh config opens on the friendly Cartoon preset.
+        assert window._sketch_preset_control.value() == "cartoon"
+
+        window._sketch_preset_control.changed.emit("realistic")
+        assert window.bot.sketch_hue_threshold == pytest.approx(28.0)
+        assert window.bot.sketch_gradient_keep == pytest.approx(0.6)
+        assert window._sketch_preset_control.value() == "realistic"
+
+        # Touching an advanced knob drops the selector to Custom: the Custom
+        # tile appears only while it is the live state, and is selected.
+        window._sketch_hue_threshold.set_value(12, emit=True)
+        assert window._sketch_preset_control.value() == "custom"
+    finally:
+        window.close()
+
+
+def test_preview_view_toggle_and_restore(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        assert window._preview_view == "source"
+        assert window._view_source_btn.isChecked()
+
+        window._view_group.idClicked.emit(1)
+        assert window._preview_view == "preview"
+        assert window._view_preview_btn.isChecked()
+
+        window._view_group.idClicked.emit(0)
+        assert window._preview_view == "source"
+        assert window._view_source_btn.isChecked()
+        assert window._preview_meta.text()  # restored meta, never blank
+    finally:
+        window.close()
+
+
+def test_compare_disabled_without_an_image(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        # The isolated config points PROJECT_ROOT at tmp_path, so no image is
+        # loaded and Compare starts unavailable.
+        assert not window._view_split_btn.isEnabled()
+
+        source = tmp_path / "src.png"
+        Image.new("RGB", (12, 12), (255, 0, 0)).save(source)
+        window._set_image_path(str(source))
+        assert window._view_split_btn.isEnabled()
+
+        window._view_group.idClicked.emit(2)
+        assert window._preview_view == "split"
+
+        # No source image: the Compare choice is disabled and any split view
+        # falls back to showing the source only.
+        window._imname = ""
+        window._source_pixmap = None
+        window._update_compare_available()
+        assert not window._view_split_btn.isEnabled()
+        assert window._preview_view == "source"
+    finally:
+        window.close()
+
+
+def test_plan_preview_task_frames_the_drawn_region(app, tmp_path):
+    from pyaint import planner
+    from pyaint.palette import Palette
+    from pyaint.ui.plan_tasks import PlanPreviewTask
+
+    source = tmp_path / "src.png"
+    Image.new("RGB", (20, 20), (255, 0, 0)).save(source)
+    captured = {}
+    task = PlanPreviewTask(
+        7,
+        str(source),
+        (0, 0, 20, 20),
+        2,
+        Palette(colors_pos={(255, 0, 0): (0, 0), (0, 0, 255): (1, 0)}),
+        "rgb",
+        planner.IGNORE_WHITE | planner.IGNORE_TRANSPARENT,
+        planner.SLOTTED,
+        {},
+    )
+    task.signals.ready.connect(
+        lambda generation, image, meta: captured.update(
+            generation=generation, image=image, meta=meta
+        )
+    )
+    task.run()
+    assert captured["generation"] == 7
+    # The preview is cropped to the drawn region, not the padded canvas rect.
+    source_img = Image.open(source)
+    _s, (grid_w, grid_h), _ox, _oy = planner.fit_to_canvas(
+        source_img, (0, 0, 20, 20), 2
+    )
+    assert captured["image"].width() == grid_w * 2
+    assert captured["image"].height() == grid_h * 2
+    assert captured["meta"]
+
+
+def test_progress_overlay_updates(app):
+    from PySide6.QtCore import Qt
+
+    from pyaint.ui.overlay import ProgressOverlay
+
+    overlay = ProgressOverlay()
+    try:
+        # Click-through: the bot owns the mouse, so the overlay must never
+        # intercept clicks meant for the target app (e.g. the palette).
+        assert overlay.windowFlags() & Qt.WindowTransparentForInput
+        overlay.show_overlay("Drawing…", "p")
+        overlay.update_progress(5, 10, 30.0)
+        assert overlay._bar.value() == 50
+        assert "5/10" in overlay._label.text()
+        assert overlay._hint.text().startswith("ESC stop")
+        overlay.set_paused(True)
+        assert "PAUSED" in overlay._hint.text()
+    finally:
+        overlay.close()
+
+
+def test_countdown_banner_counts_down_and_captures(app):
+    import time
+
+    from pyaint.ui.countdown import CountdownBanner
+
+    banner = CountdownBanner()
+    captured = []
+    banner.captured.connect(lambda: captured.append(True))
+    try:
+        banner.start(seconds=2)
+        assert banner._timer.isActive()  # regression: the timer must actually run
+        # Under a second left: the bar is partway (smooth, not stepped) and the
+        # title reads "1s".
+        banner._deadline = time.monotonic() + 0.9
+        banner._tick()
+        assert banner._title.text().endswith("1s…")
+        assert 0 < banner._bar.value() < 1000
+        # Past the deadline: capture fires and the timer stops.
+        banner._deadline = time.monotonic() - 0.01
+        banner._tick()
+        assert captured == [True]
+        assert not banner._timer.isActive()
+    finally:
+        banner.close()
+
+
+def test_countdown_banner_cancel_emits(app):
+    from pyaint.ui.countdown import CountdownBanner
+
+    banner = CountdownBanner()
+    cancelled = []
+    banner.cancelled.connect(lambda: cancelled.append(True))
+    try:
+        banner.start(seconds=3)
+        banner._cancel()
+        assert cancelled == [True]
+    finally:
+        banner.close()
+
+
+def test_setup_row_states(app):
+    from PySide6.QtCore import Qt
+
+    from pyaint.ui.widgets import SetupRow
+
+    row = SetupRow()
+    try:
+        row.update_steps("skribbl", environment_ready=True, image_ready=False)
+        steps = row.steps()
+        assert [done for _, done in steps] == [True, True, False, False]
+        # Status only: the row is the click target, its children are not.
+        assert row.focusPolicy() == Qt.FocusPolicy.StrongFocus
+        row.update_steps("skribbl", environment_ready=True, image_ready=True)
+        assert [done for _, done in row.steps()] == [True, True, True, True]
+    finally:
+        row.close()
+
+
+def test_setup_row_toggles_itself(app):
+    from pyaint.ui.widgets import SetupRow
+
+    row = SetupRow()
+    seen = []
+    row.toggled.connect(seen.append)
+    try:
+        assert row.is_open() is False
+        row.toggle()
+        assert row.is_open() is True
+        row.set_open(True)  # no emission, no flap
+        row.toggle()
+        assert row.is_open() is False
+        assert seen == [True, False]
+    finally:
+        row.close()
+
+
+def test_collapsible_section_toggles_from_its_header(app):
+    from pyaint.ui.widgets import CollapsibleSection
+
+    section = CollapsibleSection("Diagnostics")
+    seen = []
+    section.toggled.connect(seen.append)
+    try:
+        assert section.is_expanded() is False
+        section.header.toggle()
+        assert section.is_expanded() is True
+        assert seen == [True]
+        section.set_expanded(False)  # programmatic: no extra emission
+        assert section.is_expanded() is False
+        assert seen == [True]
+    finally:
+        section.close()
+
+
+def test_section_insets_share_one_content_rail(app):
+    from pyaint.ui.widgets import CollapsibleSection, Section
+
+    top = Section("Top")
+    nested = Section("Nested", nested=True)
+    top_fold = CollapsibleSection("Top fold")
+    nested_fold = CollapsibleSection("Nested fold", nested=True)
+    try:
+        assert top._body_layout.contentsMargins().left() == 12
+        assert top_fold._body_layout.contentsMargins().left() == 12
+        # A nested group adds no second indent: its parent body supplies it.
+        assert nested._body_layout.contentsMargins().left() == 0
+        assert nested_fold._body_layout.contentsMargins().left() == 0
+    finally:
+        for widget in (top, nested, top_fold, nested_fold):
+            widget.close()
+
+
+def test_detection_checklist(app):
+    from pyaint.locators import Detection
+    from pyaint.ui.main_window import MainWindow
+
+    good = Detection(canvas=(1, 2, 3, 4), palette=(5, 6, 7, 8), palette_rows=2, palette_cols=3)
+    text = MainWindow._detection_checklist(good)
+    assert "✓ Canvas" in text and "✓ Palette 2×3" in text
+
+    empty = MainWindow._detection_checklist(Detection())
+    assert "✗ Canvas" in empty and "✗ Palette" in empty
+
+
+def test_theme_resolution_and_stylesheet():
+    from pyaint.ui import theme
+
+    assert theme.resolve_tokens("dark") is theme.DARK
+    assert theme.resolve_tokens("light") is theme.LIGHT
+    # Unknown modes fall back to auto (a real token set).
+    assert theme.resolve_tokens("nonsense") in (theme.DARK, theme.LIGHT)
+    assert theme.stylesheet(theme.DARK) != theme.stylesheet(theme.LIGHT)
+    assert theme.DARK["bg"] != theme.LIGHT["bg"]
+
+
+def test_detection_uses_review_overlay(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    from pyaint.locators import Detection
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        # Detection is an overlay; the Image panel stays on the preview page.
+        assert window._image_stack.currentWidget() is window._preview_page
+
+        image = Image.new("RGB", (80, 60), (10, 20, 30))
+        window._present_detection(image, Detection(canvas=(5, 5, 50, 40)))
+        assert window._detection_overlay.isVisible()
+        assert window._detection_overlay._confirm_btn.isEnabled()
+        assert window._detection_result is not None
+
+        # A failed detection shows the same overlay but disables confirm.
+        window._present_detection(image, Detection())
+        assert window._detection_overlay.isVisible()
+        assert not window._detection_overlay._confirm_btn.isEnabled()
+        assert window._detection_result is None
+
+        window._dismiss_detection()
+        assert not window._detection_overlay.isVisible()
+    finally:
+        window.close()
+
+
+def test_apply_detection_keeps_taught_palette_and_warns(app, tmp_path, monkeypatch):
+    """A canvas-only re-detect must keep the taught palette and say so."""
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    from pyaint.locators import Detection
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        white = Image.new("RGB", (300, 200), (255, 255, 255))
+        # Seed a previously taught canvas and palette.
+        bot.apply_detection(
+            Detection(
+                canvas=(30, 20, 180, 110),
+                palette=(40, 150, 74, 34),
+                palette_rows=2,
+                palette_cols=4,
+            ),
+            image=white,
+        )
+        assert bot._palette is not None
+        assert window._environment_ready()
+
+        # Re-detect finds only the canvas: the taught palette is kept.
+        window._detection_result = Detection(
+            canvas=(30, 20, 180, 110), palette_expected=True
+        )
+        window._detection_image = white
+        window._apply_detection()
+
+        assert bot._palette is not None
+        assert bot.profile["Palette"]["status"] is True
+        assert window._environment_ready()
+        notice = window._notice._text.text().lower()
+        assert "palette" in notice and "keeping" in notice
+    finally:
+        window.close()
+
+
+def test_apply_detection_stores_region_previews(app, tmp_path, monkeypatch):
+    """Auto-detected regions must show up as previews in Setup."""
+    import os
+
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    from pyaint import paths
+    from pyaint.locators import Detection
+    from pyaint.ui.setup_dialog import SetupDialog
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        image = Image.new("RGB", (300, 200), (255, 255, 255))
+        window._detection_result = Detection(
+            canvas=(10, 10, 200, 120),
+            palette=(20, 150, 120, 40),
+            palette_rows=2,
+            palette_cols=4,
+        )
+        window._detection_image = image
+        window._apply_detection()
+
+        assert window.profile["Canvas"]["preview"]
+        assert window.profile["Palette"]["preview"]
+        for name in ("Canvas", "Palette"):
+            path = os.path.join(paths.PROJECT_ROOT, window.profile[name]["preview"])
+            assert os.path.exists(path)
+
+        # Reopening Setup must load the saved preview rather than a blank pane.
+        dialog = SetupDialog(
+            None, bot, window.profile, required_tools=("Palette", "Canvas")
+        )
+        try:
+            assert dialog._palette_preview._original is not None
+        finally:
+            dialog.close()
+    finally:
+        window.close()
+
+
+def test_reset_config_wipes_everything_immediately(app, tmp_path, monkeypatch):
+    """Reset must reinitialize live state, not just delete the file."""
+    import os
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from pyaint import paths
+    from pyaint.locators import Detection
+
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        # Seed a taught environment and a non-default preference.
+        window.profile.target = "mspaint"
+        window.profile["Palette"].update(
+            {"status": True, "box": [10, 10, 90, 50], "rows": 2, "cols": 4}
+        )
+        window.profile["Canvas"].update({"status": True, "box": [0, 0, 200, 200]})
+        bot._palette = object()
+        window._save_config()
+        assert os.path.exists(paths.CONFIG_PATH)
+
+        monkeypatch.setattr(
+            QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes)
+        )
+        window._on_reset_config()
+
+        # Live state is back to defaults, without a restart.
+        assert window.profile.target == "generic"
+        assert window.profile["Palette"]["status"] is False
+        assert window.profile["Palette"]["box"] is None
+        assert window.profile["Canvas"]["status"] is False
+        assert bot._palette is None
+        # The fresh defaults are written back out.
+        assert os.path.exists(paths.CONFIG_PATH)
+    finally:
+        window.close()
+
+
+def test_pick_points_minimizes_and_captures_before_overlay(app, monkeypatch):
+    """Hiding a dialog ends its exec() loop, which broke manual teaching; and
+    the clean screenshot must be taken before the translucent veil appears."""
+    from PIL import Image
+    from PySide6.QtWidgets import QDialog, QWidget
+
+    import pyaint.ui.capture as capture
+
+    parent = QWidget()
+    parent.show()
+    events = []
+    sentinel = Image.new("RGB", (10, 10), (1, 2, 3))
+
+    class FakeOverlay:
+        def __init__(self, count, prompt):
+            self.points = [(1, 1), (2, 2)]
+
+        def exec(self):
+            events.append(("exec", parent.isMinimized()))
+            return QDialog.Accepted
+
+    def fake_screenshot(*args, **kwargs):
+        events.append(("screenshot", parent.isMinimized()))
+        return sentinel
+
+    monkeypatch.setattr(capture, "_PickOverlay", FakeOverlay)
+    monkeypatch.setattr(capture.pyautogui, "screenshot", fake_screenshot)
+    try:
+        result = capture.pick_points(parent, 2, "prompt")
+        # Grabbed while pyaint is minimized and *before* the overlay runs.
+        assert events[0] == ("screenshot", True)
+        assert events[1] == ("exec", True)
+        assert result is not None and len(result.points) == 2
+        assert result.image is sentinel
+        assert not parent.isMinimized()
+    finally:
+        parent.close()
+
+
+def test_pick_prefers_physical_cursor_position(monkeypatch):
+    """Qt's global point is logical and its screen data can lag a display change."""
+    import pyaint.ui.capture as capture
+
+    class FakePoint:
+        x, y = 1234, 567
+
+    monkeypatch.setattr(capture.pyautogui, "position", lambda: FakePoint())
+    assert capture._physical_cursor_pos((10, 20)) == (1234, 567)
+
+    def boom():
+        raise RuntimeError("no cursor")
+
+    monkeypatch.setattr(capture.pyautogui, "position", boom)
+    assert capture._physical_cursor_pos((10, 20)) == (10, 20)
+
+
+def test_pick_points_real_overlay_accepts_on_final_click(app, monkeypatch):
+    """Regression: the real overlay must return its points, not vanish.
+
+    Hiding a modal QDialog exits its ``exec()`` loop with ``Rejected``, so the
+    old ``hide()`` + deferred ``accept()`` made ``pick_points`` return ``None``
+    and silently dropped every taught point (preview blank, status unset).
+    """
+    from PIL import Image
+    from PySide6.QtCore import QPointF, QEvent, QTimer, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    import pyaint.ui.capture as capture
+
+    sentinel = Image.new("RGB", (10, 10), (1, 2, 3))
+    monkeypatch.setattr(capture.pyautogui, "screenshot", lambda *a, **k: sentinel)
+    # Picks store the physical cursor position, not Qt's logical event point.
+    class FakePoint:
+        x, y = 4, 5
+    monkeypatch.setattr(capture.pyautogui, "position", lambda: FakePoint())
+
+    real_overlay = capture._PickOverlay
+
+    class ClickingOverlay(real_overlay):
+        def showEvent(self, event):  # noqa: N802
+            super().showEvent(event)
+            QTimer.singleShot(0, self._click_corners)
+
+        def _click_corners(self):
+            for _ in range(2):
+                click = QMouseEvent(
+                    QEvent.MouseButtonPress,
+                    QPointF(4, 5),
+                    QPointF(4, 5),
+                    Qt.LeftButton,
+                    Qt.LeftButton,
+                    Qt.NoModifier,
+                )
+                self.mousePressEvent(click)
+
+    monkeypatch.setattr(capture, "_PickOverlay", ClickingOverlay)
+    result = capture.pick_points(None, 2, "prompt")
+    assert result is not None
+    assert len(result.points) == 2
+    assert result.image is sentinel
+
+
+def test_setup_teach_palette_samples_and_previews(app, tmp_path, monkeypatch):
+    """Two taught corners must set the palette status and fill the preview."""
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+
+    import pyaint.ui.setup_dialog as setup_module
+    from pyaint.profile import Profile
+    from pyaint.ui.capture import PickResult
+    from pyaint.ui.setup_dialog import SetupDialog
+
+    image = Image.new("RGB", (400, 300), (240, 240, 240))
+    colors = [
+        (255, 0, 0), (0, 200, 0), (0, 0, 255), (255, 255, 0),
+        (255, 0, 255), (0, 255, 255), (128, 0, 128), (255, 128, 0),
+    ]
+    # 2 rows x 4 columns inside (100, 50)-(260, 130).
+    for index, color in enumerate(colors):
+        row, col = divmod(index, 4)
+        for y in range(50 + row * 40, 50 + (row + 1) * 40):
+            for x in range(100 + col * 40, 100 + (col + 1) * 40):
+                image.putpixel((x, y), color)
+
+    profile = Profile()
+    profile["Palette"]["rows"] = 2
+    profile["Palette"]["cols"] = 4
+    dialog = SetupDialog(None, Bot(), profile, required_tools=("Palette", "Canvas"))
+    try:
+        assert dialog._current == "Palette"
+        monkeypatch.setattr(
+            setup_module,
+            "pick_points",
+            lambda parent, count, prompt: PickResult([(100, 50), (260, 130)], image),
+        )
+        dialog._teach()
+        assert profile["Palette"]["status"] is True
+        assert profile["Palette"]["color_coords"]
+        assert dialog._palette_preview._original is not None
+    finally:
+        dialog.close()
+
+
+def test_setup_teach_palette_failure_keeps_status_unset(app, tmp_path, monkeypatch):
+    """A failed sample must not claim the palette is configured."""
+    monkeypatch.chdir(tmp_path)
+    from PySide6.QtWidgets import QMessageBox
+
+    import pyaint.ui.setup_dialog as setup_module
+    from pyaint.profile import Profile
+    from pyaint.ui.capture import PickResult
+    from pyaint.ui.setup_dialog import SetupDialog
+
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+    profile = Profile()
+    dialog = SetupDialog(None, Bot(), profile, required_tools=("Palette", "Canvas"))
+    try:
+        # No screenshot was captured, so sampling must fail rather than fall
+        # back to a fresh grab that shows the dialog itself.
+        monkeypatch.setattr(
+            setup_module,
+            "pick_points",
+            lambda parent, count, prompt: PickResult([(10, 10), (80, 60)], None),
+        )
+        dialog._teach()
+        assert profile["Palette"]["status"] is False
+        assert dialog._palette_preview._original is None
+    finally:
+        dialog.close()
+
+
+def _teachable_palette_image():
+    """A 2x4 swatch grid inside (100, 50)-(260, 130)."""
+    from PIL import Image
+
+    image = Image.new("RGB", (400, 300), (240, 240, 240))
+    colors = [
+        (255, 0, 0), (0, 200, 0), (0, 0, 255), (255, 255, 0),
+        (255, 0, 255), (0, 255, 255), (128, 0, 128), (255, 128, 0),
+    ]
+    for index, color in enumerate(colors):
+        row, col = divmod(index, 4)
+        for y in range(50 + row * 40, 50 + (row + 1) * 40):
+            for x in range(100 + col * 40, 100 + (col + 1) * 40):
+                image.putpixel((x, y), color)
+    return image
+
+
+def test_setup_palette_preview_persists_across_reopen(app, tmp_path, monkeypatch):
+    """The captured palette preview must survive closing and reopening Setup."""
+    monkeypatch.chdir(tmp_path)
+    import pyaint.ui.setup_dialog as setup_module
+    from pyaint.profile import Profile
+    from pyaint.ui.capture import PickResult
+    from pyaint.ui.setup_dialog import SetupDialog
+
+    image = _teachable_palette_image()
+    profile = Profile()
+    profile["Palette"]["rows"] = 2
+    profile["Palette"]["cols"] = 4
+    dialog = SetupDialog(None, Bot(), profile, required_tools=("Palette", "Canvas"))
+    try:
+        monkeypatch.setattr(
+            setup_module,
+            "pick_points",
+            lambda parent, count, prompt: PickResult([(100, 50), (260, 130)], image),
+        )
+        dialog._teach()
+        assert profile["Palette"]["preview"]
+    finally:
+        dialog.close()
+
+    reopened = SetupDialog(None, Bot(), profile, required_tools=("Palette", "Canvas"))
+    try:
+        assert reopened._current == "Palette"
+        assert reopened._palette_preview._original is not None
+        assert "colours sampled" in reopened._palette_feedback.text()
+    finally:
+        reopened.close()
+
+
+def test_setup_clear_tool_forgets_palette(app, tmp_path, monkeypatch):
+    """The Clear button must unset the tool and remove its preview."""
+    import os
+
+    monkeypatch.chdir(tmp_path)
+    import pyaint.ui.setup_dialog as setup_module
+    from pyaint import paths
+    from pyaint.profile import Profile
+    from pyaint.ui.capture import PickResult
+    from pyaint.ui.setup_dialog import SetupDialog
+
+    image = _teachable_palette_image()
+    profile = Profile()
+    profile["Palette"]["rows"] = 2
+    profile["Palette"]["cols"] = 4
+    bot = Bot()
+    dialog = SetupDialog(None, bot, profile, required_tools=("Palette", "Canvas"))
+    try:
+        monkeypatch.setattr(
+            setup_module,
+            "pick_points",
+            lambda parent, count, prompt: PickResult([(100, 50), (260, 130)], image),
+        )
+        dialog._teach()
+        assert profile["Palette"]["status"] is True
+        preview_file = os.path.join(paths.PROJECT_ROOT, profile["Palette"]["preview"])
+        assert os.path.exists(preview_file)
+
+        dialog._clear_tool("Palette")
+        assert profile["Palette"]["status"] is False
+        assert profile["Palette"]["box"] is None
+        assert profile["Palette"]["color_coords"] is None
+        assert profile["Palette"]["preview"] is None
+        assert bot._palette is None
+        assert not os.path.exists(preview_file)
+    finally:
+        dialog.close()
+
+
+def test_pick_rejects_points_outside_the_captured_screen(app, monkeypatch):
+    """A pick on an uncaptured monitor must not become a silently bad box."""
+    from PIL import Image
+    from PySide6.QtWidgets import QDialog
+
+    import pyaint.ui.capture as capture
+
+    sentinel = Image.new("RGB", (1280, 720))
+
+    class FakeOverlay:
+        def __init__(self, count, prompt):
+            self.points = [(1500, 900)]  # outside the primary screenshot
+
+        def exec(self):
+            return QDialog.Accepted
+
+    warnings = []
+    monkeypatch.setattr(capture, "_PickOverlay", FakeOverlay)
+    monkeypatch.setattr(capture.pyautogui, "screenshot", lambda *a, **k: sentinel)
+    monkeypatch.setattr(
+        capture.QMessageBox, "warning", lambda *a, **k: warnings.append(a)
+    )
+    assert capture.pick_points(None, 1, "prompt") is None
+    assert warnings
+
+
+def test_progress_signal_updates_overlay_bar(app, tmp_path, monkeypatch):
+    """Drawing progress goes to the floating overlay, not a status bar."""
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        window.signals.progress.emit(5, 10, 1.0)
+        assert window._overlay._bar.value() == 50
+        assert not hasattr(window, "_progress")
+    finally:
+        window.close()
+
+
+def test_notice_banner_severity_and_action(app):
+    from pyaint.ui.widgets import NoticeBanner
+
+    banner = NoticeBanner()
+    fired = []
+    try:
+        banner.show_notice("Something missing", "warning", "Fix", lambda: fired.append(True))
+        assert banner.property("severity") == "warning"
+        assert not banner._action.isHidden()
+        banner._action.click()
+        assert fired == [True]
+
+        banner.show_notice("It broke", "error")
+        assert banner.property("severity") == "error"
+        assert banner._action.isHidden()
+
+        banner.clear()
+        assert banner.isHidden()
+    finally:
+        banner.close()
+
+
+def test_target_switcher_remembers_environment(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        # Deterministic environment: colour-position palette (no screenshot).
+        window._config_path = str(tmp_path / "config.json")
+        window.profile["Palette"]["box"] = None
+        window.profile["Palette"]["color_coords"] = {"(255, 0, 0)": [1, 1], "(0, 255, 0)": [2, 2]}
+        window.profile["Palette"]["status"] = True
+        window.profile["Canvas"]["box"] = [10, 10, 110, 110]
+        window._environments = {window.profile.target: window.profile.snapshot_environment()}
+        window._restore_environment()
+        first = window.profile.target
+
+        ids = [window._target_combo.itemData(i) for i in range(window._target_combo.count())]
+        other = next(i for i in ids if i != first)
+        window._target_combo.setCurrentIndex(ids.index(other))
+        assert window.profile.target == other
+        # The new target has no taught geometry of its own.
+        assert window.bot._palette is None
+        assert window.bot._canvas is None
+
+        window._target_combo.setCurrentIndex(ids.index(first))
+        assert window.profile.target == first
+        assert window.bot._canvas == (10, 10, 100, 100)
+        assert window.bot._palette is not None
+        assert len(window.bot._palette.colors) == 2
+    finally:
+        window.close()
+
+
+def test_preflight_reports_missing_pieces(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        # Clear any environment restored from the developer's config.
+        window.profile["Canvas"]["box"] = None
+        window.profile["Palette"]["box"] = None
+        window.profile["Palette"]["color_coords"] = None
+        window.bot._palette = None
+        window._refresh_readiness()
+
+        reasons = [reason for reason, _, _ in window._preflight_issues()]
+        assert "canvas not set" in reasons
+        assert "palette not set" in reasons
+        # The row carries the status; the panel it reveals carries the verbs.
+        assert window._setup_row.steps()[1][1] is False
+        window.show()
+        app.processEvents()
+        assert window._setup_row.is_open() is True
+        assert window._auto_btn.isVisibleTo(window)
+        assert window._teach_btn.isVisibleTo(window)
+    finally:
+        window.close()
+
+
+def test_image_field_browse_action_and_empty_load(app, tmp_path, monkeypatch):
+    """Browse is a field helper; an empty Load must not silently open a dialog."""
+    from PIL import Image
+    from PySide6.QtWidgets import QFileDialog
+
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        picked = tmp_path / "picked.png"
+        Image.new("RGB", (24, 24), (1, 2, 3)).save(picked)
+        calls = {"count": 0}
+
+        def fake_dialog(*args, **kwargs):
+            calls["count"] += 1
+            return str(picked), "Images (*.png)"
+
+        monkeypatch.setattr(QFileDialog, "getOpenFileName", fake_dialog)
+
+        # Empty field: Load is disabled and never reaches the file dialog.
+        window._url_edit.clear()
+        assert not window._load_btn.isEnabled()
+        window._on_load_clicked()
+        assert calls["count"] == 0
+
+        # The folder action opens the picker and mirrors the path into the field.
+        window._browse_action.trigger()
+        assert calls["count"] == 1
+        assert window._url_edit.text() == str(picked)
+        assert window._load_btn.isEnabled()
+        assert window._imname == str(picked)
+    finally:
+        window.close()
+
+
+def test_image_preview_accepts_file_drops(app):
+    from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+
+    from pyaint.ui.widgets import ImagePreview
+
+    preview = ImagePreview()
+    seen = []
+    preview.fileDropped.connect(seen.append)
+    try:
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile("C:/tmp/pic.png")])
+        enter = QDragEnterEvent(
+            QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        preview.dragEnterEvent(enter)
+        assert preview.property("dragActive") == "true"
+
+        drop = QDropEvent(
+            QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        preview.dropEvent(drop)
+        assert seen == ["C:/tmp/pic.png"]
+        assert preview.property("dragActive") == "false"
+    finally:
+        preview.close()
+
+
+def test_image_preview_accepts_remote_url_drops(app):
+    """Browser drags carry a URL, not a local file, so they must be accepted."""
+    from PySide6.QtCore import QByteArray, QMimeData, QPoint, Qt
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+
+    from pyaint.ui.widgets import ImagePreview
+
+    preview = ImagePreview()
+    seen = []
+    preview.remoteDropped.connect(seen.append)
+    try:
+        mime = QMimeData()
+        mime.setData("text/uri-list", QByteArray(b"https://example.com/cat.png"))
+        enter = QDragEnterEvent(
+            QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        preview.dragEnterEvent(enter)
+        assert preview.property("dragActive") == "true"
+
+        drop = QDropEvent(
+            QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        preview.dropEvent(drop)
+        assert seen == ["https://example.com/cat.png"]
+        assert preview.property("dragActive") == "false"
+    finally:
+        preview.close()
+
+
+def test_image_preview_accepts_data_uri_drops(app):
+    from PySide6.QtCore import QByteArray, QMimeData, QPoint, Qt
+    from PySide6.QtGui import QDropEvent
+
+    from pyaint.ui.widgets import ImagePreview
+
+    preview = ImagePreview()
+    seen = []
+    preview.remoteDropped.connect(seen.append)
+    uri = "data:image/png;base64,iVBORw0KGgo="
+    try:
+        mime = QMimeData()
+        mime.setData("text/plain", QByteArray(uri.encode()))
+        drop = QDropEvent(
+            QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier
+        )
+        preview.dropEvent(drop)
+        assert seen == [uri]
+    finally:
+        preview.close()
+
+
+def test_remote_source_prefers_image_url_over_page_url():
+    from PySide6.QtCore import QByteArray, QMimeData
+
+    from pyaint.ui.widgets import remote_source_from_mime
+
+    mime = QMimeData()
+    mime.setData(
+        "text/html",
+        QByteArray(b'<a href="#"><img src="https://example.com/real.png"></a>'),
+    )
+    mime.setData("text/uri-list", QByteArray(b"https://www.google.com/search?q=cat"))
+    assert remote_source_from_mime(mime) == "https://example.com/real.png"
+
+
+def test_main_window_routes_remote_drops(app, tmp_path, monkeypatch):
+    from PySide6.QtCore import QByteArray, QMimeData
+
+    monkeypatch.chdir(tmp_path)
+    bot = Bot()
+    window = MainWindow(bot)
+    seen = []
+    monkeypatch.setattr(window, "_load_dropped_url", seen.append)
+    try:
+        mime = QMimeData()
+        mime.setData("text/uri-list", QByteArray(b"https://example.com/a.png"))
+        window._handle_image_drop(mime)
+        assert seen == ["https://example.com/a.png"]
+    finally:
+        window.close()
+
+
+def test_decode_data_uri_and_unwrap_redirect():
+    import base64
+
+    from pyaint.ui.main_window import _decode_data_uri, _unwrap_image_redirect
+
+    payload = base64.b64encode(b"hello").decode()
+    assert _decode_data_uri(f"data:image/png;base64,{payload}") == b"hello"
+
+    wrapped = (
+        "https://www.google.com/imgres?imgurl=https%3A%2F%2Fexample.com%2Fcat.png&tbnid=x"
+    )
+    assert _unwrap_image_redirect(wrapped) == "https://example.com/cat.png"
+    other = "https://example.com/page?url=https://evil.test/x.png"
+    assert _unwrap_image_redirect(other) == other
+
+
+def test_startup_restores_palette_from_saved_coords_without_screenshot(
+    app, tmp_path, monkeypatch
+):
+    """A saved palette must rebuild offline, not by re-screenshotting the box."""
+    import json
+
+    import pyaint.palette as palette_module
+    from pyaint import paths
+
+    config = {
+        "target": "mspaint",
+        "Canvas": {"status": True, "box": [10, 20, 210, 120]},
+        "Palette": {
+            "status": True,
+            "box": [10, 10, 210, 40],
+            "rows": 1,
+            "cols": 2,
+            "color_coords": {"(255, 0, 0)": [15, 15], "(0, 0, 255)": [115, 15]},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setattr(paths, "CONFIG_PATH", str(cfg))
+
+    def no_screenshot(*args, **kwargs):
+        raise AssertionError("startup must not screenshot the palette")
+
+    monkeypatch.setattr(palette_module.pyautogui, "screenshot", no_screenshot)
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        assert bot._canvas == (10, 20, 200, 100)
+        palette = bot._palette
+        assert palette is not None
+        assert len(palette.colors) == 2
+        assert (255, 0, 0) in palette.colors
+        assert palette.colors_pos[(255, 0, 0)] == (15, 15)
+        assert window._environment_ready()
+    finally:
+        window.close()
+
+
+def test_close_flushes_pending_settings(app, tmp_path, monkeypatch):
+    """Closing the window must persist settings that no slot saved eagerly."""
+    import json
+
+    from pyaint import paths
+
+    cfg = tmp_path / "config.json"
+    monkeypatch.setattr(paths, "CONFIG_PATH", str(cfg))
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        window.bot.pause_key = "q"
+        window.close()
+        assert json.loads(cfg.read_text(encoding="utf-8"))["pause_key"] == "q"
+    finally:
+        window.close()
+
+
+def test_color_metric_option_defaults_and_persists(app):
+    import json
+
+    from pyaint import paths
+    from pyaint.palette import DEFAULT_METRIC, METRIC_RGB
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        assert window._metric_combo.currentData() == DEFAULT_METRIC
+        assert bot.color_metric == DEFAULT_METRIC
+
+        legacy = window._metric_combo.findData(METRIC_RGB)
+        window._metric_combo.setCurrentIndex(legacy)
+        assert bot.color_metric == METRIC_RGB
+        with open(paths.CONFIG_PATH, encoding="utf-8") as handle:
+            assert json.load(handle)["color_metric"] == METRIC_RGB
+    finally:
+        window.close()
+
+
+def test_mspaint_double_click_toggle_persists(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._drawing_section.set_expanded(True)  # knobs start collapsed
+        # Desktop recipes expose it; browser recipes hide it.
+        assert window._chk_mspaint.isVisibleTo(window)
+        window.profile.target = "skribbl"
+        window._sync_env_ui()
+        assert not window._chk_mspaint.isVisibleTo(window)
+        window.profile.target = "mspaint"
+        window._sync_env_ui()
+        assert window._chk_mspaint.isVisibleTo(window)
+
+        window._chk_mspaint.setChecked(True)
+        assert window.profile.mspaint_mode["enabled"] is True
+        window._save_config()
+    finally:
+        window.close()
+
+    restored = MainWindow(Bot())
+    try:
+        assert restored.profile.mspaint_mode["enabled"] is True
+    finally:
+        restored.close()
+
+
+def test_ignore_white_and_transparent_are_always_on(app):
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        assert window.draw_options & Bot.IGNORE_WHITE
+        assert window.draw_options & Bot.IGNORE_TRANSPARENT
+        # The old overrides are gone from the inspector.
+        assert not hasattr(window, "_chk_ignore")
+        assert not hasattr(window, "_chk_transparent")
+        assert not hasattr(window, "_chk_skip")
+
+        # A legacy snapshot that disables them is ignored (always on).
+        window._apply_drawing(
+            {
+                "drawing_options": {
+                    "ignore_white_pixels": False,
+                    "ignore_transparent_pixels": False,
+                }
+            }
+        )
+        assert window.draw_options & Bot.IGNORE_WHITE
+        assert window.draw_options & Bot.IGNORE_TRANSPARENT
+    finally:
+        window.close()
+
+
+def test_load_field_routes_url_path_and_search(app, monkeypatch):
+    from pyaint.ui.main_window import _looks_like_path
+
+    # Path detection uses shape, not existence, so typos don't search.
+    assert _looks_like_path(r"C:\pics\a.png")
+    assert _looks_like_path("./a.png")
+    assert _looks_like_path("/tmp/a.png")
+    assert not _looks_like_path("cartoon cat")
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        started = []
+        monkeypatch.setattr(
+            window, "_start_task", lambda name, work, **kwargs: started.append(name)
+        )
+        searched = []
+        monkeypatch.setattr(window, "_start_search", lambda query: searched.append(query))
+
+        window._url_edit.setText("https://example.com/a.png")
+        window._on_load_clicked()
+        assert started == ["Download image"]
+
+        # A missing but path-shaped value stays a "not found", not a search.
+        window._url_edit.setText(r"C:\definitely\missing\file.png")
+        window._on_load_clicked()
+        assert started == ["Download image"]
+        assert searched == []
+
+        window._url_edit.setText("cartoon cat")
+        window._on_load_clicked()
+        assert searched == ["cartoon cat"]
+    finally:
+        window.close()
+
+
+def _png_bytes(color=(255, 0, 0), size=(8, 8)):
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", size, color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_search_gallery_populates_selects_and_returns(app, monkeypatch):
+    import pyaint.image_search as image_search
+    from pyaint.image_search import ImageCandidate, SearchPage
+
+    candidates = [
+        ImageCandidate(
+            url="https://example/full1.png",
+            thumb_url="https://example/thumb1.png",
+            mime="image/png",
+            title="File:One.png",
+            source_url="https://commons.example/One",
+            width=100,
+            height=80,
+        ),
+        ImageCandidate(
+            url="https://example/full2.png",
+            thumb_url="https://example/thumb2.png",
+            mime="image/png",
+            title="File:Two.png",
+            source_url="https://commons.example/Two",
+            width=80,
+            height=120,
+        ),
+    ]
+
+    def fake_search_page(query, **kwargs):
+        return SearchPage(candidates=candidates, next_continue=None)
+
+    monkeypatch.setattr(image_search, "search_page", fake_search_page)
+    monkeypatch.setattr(image_search, "fetch_bytes", lambda url, timeout=30: _png_bytes())
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        # Run the page fetch synchronously instead of on the thread pool.
+        monkeypatch.setattr(
+            window,
+            "_request_search_page",
+            lambda cont: window._on_search_page(
+                window._search_generation,
+                fake_search_page(window._search_query, cont=cont),
+            ),
+        )
+        monkeypatch.setattr(window, "_start_thumbnails", lambda candidates: None)
+        # Commit synchronously instead of via the busy worker thread.
+        monkeypatch.setattr(window, "_start_task", lambda name, work, **kw: work())
+
+        window._start_search("cats")
+        assert window._gallery.count() == 2
+        assert window._image_stack.currentWidget() is window._gallery
+        assert window._gallery.first_candidate() == candidates[0]
+
+        window._on_candidate_selected(candidates[1])
+        assert window._image_stack.currentWidget() is window._preview_page
+        assert "File:Two.png" in window._image_info.text()
+        assert not window._back_btn.isHidden()
+
+        window._show_results()
+        assert window._image_stack.currentWidget() is window._gallery
+    finally:
+        window.close()
+
+
+def test_double_enter_selects_first_result(app, monkeypatch):
+    from pyaint.image_search import ImageCandidate
+
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        selected = []
+        monkeypatch.setattr(window, "_on_candidate_selected", selected.append)
+        monkeypatch.setattr(window, "_start_search", lambda query: None)
+        window._search_query = "cats"
+        window._gallery.add_candidate(
+            ImageCandidate(
+                url="u",
+                thumb_url="t",
+                mime="image/png",
+                title="File:Cats.png",
+                source_url="s",
+                width=10,
+                height=10,
+            )
+        )
+        window._image_stack.setCurrentWidget(window._gallery)
+        window._url_edit.setText("cats")
+        window._on_load_clicked()
+        assert len(selected) == 1
+    finally:
+        window.close()
+
+
+def test_search_page_task_reports_page(monkeypatch):
+    import pyaint.image_search as image_search
+    from pyaint.ui.search_tasks import SearchPageTask
+
+    monkeypatch.setattr(image_search, "search_page", lambda q, **kw: "PAGE")
+    task = SearchPageTask("q", None, 7)
+    got = []
+    task.signals.ready.connect(lambda generation, page: got.append((generation, page)))
+    task.run()
+    assert got == [(7, "PAGE")]
+
+
+def test_image_source_selector_defaults_and_persists(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    import pyaint.image_search as image_search
+
+    window = MainWindow(Bot())
+    try:
+        assert window._provider == image_search.DEFAULT_PROVIDER == "openverse"
+        assert window._provider_combo.currentData() == "openverse"
+
+        window._provider_combo.setCurrentIndex(
+            window._provider_combo.findData("commons")
+        )
+        assert window._provider == "commons"
+        assert window.tools.get("image_search_provider") == "commons"
+    finally:
+        window.close()
+
+    restored = MainWindow(Bot())
+    try:
+        assert restored._provider == "commons"
+        assert restored._provider_combo.currentData() == "commons"
+    finally:
+        restored.close()
+
+
+def test_changing_source_reruns_active_search(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        seen = []
+        monkeypatch.setattr(window, "_start_search", seen.append)
+        window._search_query = "cats"
+        window._image_stack.setCurrentWidget(window._gallery)
+        window._provider_combo.setCurrentIndex(
+            window._provider_combo.findData("commons")
+        )
+        assert seen == ["cats"]
+    finally:
+        window.close()
+
+
+def test_drawing_settings_are_per_target(app):
+    bot = Bot()
+    window = MainWindow(bot)
+    try:
+        ids = [
+            window._target_combo.itemData(i)
+            for i in range(window._target_combo.count())
+        ]
+        assert "mspaint" in ids and "skribbl" in ids
+
+        # Tune MS Paint fast.
+        window._target_combo.setCurrentIndex(ids.index("mspaint"))
+        window.bot.settings[:] = [0.01, 4, 0.05]
+        window.bot.jump_threshold = 3
+        window._store_drawing_settings()
+        window._save_config()
+
+        # skribbl falls back to its slower recipe defaults.
+        window._target_combo.setCurrentIndex(ids.index("skribbl"))
+        assert window.bot.settings[0] == pytest.approx(0.05)
+        assert window.bot.settings[2] == pytest.approx(0.5)
+        assert window.bot.jump_threshold == 5
+
+        # Tune skribbl slower still; it must not leak into MS Paint.
+        window.bot.settings[:] = [0.2, 10, 1.0]
+        window._store_drawing_settings()
+        window._save_config()
+
+        window._target_combo.setCurrentIndex(ids.index("mspaint"))
+        assert window.bot.settings[0] == pytest.approx(0.01)
+        assert window.bot.settings[1] == pytest.approx(4)
+        assert window.bot.jump_threshold == 3
+
+        window._target_combo.setCurrentIndex(ids.index("skribbl"))
+        assert window.bot.settings[0] == pytest.approx(0.2)
+        assert window.bot.settings[1] == pytest.approx(10)
+    finally:
+        window.close()
+
+
+def test_dual_readout_slider_shows_number_and_band(app):
+    from pyaint.ui.widgets import DualReadoutSlider
+
+    field = DualReadoutSlider("Detail", "detail", 1, 50, 12, 1)
+    try:
+        assert field._value_label.text() == "12 px"
+        assert field._band_label.text() == "Balanced"
+        field.set_value(40, emit=True)
+        assert field._value_label.text() == "40 px"
+        assert field._band_label.text() == "Coarse"
+    finally:
+        field.close()
+
+
+def test_edge_tracing_is_default_and_outline_is_hidden(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        assert window._mode == Bot.SKETCH
+        assert window._mode_rail.mode() == Bot.SKETCH
+        assert Bot.OUTLINE not in window._mode_rail._buttons
+        # The hidden state holder keeps the retired mode runnable.
+        assert window._mode_combo.findData(Bot.OUTLINE) >= 0
+    finally:
+        window.close()
+
+
+def test_saved_outline_mode_opens_as_edge_tracing(app, tmp_path, monkeypatch):
+    from pyaint import paths
+
+    monkeypatch.chdir(tmp_path)
+    os.makedirs(os.path.dirname(paths.CONFIG_PATH), exist_ok=True)
+    with open(paths.CONFIG_PATH, "w", encoding="utf-8") as fh:
+        json.dump({"draw_mode": "outline"}, fh)
+
+    window = MainWindow(Bot())
+    try:
+        assert window._mode == Bot.SKETCH
+        assert window._mode_rail.mode() == Bot.SKETCH
+    finally:
+        window.close()
+
+
+def test_mode_rail_is_a_single_choice(app):
+    from pyaint import planner
+    from pyaint.ui.widgets import ModeRail
+
+    rail = ModeRail(planner.LAYERED)
+    try:
+        assert rail.mode() == planner.LAYERED
+        rail.set_mode(planner.SKETCH)
+        assert rail.mode() == planner.SKETCH
+        # Radio exclusivity: exactly one mode is ever active.
+        checked = [b for b in rail._buttons.values() if b.isChecked()]
+        assert len(checked) == 1
+    finally:
+        rail.close()
+
+
+def test_load_field_splits_load_from_search(app, tmp_path, monkeypatch):
+    """A URL/path loads; plain words search; the Source picker only shows for a search."""
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._url_edit.setText("https://example.com/a.png")
+        assert window._load_btn.text() == "Load"
+        assert not window._source_label.isVisibleTo(window)
+
+        window._url_edit.setText("cartoon cat")
+        assert window._load_btn.text() == "Search"
+        assert window._source_label.isVisibleTo(window)
+    finally:
+        window.close()
+
+
+def test_guide_note_follows_hover(app, tmp_path, monkeypatch):
+    """Hovering/focusing a control swaps the guide note; leaving restores the mode note."""
+    from PySide6.QtCore import QEvent
+
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._url_edit.setToolTip("Image URL or file path, or search words")
+        window._update_guide()
+        baseline = window._guide._text.text()
+
+        window.eventFilter(window._url_edit, QEvent(QEvent.Enter))
+        assert "Image URL" in window._guide._text.text()
+        window.eventFilter(window._url_edit, QEvent(QEvent.Leave))
+        assert window._guide._text.text() == baseline
+    finally:
+        window.close()
+
+
+def test_notice_grows_to_fit_a_long_message(app):
+    """A wrapped message must grow the card, not spill out of its bottom edge."""
+    from pyaint.ui.widgets import NoticeBanner
+
+    banner = NoticeBanner()
+    try:
+        banner.show_notice(
+            '"Generic / other app" is not set up yet — find its canvas and '
+            "palette, or pick both regions by hand if detection cannot see them.",
+            "warning", "Find the canvas", lambda: None,
+        )
+        app.processEvents()
+        label = banner._text
+        assert label.height() >= label.heightForWidth(label.width())
+        assert label.geometry().bottom() < banner.height()
+    finally:
+        banner.close()
+
+
+def test_notice_raised_before_show_lands_bottom_right(app, tmp_path, monkeypatch):
+    """A startup notice is measured and placed before the window is laid out."""
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        # Raised while the window is still hidden, as a startup warning is.
+        window._notice.show_notice(
+            '"Generic / other app" is not set up yet — find its canvas and '
+            "palette.",
+            "warning", "Find the canvas", lambda: None,
+        )
+        window.show()
+        app.processEvents()
+        notice = window._notice
+        central = window.centralWidget()
+        assert notice.isVisibleTo(window)
+        assert notice.x() > central.width() // 2          # bottom-right, not 0,0
+        assert notice.geometry().bottom() < central.height()
+        label = notice._text
+        assert label.height() >= label.heightForWidth(label.width())
+        assert label.geometry().bottom() < notice.height()
+    finally:
+        window.close()
+
+
+def test_notice_toast_behaviour(app, tmp_path, monkeypatch):
+    """Notices are floating toasts: info auto-dismisses, errors persist."""
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window._notice.show_notice("hello", "info")
+        assert window._notice.isVisibleTo(window)
+        assert window._notice._timer.isActive()
+        window._notice.clear()
+        assert not window._notice.isVisibleTo(window)
+        # An error carries the fix, so it must not auto-dismiss.
+        window._notice.show_notice("boom", "error", "Fix", lambda: None)
+        assert not window._notice._timer.isActive()
+    finally:
+        window.close()
+
+
+def test_setup_panel_hangs_off_the_row(app, tmp_path, monkeypatch):
+    from PySide6.QtCore import QPoint
+
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        window.show()
+        app.processEvents()
+        if window._setup_row.is_open():
+            window._setup_row.toggle()
+        window._setup_row.toggle()
+        app.processEvents()
+        assert window._setup_panel.isVisibleTo(window)
+        from pyaint.ui.main_window import COLUMN_WIDTH, GAP
+
+        row = window._setup_row.mapTo(window.centralWidget(), QPoint(0, 0))
+        panel = window._setup_panel.geometry()
+        # The clicked edge is the revealed edge: the panel starts exactly at the
+        # row's bottom and reaches its right edge, and nothing in the layout
+        # moved for it. It stops at the tool column so the column stays usable.
+        assert panel.y() == row.y() + window._setup_row.height()
+        assert panel.x() + panel.width() == row.x() + window._setup_row.width()
+        assert panel.x() == row.x() + COLUMN_WIDTH + GAP
+        assert window._setup_panel.parent() is window.centralWidget()
+
+        window._setup_row.toggle()
+        app.processEvents()
+        assert not window._setup_panel.isVisibleTo(window)
+    finally:
+        window.close()
+
+
+def test_setup_panel_stays_shut_after_the_user_closes_it(app, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    window = MainWindow(Bot())
+    try:
+        assert window._setup_row.is_open()  # nothing set up yet: auto-open
+        window._setup_row.toggle()          # user folds it away
+        assert not window._setup_row.is_open()
+        window._refresh_readiness()         # a refresh must not re-open it
+        assert not window._setup_row.is_open()
+        assert window._setup_touched is True
+    finally:
+        window.close()

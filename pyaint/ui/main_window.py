@@ -1,0 +1,2974 @@
+"""VS Code-inspired main window (PySide6).
+
+This is the Qt replacement for the historical Tk ``Window``. It owns the
+shared :class:`~pyaint.profile.Profile`, persists ``config.json``, and runs
+long tasks on worker threads. Progress is delivered by ``Bot`` through a
+callback that emits a Qt signal, so all UI updates happen on the main thread.
+"""
+
+from __future__ import annotations
+
+import base64
+import io
+import os
+import re
+import shutil
+import tempfile
+import threading
+import time
+import traceback
+import urllib.error as urllib_error
+import urllib.parse
+import urllib.request
+
+from typing import Optional
+
+from PIL import Image
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QEvent,
+    QObject,
+    QPoint,
+    QPropertyAnimation,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+)
+from PySide6.QtGui import QGuiApplication, QIcon, QPixmap
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QSpinBox,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from pyaint import config as pyaint_config
+from pyaint import image_search
+from pyaint import paths
+from pyaint.bot import Bot
+from pyaint.locators import detect_target
+from pyaint.log import log
+from pyaint.palette import DEFAULT_METRIC, METRIC_CIEDE2000, METRIC_RGB, METRICS
+from pyaint.profile import Profile
+from pyaint.targets import (
+    apply_profile_defaults,
+    get_recipe,
+    list_recipes,
+    load_user_recipes,
+    merge_drawing_settings,
+)
+from pyaint.ui import modes, theme
+from pyaint.ui.countdown import CountdownBanner
+from pyaint.ui.icons import icon
+from pyaint.ui.inspector import InspectorMixin
+from pyaint.ui.overlay import DetectionOverlay, ProgressOverlay
+from pyaint.ui.paper import PaperButton, PaperSegmented, PaperSurface
+from pyaint.ui.plan_tasks import PlanPreviewTask
+from pyaint.ui.presets import (
+    SKETCH_PRESET_FIELDS,
+    SKETCH_PRESET_OPTIONS,
+    drawing_preset_by_key,
+    look_by_key,
+    look_options,
+    match_drawing_preset,
+    match_preset,
+    preset_by_key,
+)
+from pyaint.ui.previews import store_box_preview
+from pyaint.ui.widgets import (
+    CheckBox,
+    CheckBoxField,
+    CollapsibleSection,
+    GuidePanel,
+    ImagePreview,
+    MasonryGallery,
+    ModeRail,
+    NoticeBanner,
+    Section,
+    SetupRow,
+    SheetCard,
+    local_path_from_mime,
+    pil_to_qpixmap,
+    raw_image_from_mime,
+    remote_source_from_mime,
+)
+from pyaint.validation import validate_recipe
+
+
+class UiSignals(QObject):
+    """Cross-thread signals: workers emit, the main thread consumes."""
+
+    progress = Signal(int, int, float)
+    status = Signal(str)
+    finished = Signal(str)
+    image_ready = Signal(str)
+    message = Signal(str)
+
+
+_PATH_LIKE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|\.{1,2}[\\/]|[\\/]|~)")
+
+#: Width of the persistent tool column, and the desk gutter (outer margin and
+#: the gap between the column and the artwork).
+COLUMN_WIDTH = 300
+MARGIN = 14
+GAP = 14
+
+#: The bundled sample shown when there is no remembered image. A frozen build
+#: unpacks it to ``RESOURCE_ROOT`` (see ``pyaint.spec``); a source checkout
+#: reads it straight from ``assets/``.
+DEFAULT_SAMPLE = os.path.join(paths.RESOURCE_ROOT, "assets", "koala.png")
+
+
+class DeskBody(QWidget):
+    """A full-width canvas with the tool column drawn over it.
+
+    The canvas spans the whole width so the hero sheet can extend under the
+    column (the desk "tuck"); the column is a plain full-height sheet raised
+    above it.
+    """
+
+    def __init__(self, column: QWidget, canvas: QWidget, parent=None):
+        super().__init__(parent)
+        self._column = column
+        self._canvas = canvas
+        self._canvas.setParent(self)
+        self._column.setParent(self)
+        self._column.raise_()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        width, height = self.width(), self.height()
+        self._canvas.setGeometry(0, 0, width, height)
+        self._column.setGeometry(0, 0, COLUMN_WIDTH, height)
+        self._column.raise_()
+        super().resizeEvent(event)
+#: Image-search hosts that wrap the real file in a redirect/page URL.
+_REDIRECT_HOSTS = ("google.", "bing.", "duckduckgo.", "yandex.", "search.brave.")
+
+
+def _looks_like_path(text: str) -> bool:
+    """True when ``text`` looks like a filesystem path, not a search query."""
+    return bool(_PATH_LIKE.match(text))
+
+
+def _decode_data_uri(uri: str) -> bytes:
+    """Decode an ``image/...`` data URI into raw bytes."""
+    header, separator, payload = uri.partition(",")
+    if not separator:
+        raise ValueError("malformed data URI")
+    if ";base64" in header.lower():
+        return base64.b64decode(payload)
+    return urllib.parse.unquote_to_bytes(payload)
+
+
+def _unwrap_image_redirect(url: str) -> str:
+    """Pull the real image URL out of a search-engine result/redirect URL."""
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.netloc.lower()
+    if not parsed.query or not any(marker in host for marker in _REDIRECT_HOSTS):
+        return url
+    params = urllib.parse.parse_qs(parsed.query)
+    for key in ("imgurl", "mediaurl", "image_url", "url"):
+        values = params.get(key)
+        if values and values[0].startswith(("http://", "https://")):
+            return values[0]
+    return url
+
+
+class MainWindow(InspectorMixin, QMainWindow):
+    def __init__(self, bot: Bot):
+        super().__init__()
+        self.bot = bot
+        self.title = "Pyaint"
+        self.setWindowTitle(self.title)
+        app_icon = os.path.join(paths.RESOURCE_ROOT, "assets", "pyaint.ico")
+        if os.path.exists(app_icon):
+            self.setWindowIcon(QIcon(app_icon))
+        self.resize(1320, 840)
+        self.setMinimumSize(940, 620)
+        self.setAcceptDrops(True)
+
+        self._initializing = True
+        self._config_path = paths.CONFIG_PATH
+        self.profile = Profile()
+        self.bot.profile = self.profile
+        self.tools = {}
+        self.draw_options = 0
+        self._mode = modes.DEFAULT_MODE
+        # True while a preset is being pushed into the widgets, so the change
+        # handlers do not immediately flip the selector back to Custom.
+        self._applying_sketch_preset = False
+        self._busy = False
+        self._last_url = ""
+        # Durable copy of the most recently loaded image, restored on startup.
+        self._last_image_path = ""
+        self._last_image_file = os.path.join(
+            os.path.dirname(self._config_path), "last_image.png"
+        )
+        self._pending_source = None
+        self._search_query = ""
+        self._search_continue = None
+        self._search_generation = 0
+        self._search_loading = False
+        self._provider = image_search.DEFAULT_PROVIDER
+        self._redraw_region = None
+        self._recipes = []
+        self._recipes_by_name = {}
+        self._imname = ""
+        self._detecting = False
+        self._detection_result = None
+        self._detection_image = None
+        # Per-target environment snapshots, so switching targets is instant.
+        self._environments = {}
+        # Per-target drawing settings/options, so each app keeps its own tuning.
+        self._drawing_by_target = {}
+        self._last_error = None
+        # The widget whose tooltip currently owns the guide note.
+        self._guide_owner = None
+
+        # Live preview state. ``_preview_generation`` drops stale worker
+        # results; the timer debounces planning while sliders move.
+        self._preview_view = "source"
+        self._preview_generation = 0
+        self._preview_busy = False
+        self._source_pixmap = None
+        self._source_meta = ""
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(300)
+        self._preview_timer.timeout.connect(self._run_preview)
+
+        # Setup disclosure: auto until the user takes over, then theirs.
+        self._setup_touched = False
+        self._setting_setup = False
+
+        self.signals = UiSignals()
+        self.signals.progress.connect(self._on_progress)
+        self.signals.status.connect(self._set_status)
+        self.signals.finished.connect(self._on_task_finished)
+        self.signals.image_ready.connect(self._set_image_path)
+        self.bot.progress_callback = self._emit_progress
+
+        # Resolve the theme before building widgets so the first paint is right.
+        self._theme_mode = "auto"
+        try:
+            self._theme_mode = str(
+                pyaint_config.load_config(self._config_path).get("theme", "auto")
+            )
+        except Exception:
+            pass
+        if self._theme_mode not in theme.THEME_MODES:
+            self._theme_mode = "auto"
+        self.tokens = theme.resolve_tokens(self._theme_mode)
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply(app, self.tokens)
+
+        self._build_ui()
+        app = QApplication.instance()
+        if app is not None:
+            # The guide note follows the control under the pointer or keyboard.
+            app.installEventFilter(self)
+        self._overlay = ProgressOverlay()
+        self._detection_overlay = DetectionOverlay()
+        self._detection_overlay.confirmed.connect(self._apply_detection)
+        self._detection_overlay.retry_requested.connect(self._retry_detection)
+        self._detection_overlay.teach_requested.connect(self._teach_detection)
+        self._detection_overlay.dismissed.connect(self._dismiss_detection)
+        self.signals.message.connect(self._overlay.show_message)
+        self._load_recipes()
+        self.load_config()
+        self._load_default_image()
+
+        hints = QGuiApplication.styleHints()
+        if hasattr(hints, "colorSchemeChanged"):
+            hints.colorSchemeChanged.connect(self._on_system_scheme_changed)
+        self._apply_theme()
+        self._initializing = False
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+    def _build_ui(self) -> None:
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(MARGIN, 10, MARGIN, MARGIN)
+        root.setSpacing(10)
+
+        # Header = wordmark/target bar plus the setup disclosure row directly
+        # beneath it. The row *is* the panel's top edge; the panel itself is a
+        # child overlay, so revealing it never moves the desk.
+        self._topbar = self._build_topbar()
+        self._setup_row = SetupRow()
+        self._setup_row.toggled.connect(self._on_setup_toggled)
+        header = QWidget()
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
+        header_layout.addWidget(self._topbar)
+        header_layout.addWidget(self._setup_row)
+        root.addWidget(header)
+
+        self._notice = NoticeBanner(central)
+        self._notice.shown.connect(self._position_overlays)
+        self._countdown_banner = CountdownBanner(central)
+        self._countdown_banner.shown.connect(self._position_overlays)
+        self._countdown_banner.captured.connect(self._begin_capture)
+        self._countdown_banner.cancelled.connect(self._cancel_auto_detect)
+
+        # One desk: a full-width canvas with the tool column drawn over it,
+        # then the docked voice bar.
+        self._inspector = self._build_inspector()
+        canvas = self._build_canvas()  # sets self._preview_stage
+        self._desk = DeskBody(self._inspector, canvas)
+        root.addWidget(self._desk, 1)
+        self._bottom_bar = self._build_bottom_bar()
+        root.addWidget(self._bottom_bar)
+
+        # Built last so it can sit above the desk without a raise() dance.
+        self._setup_panel = self._build_setup_panel(central)
+        self._setup_panel.hide()
+
+    def _build_topbar(self) -> QWidget:
+        bar = QWidget()
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
+
+        brand = QLabel("Pyaint")
+        brand.setObjectName("TopBarBrand")
+        layout.addWidget(brand)
+
+        label = QLabel("Drawing in")
+        label.setObjectName("TopBarLabel")
+        layout.addWidget(label)
+
+        self._target_combo = QComboBox()
+        self._target_combo.setMinimumWidth(220)
+        self._target_combo.setToolTip("Choose the app Pyaint draws in")
+        self._target_combo.currentIndexChanged.connect(self._on_target_changed)
+        layout.addWidget(self._target_combo)
+
+        layout.addStretch(1)
+
+        return bar
+
+    def _build_mode_block(self) -> QWidget:
+        """The mode picker, built for the top of the persistent column.
+
+        ``_mode_combo`` stays as the state holder (and the hidden driver used
+        by config and preset code); the rail is the visible control, and the
+        two stay in sync.
+        """
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self._mode_combo = QComboBox()
+        self._mode_combo.setVisible(False)
+        self._mode_combo.addItem("Layered", Bot.LAYERED)
+        self._mode_combo.addItem("Slotted", Bot.SLOTTED)
+        # Outline is retired from the rail, but the state holder keeps it so
+        # old configs, tests and internal callers can still exercise it.
+        self._mode_combo.addItem("Outline", Bot.OUTLINE)
+        self._mode_combo.addItem("Edge tracing", Bot.SKETCH)
+        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+
+        self._mode_rail = ModeRail(self._mode)
+        self._mode_rail.modeChanged.connect(self._on_mode_rail_changed)
+        layout.addWidget(self._mode_rail)
+        return box
+
+    def _build_sidebar_head(self, layout) -> None:
+        """Insert Mode and Look at the pane's top."""
+        layout.insertWidget(layout.count() - 1, self._build_mode_block())
+
+        look_box = QWidget()
+        look_layout = QVBoxLayout(look_box)
+        look_layout.setContentsMargins(0, 0, 0, 0)
+        look_layout.setSpacing(6)
+        look_label = QLabel("Look")
+        look_label.setObjectName("FieldLabel")
+        look_layout.addWidget(look_label)
+        self._look_control = PaperSegmented(
+            self._look_options(), self._look_current_key()
+        )
+        self._look_control.changed.connect(self._on_look_changed)
+        # Sketch's preset control is this same control (the preset name is
+        # carried by the control itself, not a second label).
+        self._sketch_preset_control = self._look_control
+        look_layout.addWidget(self._look_control)
+        layout.insertWidget(layout.count() - 1, look_box)
+
+    def _on_mode_rail_changed(self, mode: str) -> None:
+        index = self._mode_combo.findData(mode)
+        if index >= 0:
+            self._mode_combo.setCurrentIndex(index)
+
+    def _build_canvas(self) -> QWidget:
+        """The canvas column: the image strip + preview/gallery stage.
+
+        The action cluster lives in the docked bottom bar, so the canvas stays
+        a clean sheet on the desk.
+        """
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._build_content(), 1)
+        return host
+
+    def _update_guide(self, kicker: str | None = None, text: str | None = None) -> None:
+        """Set the voice note; with no text, describe the active mode."""
+        panel = getattr(self, "_guide", None)
+        if panel is None:
+            return
+        if text is None:
+            kicker = "About this mode"
+            text = self._MODE_GUIDE.get(self._mode, "")
+        panel.set_note(kicker or "", text)
+
+    @staticmethod
+    def _guide_text_for(widget) -> str:
+        try:
+            return (widget.toolTip() or "").strip()
+        except Exception:
+            return ""
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        """Swap the guide note to the hovered/focused control's own help."""
+        kind = event.type()
+        if kind in (QEvent.Enter, QEvent.FocusIn):
+            if isinstance(obj, QWidget) and obj.window() is self:
+                text = self._guide_text_for(obj)
+                if text:
+                    self._guide_owner = obj
+                    self._update_guide("", text)
+        elif kind in (QEvent.Leave, QEvent.FocusOut):
+            if self._guide_owner is obj:
+                self._guide_owner = None
+                self._update_guide()
+        return super().eventFilter(obj, event)
+
+    # -- Look (mode-aware preset) -------------------------------------
+    def _drawing_values(self) -> dict:
+        return {
+            "delay": self.bot.settings[Bot.DELAY],
+            "pixel_size": self.bot.settings[Bot.STEP],
+            "jump_delay": self.bot.settings[Bot.JUMP_DELAY],
+            "stroke_speed": self.bot.stroke_speed,
+            "frame_interval": self.bot.frame_interval,
+            "travel_delay": self.bot.travel_delay,
+        }
+
+    def _look_current_key(self) -> str:
+        if self._mode == Bot.SKETCH:
+            values = {
+                field: getattr(self.bot, field) for field in SKETCH_PRESET_FIELDS
+            }
+            return match_preset(values) or "custom"
+        return match_drawing_preset(self._drawing_values()) or "custom"
+
+    def _look_options(self):
+        """Options for the Look control, with each Look's tagline attached.
+
+        ``Custom`` appears only while it is the live state, so the tiles always
+        mean "pick one of these" and never "pick Custom".
+        """
+        options = []
+        for key, label in look_options(self._mode):
+            tagline = look_by_key(self._mode, key).get("tagline", "")
+            options.append((key, label, tagline))
+        if self._look_current_key() == "custom":
+            options.append(("custom", "Custom", ""))
+        return options
+
+    def _refresh_look_control(self) -> None:
+        control = getattr(self, "_look_control", None)
+        if control is None:
+            return
+        control.set_options(self._look_options(), self._look_current_key())
+
+    def _on_look_changed(self, key: str) -> None:
+        if self._initializing or key == "custom":
+            return
+        if self._mode == Bot.SKETCH:
+            self._on_sketch_preset_changed(key)
+            self._refresh_look_control()
+            return
+        values = drawing_preset_by_key(key)["settings"]
+        self.bot.settings = [
+            values["delay"],
+            values["pixel_size"],
+            values["jump_delay"],
+        ]
+        self.bot.stroke_speed = values["stroke_speed"]
+        self.bot.frame_interval = values["frame_interval"]
+        self.bot.travel_delay = values["travel_delay"]
+        self._refresh_drawing_widgets()
+        self._store_drawing_settings()
+        self._save_config()
+        self._schedule_preview(immediate=True)
+
+    def _build_content(self) -> QWidget:
+        """The Image panel: source controls stacked over preview/gallery."""
+        panel = QFrame()
+        panel.setObjectName("ImagePanel")
+        layout = QVBoxLayout(panel)
+        # The stack starts under the column (the sheet tuck); the header is
+        # indented so its title stays clear of the column.
+        layout.setContentsMargins(COLUMN_WIDTH + GAP, 12, 0, 12)
+        layout.setSpacing(8)
+
+        header_wrap = QWidget()
+        header_layout = QVBoxLayout(header_wrap)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
+        header_layout.addWidget(self._build_image_header())
+        layout.addWidget(header_wrap)
+
+        # The stage swaps between a committed image, the search gallery, and a
+        # message (searching / no results / failed).
+        self._image_stack = QStackedWidget()
+        self._image_stack.addWidget(self._build_preview_page())
+        self._gallery = MasonryGallery()
+        self._gallery.candidateSelected.connect(self._on_candidate_selected)
+        self._gallery.nearBottom.connect(self._load_more_results)
+        self._image_stack.addWidget(self._gallery)
+        self._image_message = QLabel("")
+        self._image_message.setObjectName("StageHint")
+        self._image_message.setAlignment(Qt.AlignCenter)
+        self._image_message.setWordWrap(True)
+        self._image_stack.addWidget(self._image_message)
+        layout.addWidget(self._image_stack, 1)
+        return panel
+
+    def _build_image_header(self) -> QWidget:
+        # One strip: title · back-to-results (when searching) · field · submit ·
+        # source. The dimensions/status meta lives on the stage header instead.
+        header = QFrame()
+        header.setObjectName("ImageHeader")
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(0, 0, 0, 4)
+        layout.setSpacing(8)
+
+        title = QLabel("Image")
+        title.setObjectName("ImageTitle")
+        layout.addWidget(title)
+
+        self._back_btn = QPushButton("← Results")
+        self._back_btn.setObjectName("ToolBarButton")
+        self._back_btn.setToolTip("Back to the search results")
+        self._back_btn.clicked.connect(self._show_results)
+        self._back_btn.setVisible(False)
+        layout.addWidget(self._back_btn)
+
+        self._url_edit = QLineEdit()
+        self._url_edit.setObjectName("SearchField")
+        self._url_edit.setPlaceholderText(
+            "Paste a URL or path, or type words to search"
+        )
+        self._url_edit.setToolTip(
+            "Image URL or file path — or type words to search online"
+        )
+        self._url_edit.returnPressed.connect(self._on_load_clicked)
+        # Browse is a trailing action *inside* the field, so it reads as a
+        # navigation helper for the path rather than a second submit button.
+        self._browse_action = self._url_edit.addAction(
+            icon("folder", self.tokens["fg"], 16), QLineEdit.TrailingPosition
+        )
+        self._browse_action.setToolTip("Browse for an image file…")
+        self._browse_action.triggered.connect(self._open_file)
+        self._url_edit.textChanged.connect(self._on_url_changed)
+        layout.addWidget(self._url_edit, 1)
+
+        self._load_btn = PaperButton("Load")
+        self._load_btn.setObjectName("LoadButton")
+        self._load_btn.setToolTip("Load the URL or path, or search for the words above")
+        self._load_btn.setEnabled(False)
+        self._load_btn.clicked.connect(self._on_load_clicked)
+        layout.addWidget(self._load_btn)
+
+        self._source_label = QLabel("Source")
+        self._source_label.setObjectName("SourceLabel")
+        layout.addWidget(self._source_label)
+
+        self._provider_combo = QComboBox()
+        self._provider_combo.setMinimumWidth(150)
+        for provider in image_search.PROVIDERS:
+            self._provider_combo.addItem(provider.name, provider.id)
+            self._provider_combo.setItemData(
+                self._provider_combo.count() - 1, provider.description, Qt.ToolTipRole
+            )
+        self._provider_combo.setToolTip(
+            "Where online image searches look. Openverse has the broadest coverage."
+        )
+        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        layout.addWidget(self._provider_combo)
+        return header
+
+    def _build_preview_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        # A bordered card mirrors the source header above, with the image on a
+        # recessed stage so light/transparent images stay visually contained.
+        # A paper sheet, not a rectangle: the artwork pane is the hero surface.
+        # The hero sheet: the only paper surface. The safe area is computed
+        # from the role, so content never leaks past the slight lean.
+        stage = PaperSurface("hero")
+        stage.setObjectName("PreviewStage")
+        self._preview_stage = stage
+        stage_layout = QVBoxLayout(stage)
+        safe = stage.content_margins()
+        # The sheet runs under the column (the tuck); content is indented so the
+        # image and labels always clear both the column and the jittered edge.
+        stage_layout.setContentsMargins(
+            safe.left(), safe.top(), safe.right(), safe.bottom()
+        )
+        stage_layout.setSpacing(8)
+
+        stage_header = QHBoxLayout()
+        stage_header.setContentsMargins(2, 0, 2, 0)
+        stage_header.setSpacing(8)
+        self._image_info = QLabel("No image loaded.")
+        self._image_info.setObjectName("ImageMeta")
+        stage_header.addWidget(self._image_info)
+        stage_header.addStretch(1)
+
+        # Source / Preview / Compare view switch. Making all three explicit
+        # (rather than a source/preview toggle) keeps the planned result obvious
+        # from the first launch.
+        self._view_source_btn = QPushButton("Source")
+        self._view_source_btn.setToolTip("Show only the loaded image.")
+        self._view_preview_btn = QPushButton("Preview")
+        self._view_preview_btn.setToolTip(
+            "Show only the planned result, updating as settings change."
+        )
+        self._view_split_btn = QPushButton("Compare")
+        self._view_split_btn.setToolTip(
+            "Show the source and the planned result side by side."
+        )
+        self._view_group = QButtonGroup(self)
+        self._view_group.setExclusive(True)
+        for view_id, button in enumerate(
+            (self._view_source_btn, self._view_preview_btn, self._view_split_btn)
+        ):
+            button.setObjectName("ViewToggle")
+            button.setCheckable(True)
+            self._view_group.addButton(button, view_id)
+        self._view_source_btn.setChecked(True)
+        self._view_group.idClicked.connect(self._on_view_changed)
+        toggle = QWidget()
+        toggle.setObjectName("ViewToggleGroup")
+        toggle_layout = QHBoxLayout(toggle)
+        toggle_layout.setContentsMargins(0, 0, 0, 0)
+        toggle_layout.setSpacing(0)
+        toggle_layout.addWidget(self._view_source_btn)
+        toggle_layout.addWidget(self._view_preview_btn)
+        toggle_layout.addWidget(self._view_split_btn)
+        stage_header.addWidget(toggle)
+
+        self._preview_spinner = QProgressBar()
+        self._preview_spinner.setRange(0, 0)
+        self._preview_spinner.setTextVisible(False)
+        self._preview_spinner.setFixedWidth(64)
+        self._preview_spinner.setFixedHeight(6)
+        self._preview_spinner.setVisible(False)
+        stage_header.addWidget(self._preview_spinner)
+
+        self._preview_meta = QLabel("No image")
+        self._preview_meta.setObjectName("StageMeta")
+        stage_header.addWidget(self._preview_meta)
+        stage_layout.addLayout(stage_header)
+
+        # Two labelled panes: source on the left, plan on the right, so
+        # "Compare" is a true before/after and the preview reads as a result.
+        panes = QHBoxLayout()
+        panes.setSpacing(8)
+        self._source_pane, self._source_view = self._build_preview_pane(
+            "Source", "The loaded image, unchanged.", droppable=True
+        )
+        self._preview_pane, self._preview = self._build_preview_pane(
+            "Preview result", "Live plan of the strokes Pyaint will draw."
+        )
+        self._source_opacity = QGraphicsOpacityEffect(self._source_view)
+        self._source_opacity.setOpacity(1.0)
+        self._source_view.setGraphicsEffect(self._source_opacity)
+        panes.addWidget(self._source_pane, 1)
+        panes.addWidget(self._preview_pane, 1)
+        stage_layout.addLayout(panes, 1)
+
+        # Dim the frame (rather than blanking it) while planning.
+        self._preview_opacity = QGraphicsOpacityEffect(self._preview)
+        self._preview_opacity.setOpacity(1.0)
+        self._preview.setGraphicsEffect(self._preview_opacity)
+
+        layout.addWidget(stage, 1)
+
+        self._preview_page = page
+        return page
+
+    def _build_preview_pane(self, title: str, hint: str, droppable: bool = False):
+        """Build a titled image pane; returns ``(pane, ImagePreview)``.
+
+        Only the source pane accepts dropped images; the result pane is output.
+        """
+        pane = QWidget()
+        pane_layout = QVBoxLayout(pane)
+        pane_layout.setContentsMargins(0, 0, 0, 0)
+        pane_layout.setSpacing(2)
+        label = QLabel(title)
+        label.setObjectName("PaneLabel")
+        label.setToolTip(hint)
+        pane_layout.addWidget(label)
+        view = ImagePreview()
+        if droppable:
+            view.fileDropped.connect(self._load_local_path)
+            view.remoteDropped.connect(self._load_dropped_url)
+            view.rawDropped.connect(self._load_dropped_bytes)
+        pane_layout.addWidget(view, 1)
+        return pane, view
+
+    # ------------------------------------------------------------------
+    # Live preview
+    # ------------------------------------------------------------------
+    def _plan_kwargs(self) -> dict:
+        """Snapshot every planner knob the preview needs (thread-safe)."""
+        return {
+            "stroke_distance": self.bot.stroke_distance,
+            "morphology": self.bot.outline_morphology,
+            "double_edges": self.bot.outline_double_edges,
+            "smooth_strength": self.bot.outline_smoothing,
+            "join_distance": self.bot.outline_join_distance,
+            "small_area": self.bot.outline_small_area,
+            "tiny_area": self.bot.outline_tiny_area,
+            "similar_color": self.bot.outline_similar_color,
+            "step_threshold": self.bot.outline_step_threshold,
+            "sketch_edge_source": self.bot.sketch_edge_source,
+            "sketch_smoothing": self.bot.sketch_smoothing,
+            "sketch_join_distance": self.bot.sketch_join_distance,
+            "sketch_join_turn": self.bot.sketch_join_turn,
+            "sketch_min_stroke": self.bot.sketch_min_stroke,
+            "sketch_epsilon": self.bot.sketch_epsilon,
+            "sketch_hue_merge": self.bot.sketch_hue_merge,
+            "sketch_hue_threshold": self.bot.sketch_hue_threshold,
+            "sketch_gradient_keep": self.bot.sketch_gradient_keep,
+            "canny_low": self.bot.canny_low,
+            "canny_high": self.bot.canny_high,
+            "canny_auto": self.bot.canny_auto,
+            "canny_aperture": self.bot.canny_aperture,
+            "canny_l2": self.bot.canny_l2,
+            "canny_color_edges": self.bot.canny_color_edges,
+        }
+
+    def _preview_usable(self) -> bool:
+        canvas = getattr(self.bot, "_canvas", None)
+        palette = getattr(self.bot, "_palette", None)
+        return bool(
+            self._has_image()
+            and canvas is not None
+            and palette is not None
+            and len(palette.colors) > 1
+        )
+
+    def _schedule_preview(self, immediate: bool = False) -> None:
+        """Debounce (or immediately run) a preview when one is being shown."""
+        if self._preview_view not in ("preview", "split"):
+            return
+        if not self._preview_usable():
+            if not self._initializing:
+                self._preview_meta.setText("Set up the canvas and palette first")
+            return
+        if immediate:
+            self._preview_timer.stop()
+            self._run_preview()
+        else:
+            self._preview_timer.start()
+
+    def _run_preview(self) -> None:
+        if (
+            self._preview_view not in ("preview", "split")
+            or not self._preview_usable()
+        ):
+            return
+        self._preview_generation += 1
+        generation = self._preview_generation
+        self._set_preview_busy(True)
+        self._preview_meta.setText("Updating\u2026")
+        task = PlanPreviewTask(
+            generation,
+            self._imname,
+            tuple(self.bot._canvas),
+            int(self.bot.settings[Bot.STEP]),
+            self.bot._palette,
+            self.bot.color_metric,
+            self.draw_options,
+            self._mode,
+            self._plan_kwargs(),
+        )
+        task.signals.ready.connect(self._on_preview_ready)
+        task.signals.failed.connect(self._on_preview_failed)
+        QThreadPool.globalInstance().start(task)
+
+    def _set_preview_busy(self, busy: bool) -> None:
+        if busy == self._preview_busy:
+            return
+        self._preview_busy = busy
+        self._preview_spinner.setVisible(busy)
+        self._preview_opacity.setOpacity(0.55 if busy else 1.0)
+
+    def _on_preview_ready(self, generation: int, qimage, meta: str) -> None:
+        if (
+            generation != self._preview_generation
+            or self._preview_view not in ("preview", "split")
+        ):
+            return
+        self._set_preview_busy(False)
+        self._preview.set_pixmap(QPixmap.fromImage(qimage))
+        self._preview_meta.setText(f"Preview result \u00b7 {meta}")
+
+    def _on_preview_failed(self, generation: int, message: str) -> None:
+        if (
+            generation != self._preview_generation
+            or self._preview_view not in ("preview", "split")
+        ):
+            return
+        self._set_preview_busy(False)
+        self._preview_meta.setText(f"Preview failed: {message}")
+
+    def _sync_view_visibility(self) -> None:
+        """Show the source and/or result panes for the current view."""
+        show_source = self._preview_view in ("source", "split")
+        show_preview = self._preview_view in ("preview", "split")
+        self._source_pane.setVisible(show_source)
+        self._preview_pane.setVisible(show_preview)
+
+    def _update_compare_available(self) -> None:
+        """Compare needs a source image; disable the choice when there is none."""
+        available = self._has_image()
+        self._view_split_btn.setEnabled(available)
+        if not available and self._preview_view == "split":
+            self._on_view_changed(0)
+
+    def _on_view_changed(self, view_id: int) -> None:
+        self._preview_view = {0: "source", 1: "preview", 2: "split"}.get(
+            view_id, "source"
+        )
+        self._view_source_btn.setChecked(self._preview_view == "source")
+        self._view_preview_btn.setChecked(self._preview_view == "preview")
+        self._view_split_btn.setChecked(self._preview_view == "split")
+        self._sync_view_visibility()
+        self._settle_view()
+        self.tools["preview_view"] = self._preview_view
+        if self._preview_view in ("preview", "split"):
+            self._schedule_preview(immediate=True)
+        else:
+            self._preview_generation += 1  # drop any in-flight result
+            self._set_preview_busy(False)
+            self._restore_source_preview()
+
+    def _settle_view(self) -> None:
+        """A short desk settle when the view changes: the pane eases in."""
+        self._view_animations = []
+        for effect in (
+            getattr(self, "_source_opacity", None),
+            getattr(self, "_preview_opacity", None),
+        ):
+            if effect is None:
+                continue
+            animation = QPropertyAnimation(effect, b"opacity", self)
+            animation.setDuration(180)
+            animation.setStartValue(0.35)
+            animation.setEndValue(1.0)
+            animation.setEasingCurve(QEasingCurve.OutCubic)
+            animation.start(QAbstractAnimation.DeleteWhenStopped)
+            self._view_animations.append(animation)
+
+    def _restore_source_preview(self) -> None:
+        if self._source_pixmap is not None:
+            self._source_view.set_pixmap(self._source_pixmap)
+        self._preview_meta.setText(self._source_meta or "No image")
+
+    def _tool_button(
+        self, text: str, icon_name: str, slot, tooltip: str = ""
+    ) -> QPushButton:
+        button = QPushButton(text)
+        button.setObjectName("InspectorButton")
+        button.setIcon(icon(icon_name, self.tokens["fg"], 16))
+        button.setIconSize(QSize(16, 16))
+        button.setToolTip(tooltip or text)
+        button.clicked.connect(slot)
+        return button
+
+    def _build_setup_panel(self, parent=None) -> QWidget:
+        """The revealed panel: why setup is not finished, and the two verbs."""
+        panel = SheetCard("SetupPanel", parent)
+        panel.setFixedHeight(56)
+        layout = QHBoxLayout(panel)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(10)
+
+        self._setup_reason = QLabel("")
+        self._setup_reason.setObjectName("SetupReason")
+        self._setup_reason.setWordWrap(True)
+        layout.addWidget(self._setup_reason, 1)
+
+        self._auto_btn = PaperButton("Find the canvas")
+        self._auto_btn.setToolTip("Find the canvas and palette from a screenshot")
+        self._auto_btn.clicked.connect(self.auto_detect)
+        layout.addWidget(self._auto_btn)
+
+        self._teach_btn = PaperButton("Pick the regions")
+        self._teach_btn.setToolTip("Click the canvas and palette corners yourself")
+        self._teach_btn.clicked.connect(self.open_setup)
+        layout.addWidget(self._teach_btn)
+
+        return panel
+
+    def _on_setup_toggled(self, checked: bool) -> None:
+        """A click on the row itself: from here on, the user owns the state."""
+        if self._setting_setup:
+            return
+        self._setup_touched = True
+        self._set_setup_open(checked)
+
+    def _set_setup_open(self, open_: bool) -> None:
+        self._setting_setup = True
+        try:
+            self._setup_row.set_open(open_)
+        finally:
+            self._setting_setup = False
+        if open_:
+            self._update_setup_reason()
+            self._setup_panel.show()
+            self._position_overlays()
+            self._setup_panel.raise_()
+        else:
+            self._setup_panel.hide()
+
+    def _update_setup_reason(self) -> None:
+        canvas = getattr(self.bot, "_canvas", None)
+        palette = getattr(self.bot, "_palette", None)
+        if canvas is None or palette is None or len(palette.colors) <= 1:
+            reason = "Pyaint doesn't know where your canvas is yet."
+        elif not self._has_image():
+            reason = "No image yet — drop one here, or search above."
+        else:
+            reason = "Set up. Start drawing, or review the regions first."
+        self._setup_reason.setText(reason)
+
+    def _position_overlays(self) -> None:
+        """Place the floating children: notice, countdown, setup panel.
+
+        None of them are in a layout, so showing one never moves the desk.
+        """
+        central = self.centralWidget()
+        if central is None or central.width() <= 2:
+            # Not laid out yet (a startup notice): showEvent will place it.
+            return
+        top = getattr(self, "_topbar", None)
+        top_y = (top.height() if top is not None else 56) + 12
+
+        countdown = getattr(self, "_countdown_banner", None)
+        if countdown is not None and countdown.isVisible():
+            countdown.adjustSize()
+            countdown.move(max(MARGIN, (central.width() - countdown.width()) // 2),
+                           top_y)
+            countdown.raise_()
+
+        notice = getattr(self, "_notice", None)
+        if notice is not None and notice.isVisible():
+            # Bottom-right, above the voice bar: never over the artwork.
+            notice.adjustSize()
+            bar = getattr(self, "_bottom_bar", None)
+            floor = bar.mapTo(central, QPoint(0, 0)).y() if bar is not None else central.height()
+            x = central.width() - MARGIN - notice.width()
+            y = floor - 10 - notice.height()
+            notice.move(max(MARGIN, x), max(top_y, y))
+            notice.raise_()
+
+        panel = getattr(self, "_setup_panel", None)
+        row = getattr(self, "_setup_row", None)
+        if panel is not None and row is not None and panel.isVisible():
+            # Full width of the row, but it stops at the tool column so the
+            # column header stays visible while setup is open. The row's
+            # bottom edge is still the panel's top edge.
+            origin = row.mapTo(central, QPoint(0, 0))
+            left = origin.x() + COLUMN_WIDTH + GAP
+            panel.setGeometry(left, origin.y() + row.height(),
+                              max(240, row.width() - COLUMN_WIDTH - GAP),
+                              panel.height())
+            panel.raise_()
+
+    def _build_bottom_bar(self) -> QWidget:
+        """The docked voice bar: guide note (left) + Start drawing (right)."""
+        bar = QFrame()
+        bar.setObjectName("GuideBar")
+        # A fixed height so swapping the note (tooltips vary in length) never
+        # resizes the pane; long text wraps and is clipped, not reflowed.
+        bar.setFixedHeight(68)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(10)
+
+        dot = QLabel("")
+        dot.setObjectName("GuideDot")
+        dot.setFixedSize(14, 14)
+        layout.addWidget(dot)
+
+        self._guide = GuidePanel()
+        layout.addWidget(self._guide, 1)
+        self._update_guide()
+
+        self._btn_start = PaperButton("Start drawing", primary=True)
+        self._btn_start.setObjectName("Primary")
+        self._btn_start.setIcon(icon("play", self.tokens["accent_fg"], 16))
+        self._btn_start.setIconSize(QSize(16, 16))
+        self._btn_start.clicked.connect(self._on_start)
+        layout.addWidget(self._btn_start)
+        return bar
+
+    # ------------------------------------------------------------------
+    # Recipes / targets
+    # ------------------------------------------------------------------
+    def _load_recipes(self) -> None:
+        self._recipe_issues = []
+        for recipe in load_user_recipes():
+            issues = validate_recipe(recipe)
+            if issues:
+                self._recipe_issues.append((recipe.id, issues))
+                log.info(f"[Recipes] '{recipe.id}' has issues: {issues}")
+        self._recipes = list_recipes()
+        self._recipes_by_name = {r.name: r for r in self._recipes}
+        self._target_combo.blockSignals(True)
+        self._target_combo.clear()
+        for recipe in self._recipes:
+            self._target_combo.addItem(recipe.name, recipe.id)
+        self._target_combo.blockSignals(False)
+        if self._recipe_issues:
+            names = ", ".join(rid for rid, _ in self._recipe_issues)
+            self._notice.show_notice(
+                f"{len(self._recipe_issues)} recipe(s) could not be fully loaded: {names}",
+                "warning",
+            )
+
+    def _on_target_changed(self, _index: int) -> None:
+        if self._initializing:
+            return
+        recipe_id = self._target_combo.currentData()
+        recipe = next((r for r in self._recipes if r.id == recipe_id), None)
+        if recipe is None:
+            return
+        previous = self.profile.target
+        if previous == recipe.id:
+            return
+
+        # Remember the old target's geometry and drawing prefs, then restore
+        # the new target's. Capture the incoming snapshot before applying the
+        # recipe: syncing the widgets can fire a save that re-snapshots the
+        # target, so reading it afterwards could pick up the recipe defaults.
+        self._environments[previous] = self.profile.snapshot_environment()
+        self._drawing_by_target[previous] = self._drawing_snapshot()
+        saved_drawing = self._drawing_by_target.get(recipe.id)
+        self.profile.target = recipe.id
+        if recipe.id in self._environments:
+            self.profile.apply_environment(self._environments[recipe.id])
+        else:
+            self.profile.apply_environment(Profile().snapshot_environment())
+
+        self._apply_recipe(recipe)
+        if saved_drawing is not None:
+            self._apply_drawing(saved_drawing)
+            self._drawing_by_target[recipe.id] = self._drawing_snapshot()
+        self._restore_environment()
+        self._store_drawing_settings()
+        self._save_config()
+        self._refresh_detection_status()
+        self._sync_env_ui()
+        if self._environment_ready():
+            self._notice.show_notice(f"Switched to {recipe.name}.", "success")
+            self._set_status(f"Target set to {recipe.name}.")
+        else:
+            self._notice.show_notice(
+                f'"{recipe.name}" is not set up yet \u2014 find its canvas and palette.',
+                "warning",
+                "Find the canvas" if recipe.detection else "Pick the regions",
+                self.auto_detect if recipe.detection else self.open_setup,
+            )
+            self._set_status(f"Target set to {recipe.name} \u2014 setup needed.")
+
+    def _apply_recipe(self, recipe) -> None:
+        apply_profile_defaults(self.profile, recipe)
+        self.bot.settings[:] = merge_drawing_settings(
+            self.bot.settings, recipe.drawing_settings or {}
+        )
+        if "jump_threshold" in (recipe.drawing_settings or {}):
+            self.bot.jump_threshold = int(recipe.drawing_settings["jump_threshold"])
+            self._jump_threshold.setValue(self.bot.jump_threshold)
+        # Outline pacing has no recipe defaults; reset it to the built-in values
+        # so one target's tune never leaks into another's.
+        self.bot.stroke_speed = 1500.0
+        self.bot.frame_interval = 1.0 / 60.0
+        self.bot.travel_delay = 0.05
+        self.bot.outline_morphology = False
+        self.bot.outline_double_edges = False
+        self.bot.outline_smoothing = 2
+        self.bot.outline_join_distance = 6.0
+        self.bot.outline_small_area = 12
+        self.bot.outline_tiny_area = 4
+        self.bot.outline_similar_color = 10.0
+        self.bot.outline_step_threshold = 10.0
+        self.draw_options = Bot.IGNORE_WHITE | Bot.IGNORE_TRANSPARENT
+        self.bot.skip_first_color = bool(recipe.skip_first_color)
+        self._refresh_drawing_widgets()
+        self._sync_env_ui()
+
+    def _select_target_id(self, recipe_id: str) -> None:
+        for index in range(self._target_combo.count()):
+            if self._target_combo.itemData(index) == recipe_id:
+                self._target_combo.setCurrentIndex(index)
+                return
+        self._target_combo.setCurrentIndex(0)
+
+    # ------------------------------------------------------------------
+    # Config
+    # ------------------------------------------------------------------
+    def load_config(self) -> None:
+        config = pyaint_config.load_config(self._config_path)
+        self.profile = Profile.from_config(config)
+        self.bot.profile = self.profile
+        self.tools = pyaint_config.split_preferences(config)
+        self.tools.setdefault("pause_key", "p")
+        envs = self.tools.get("environments")
+        self._environments = dict(envs) if isinstance(envs, dict) else {}
+        self._environments.setdefault(
+            self.profile.target, self.profile.snapshot_environment()
+        )
+
+        try:
+            recipe = get_recipe(self.profile.target)
+            self._select_target_id(recipe.id)
+        except Exception:
+            pass
+
+        self.bot.pause_key = str(self.tools.get("pause_key", "p"))
+        self._pause_edit.setText(self.bot.pause_key)
+
+        settings = self.tools.get("drawing_settings", {})
+        # Unreleased legacy key: drop it rather than migrate.
+        if isinstance(settings, dict):
+            settings.pop("sketch_gradient_gate", None)
+        self.bot.settings = [
+            settings.get("delay", 0.1),
+            settings.get("pixel_size", 12),
+            settings.get("jump_delay", 0.5),
+        ]
+        self.bot.jump_threshold = int(settings.get("jump_threshold", 5))
+        self._jump_threshold.setValue(self.bot.jump_threshold)
+
+        # White and transparent pixels are always skipped; the old toggles are
+        # gone so the flags are fixed at their documented defaults.
+        self.draw_options = Bot.IGNORE_WHITE | Bot.IGNORE_TRANSPARENT
+        self.bot.skip_first_color = bool(self.tools.get("skip_first_color", False))
+        mode = self.tools.get("draw_mode", modes.DEFAULT_MODE)
+        # Outline is retired from the rail; an old config opens in Edge tracing.
+        self._mode = (
+            mode if mode in modes.visible_modes() else modes.DEFAULT_MODE
+        )
+        self.bot.stroke_speed = float(settings.get("stroke_speed", 1500.0))
+        self.bot.frame_interval = max(
+            0.001, float(settings.get("frame_interval", 1.0 / 60.0))
+        )
+        self.bot.travel_delay = max(0.0, float(settings.get("travel_delay", 0.05)))
+        self.bot.outline_morphology = bool(settings.get("outline_morphology", False))
+        self.bot.outline_double_edges = bool(
+            settings.get("outline_double_edges", False)
+        )
+        self.bot.outline_smoothing = float(
+            settings.get("outline_smoothing", 2)
+        )
+        self.bot.outline_join_distance = float(
+            settings.get("outline_join_distance", 6.0)
+        )
+        self.bot.outline_small_area = int(settings.get("outline_small_area", 12))
+        self.bot.outline_tiny_area = int(settings.get("outline_tiny_area", 4))
+        self.bot.outline_similar_color = float(
+            settings.get("outline_similar_color", 10.0)
+        )
+        self.bot.outline_step_threshold = float(
+            settings.get("outline_step_threshold", 10.0)
+        )
+        self.bot.sketch_edge_source = str(
+            settings.get("sketch_edge_source", Bot.EDGE_EDGEDRAWING)
+        )
+        self.bot.sketch_smoothing = float(settings.get("sketch_smoothing", 3))
+        self.bot.sketch_join_distance = float(
+            settings.get("sketch_join_distance", 10.0)
+        )
+        self.bot.sketch_join_turn = float(settings.get("sketch_join_turn", 60.0))
+        self.bot.sketch_min_stroke = int(settings.get("sketch_min_stroke", 8))
+        self.bot.sketch_epsilon = float(settings.get("sketch_epsilon", 1.2))
+        self.bot.sketch_hue_merge = bool(settings.get("sketch_hue_merge", True))
+        self.bot.sketch_hue_threshold = float(
+            settings.get("sketch_hue_threshold", 15.0)
+        )
+        self.bot.sketch_gradient_keep = float(
+            settings.get("sketch_gradient_keep", 1.0)
+        )
+        self.bot.canny_low = float(settings.get("canny_low", 50))
+        self.bot.canny_high = float(settings.get("canny_high", 150))
+        self.bot.canny_auto = bool(settings.get("canny_auto", True))
+        self.bot.canny_aperture = int(settings.get("canny_aperture", 3))
+        self.bot.canny_l2 = bool(settings.get("canny_l2", True))
+        self.bot.canny_color_edges = bool(settings.get("canny_color_edges", False))
+
+        metric = self.tools.get("color_metric", DEFAULT_METRIC)
+        if metric not in METRICS:
+            metric = DEFAULT_METRIC
+        self.bot.color_metric = metric
+        metric_index = self._metric_combo.findData(metric)
+        self._metric_combo.blockSignals(True)
+        self._metric_combo.setCurrentIndex(metric_index if metric_index >= 0 else 0)
+        self._metric_combo.blockSignals(False)
+
+        last_url = self.tools.get("last_image_url", "")
+        if last_url:
+            self._last_url = last_url
+            self._url_edit.setText(last_url)
+        self._last_image_path = str(self.tools.get("last_image_path", ""))
+
+        provider = str(
+            self.tools.get("image_search_provider", image_search.DEFAULT_PROVIDER)
+        )
+        if provider not in image_search.PROVIDER_IDS:
+            provider = image_search.DEFAULT_PROVIDER
+        self._provider = provider
+        provider_index = self._provider_combo.findData(provider)
+        self._provider_combo.blockSignals(True)
+        self._provider_combo.setCurrentIndex(
+            provider_index if provider_index >= 0 else 0
+        )
+        self._provider_combo.blockSignals(False)
+
+        self._theme_mode = str(self.tools.get("theme", "auto"))
+        if self._theme_mode not in theme.THEME_MODES:
+            self._theme_mode = "auto"
+        self._theme_combo.blockSignals(True)
+        index = self._theme_combo.findData(self._theme_mode)
+        self._theme_combo.setCurrentIndex(index if index >= 0 else 0)
+        self._theme_combo.blockSignals(False)
+
+        if not settings:
+            # First run: start from the Cartoon preset rather than a wall of
+            # edge-detection defaults, so the first sketch looks good.
+            self._apply_sketch_preset_values("cartoon")
+
+        drawing_by_target = self.tools.get("drawing_by_target")
+        self._drawing_by_target = (
+            dict(drawing_by_target) if isinstance(drawing_by_target, dict) else {}
+        )
+        if self.profile.target not in self._drawing_by_target:
+            # Migrate the legacy global drawing prefs to the active target.
+            self._drawing_by_target[self.profile.target] = self._drawing_snapshot()
+        self._apply_drawing(self._drawing_by_target[self.profile.target])
+
+        self._restore_environment()
+        self._refresh_drawing_widgets()
+        self._sync_env_ui()
+        self._refresh_detection_status()
+        preview_view = str(self.tools.get("preview_view", "source"))
+        self._preview_view = (
+            preview_view
+            if preview_view in ("source", "preview", "split")
+            else "source"
+        )
+        self._view_source_btn.setChecked(self._preview_view == "source")
+        self._view_preview_btn.setChecked(self._preview_view == "preview")
+        self._view_split_btn.setChecked(self._preview_view == "split")
+        self._sync_view_visibility()
+        self._update_compare_available()
+        self._apply_theme()
+
+    def _restore_environment(self) -> None:
+        # Reset the live palette first so switching to an unconfigured target
+        # cannot silently keep the previous target's swatches.
+        self.bot._palette = None
+        palette = self.profile["Palette"]
+        try:
+            # Prefer the saved colour/position map: it rebuilds the palette
+            # offline. Re-sampling the saved box instead needs the target app
+            # to be open and uncovered at that exact spot, which is rarely true
+            # at startup -- that produced a one-colour palette and forced users
+            # to auto-detect again on every launch.
+            colors_pos = self._stored_palette_positions(palette)
+            if colors_pos:
+                self.bot.init_palette(colors_pos=colors_pos)
+            elif palette.get("box") and palette.get("rows") and palette.get("cols"):
+                box = palette["box"]
+                self.bot.init_palette(
+                    pbox=(box[0], box[1], box[2] - box[0], box[3] - box[1]),
+                    prows=palette["rows"],
+                    pcols=palette["cols"],
+                )
+        except Exception as e:
+            log.info(f"[Config] palette restore failed: {e}")
+        try:
+            if self.profile["Canvas"].get("box"):
+                self.bot.init_canvas(self.profile["Canvas"]["box"])
+        except Exception as e:
+            log.info(f"[Config] canvas restore failed: {e}")
+
+    @staticmethod
+    def _stored_palette_positions(palette) -> Optional[dict]:
+        """Rebuild ``{colour: (x, y)}`` from saved ``Palette.color_coords``.
+
+        Returns ``None`` when the entry is absent or malformed, so callers can
+        fall back to re-sampling the saved box.
+        """
+        coords = palette.get("color_coords")
+        if not isinstance(coords, dict) or not coords:
+            return None
+        positions = {}
+        try:
+            for key, value in coords.items():
+                colour = tuple(int(part) for part in str(key).strip("()").split(","))
+                position = tuple(int(part) for part in value)
+                if len(colour) < 3 or len(position) != 2:
+                    return None
+                positions[colour[:3]] = position
+        except (TypeError, ValueError):
+            return None
+        return positions or None
+
+    def _drawing_snapshot(self) -> dict:
+        """Current target's drawing settings/options, for per-target memory."""
+        return {
+            "settings": [float(v) for v in self.bot.settings],
+            "jump_threshold": int(self.bot.jump_threshold),
+            "stroke_speed": float(self.bot.stroke_speed),
+            "frame_interval": float(self.bot.frame_interval),
+            "travel_delay": float(self.bot.travel_delay),
+            "outline_morphology": bool(self.bot.outline_morphology),
+            "outline_double_edges": bool(self.bot.outline_double_edges),
+            "outline_smoothing": float(self.bot.outline_smoothing),
+            "outline_join_distance": float(self.bot.outline_join_distance),
+            "outline_small_area": int(self.bot.outline_small_area),
+            "outline_tiny_area": int(self.bot.outline_tiny_area),
+            "outline_similar_color": float(self.bot.outline_similar_color),
+            "outline_step_threshold": float(self.bot.outline_step_threshold),
+            "sketch_edge_source": str(self.bot.sketch_edge_source),
+            "sketch_smoothing": float(self.bot.sketch_smoothing),
+            "sketch_join_distance": float(self.bot.sketch_join_distance),
+            "sketch_join_turn": float(self.bot.sketch_join_turn),
+            "sketch_min_stroke": int(self.bot.sketch_min_stroke),
+            "sketch_epsilon": float(self.bot.sketch_epsilon),
+            "sketch_hue_merge": bool(self.bot.sketch_hue_merge),
+            "sketch_hue_threshold": float(self.bot.sketch_hue_threshold),
+            "sketch_gradient_keep": float(self.bot.sketch_gradient_keep),
+            "canny_low": float(self.bot.canny_low),
+            "canny_high": float(self.bot.canny_high),
+            "canny_auto": bool(self.bot.canny_auto),
+            "canny_aperture": int(self.bot.canny_aperture),
+            "canny_l2": bool(self.bot.canny_l2),
+            "canny_color_edges": bool(self.bot.canny_color_edges),
+            "draw_mode": self._mode,
+            "skip_first_color": bool(self.bot.skip_first_color),
+        }
+
+    def _apply_drawing(self, data) -> None:
+        """Apply a per-target drawing snapshot, then sync the widgets."""
+        if not isinstance(data, dict):
+            return
+        # Unreleased legacy key: drop it rather than migrate.
+        data.pop("sketch_gradient_gate", None)
+        settings = data.get("settings")
+        if isinstance(settings, (list, tuple)) and len(settings) >= 3:
+            self.bot.settings = [
+                float(settings[0]),
+                float(settings[1]),
+                float(settings[2]),
+            ]
+        if "jump_threshold" in data:
+            self.bot.jump_threshold = int(data["jump_threshold"])
+        if "stroke_speed" in data:
+            self.bot.stroke_speed = max(50.0, float(data["stroke_speed"]))
+        if "frame_interval" in data:
+            self.bot.frame_interval = max(0.001, float(data["frame_interval"]))
+        if "travel_delay" in data:
+            self.bot.travel_delay = max(0.0, float(data["travel_delay"]))
+        if "outline_morphology" in data:
+            self.bot.outline_morphology = bool(data["outline_morphology"])
+        if "outline_double_edges" in data:
+            self.bot.outline_double_edges = bool(data["outline_double_edges"])
+        if "outline_smoothing" in data:
+            self.bot.outline_smoothing = max(0.0, float(data["outline_smoothing"]))
+        if "outline_join_distance" in data:
+            self.bot.outline_join_distance = max(
+                0.0, float(data["outline_join_distance"])
+            )
+        if "outline_small_area" in data:
+            self.bot.outline_small_area = int(data["outline_small_area"])
+        if "outline_tiny_area" in data:
+            self.bot.outline_tiny_area = int(data["outline_tiny_area"])
+        if "outline_similar_color" in data:
+            self.bot.outline_similar_color = max(
+                0.0, float(data["outline_similar_color"])
+            )
+        if "outline_step_threshold" in data:
+            self.bot.outline_step_threshold = max(
+                0.0, float(data["outline_step_threshold"])
+            )
+        if "sketch_edge_source" in data:
+            self.bot.sketch_edge_source = str(data["sketch_edge_source"])
+        if "sketch_smoothing" in data:
+            self.bot.sketch_smoothing = max(0.0, float(data["sketch_smoothing"]))
+        if "sketch_join_distance" in data:
+            self.bot.sketch_join_distance = max(
+                0.0, float(data["sketch_join_distance"])
+            )
+        if "sketch_join_turn" in data:
+            self.bot.sketch_join_turn = max(
+                0.0, float(data["sketch_join_turn"])
+            )
+        if "sketch_min_stroke" in data:
+            self.bot.sketch_min_stroke = max(0.0, float(data["sketch_min_stroke"]))
+        if "sketch_epsilon" in data:
+            self.bot.sketch_epsilon = max(0.0, float(data["sketch_epsilon"]))
+        if "sketch_hue_merge" in data:
+            self.bot.sketch_hue_merge = bool(data["sketch_hue_merge"])
+        if "sketch_hue_threshold" in data:
+            self.bot.sketch_hue_threshold = max(
+                0.0, float(data["sketch_hue_threshold"])
+            )
+        if "sketch_gradient_keep" in data:
+            self.bot.sketch_gradient_keep = max(
+                0.0, float(data["sketch_gradient_keep"])
+            )
+        if "canny_low" in data:
+            self.bot.canny_low = max(0.0, float(data["canny_low"]))
+        if "canny_high" in data:
+            self.bot.canny_high = max(0.0, float(data["canny_high"]))
+        if "canny_auto" in data:
+            self.bot.canny_auto = bool(data["canny_auto"])
+        if "canny_aperture" in data:
+            self.bot.canny_aperture = int(data["canny_aperture"])
+        if "canny_l2" in data:
+            self.bot.canny_l2 = bool(data["canny_l2"])
+        if "canny_color_edges" in data:
+            self.bot.canny_color_edges = bool(data["canny_color_edges"])
+        self.draw_options = Bot.IGNORE_WHITE | Bot.IGNORE_TRANSPARENT
+        mode = data.get("draw_mode", modes.DEFAULT_MODE)
+        self._mode = (
+            mode if mode in modes.visible_modes() else modes.DEFAULT_MODE
+        )
+        self.bot.skip_first_color = bool(data.get("skip_first_color", False))
+        self._jump_threshold.setValue(self.bot.jump_threshold)
+        self._refresh_drawing_widgets()
+
+    def _store_drawing_settings(self) -> None:
+        settings = self.tools.setdefault("drawing_settings", {})
+        settings["delay"] = self.bot.settings[0]
+        settings["pixel_size"] = self.bot.settings[1]
+        settings["jump_delay"] = self.bot.settings[2]
+        settings["jump_threshold"] = self.bot.jump_threshold
+        settings["stroke_speed"] = float(self.bot.stroke_speed)
+        settings["frame_interval"] = float(self.bot.frame_interval)
+        settings["travel_delay"] = float(self.bot.travel_delay)
+        settings["outline_morphology"] = bool(self.bot.outline_morphology)
+        settings["outline_double_edges"] = bool(self.bot.outline_double_edges)
+        settings["outline_smoothing"] = float(self.bot.outline_smoothing)
+        settings["outline_join_distance"] = float(self.bot.outline_join_distance)
+        settings["outline_small_area"] = int(self.bot.outline_small_area)
+        settings["outline_tiny_area"] = int(self.bot.outline_tiny_area)
+        settings["outline_similar_color"] = float(self.bot.outline_similar_color)
+        settings["outline_step_threshold"] = float(self.bot.outline_step_threshold)
+        settings["sketch_edge_source"] = str(self.bot.sketch_edge_source)
+        settings["sketch_smoothing"] = float(self.bot.sketch_smoothing)
+        settings["sketch_join_distance"] = float(self.bot.sketch_join_distance)
+        settings["sketch_join_turn"] = float(self.bot.sketch_join_turn)
+        settings["sketch_min_stroke"] = int(self.bot.sketch_min_stroke)
+        settings["sketch_epsilon"] = float(self.bot.sketch_epsilon)
+        settings["sketch_hue_merge"] = bool(self.bot.sketch_hue_merge)
+        settings["sketch_hue_threshold"] = float(self.bot.sketch_hue_threshold)
+        settings["sketch_gradient_keep"] = float(self.bot.sketch_gradient_keep)
+        settings.pop("sketch_gradient_gate", None)
+        settings["canny_low"] = float(self.bot.canny_low)
+        settings["canny_high"] = float(self.bot.canny_high)
+        settings["canny_auto"] = bool(self.bot.canny_auto)
+        settings["canny_aperture"] = int(self.bot.canny_aperture)
+        settings["canny_l2"] = bool(self.bot.canny_l2)
+        settings["canny_color_edges"] = bool(self.bot.canny_color_edges)
+
+    def _save_config(self) -> None:
+        if self._initializing:
+            return
+        self.tools["pause_key"] = self.bot.pause_key
+        self.tools["skip_first_color"] = bool(self.bot.skip_first_color)
+        self.tools["draw_mode"] = self._mode
+        self.tools["preview_view"] = self._preview_view
+        self.tools["color_metric"] = self.bot.color_metric
+        self.tools["theme"] = self._theme_mode
+        self.tools["image_search_provider"] = self._provider
+        if self._last_url:
+            self.tools["last_image_url"] = self._last_url
+        self.tools["last_image_path"] = self._last_image_path
+        self._drawing_by_target[self.profile.target] = self._drawing_snapshot()
+        self.tools["drawing_by_target"] = self._drawing_by_target
+        self._environments[self.profile.target] = self.profile.snapshot_environment()
+        self.tools["environments"] = self._environments
+        payload = pyaint_config.build_payload(self.tools, self.profile)
+        if not pyaint_config.save_config(self._config_path, payload):
+            log.info(f"Failed to save config to {self._config_path}")
+            self._notice.show_notice(
+                f"Could not save settings to {os.path.basename(self._config_path)} "
+                "\u2014 changes will be lost on exit.",
+                "error",
+            )
+
+    # ------------------------------------------------------------------
+    # Widget <-> state sync
+    # ------------------------------------------------------------------
+    _MODE_GUIDE = {
+        Bot.LAYERED: (
+            "Layered paints each colour as smooth runs and lets later colours "
+            "cover the joins, so you get fewer, cleaner strokes."
+        ),
+        Bot.SLOTTED: (
+            "Slotted draws every run exactly, with no overdraw \u2014 precise, "
+            "but more strokes to watch."
+        ),
+        Bot.OUTLINE: (
+            "Outline traces the outlines of colour regions \u2014 it suits "
+            "drawings and flat art. Pick a Look, then press Start drawing. "
+            "Open Drawing only if the lines need it."
+        ),
+        Bot.SKETCH: (
+            "Edge tracing turns the image's edges into black line art. Pick "
+            "Cartoon for flat art or Realistic for photos, then tune only if "
+            "the result needs it."
+        ),
+    }
+
+    def _refresh_drawing_widgets(self) -> None:
+        for field, value in zip(self._setters, self.bot.settings):
+            field.set_value(value)
+        self._stroke_speed.set_value(float(self.bot.stroke_speed))
+        self._event_interval.set_value(round(self.bot.frame_interval * 1000))
+        self._travel_delay.set_value(float(self.bot.travel_delay))
+        self._outline_smoothing.set_value(float(self.bot.outline_smoothing))
+        self._outline_join_distance.set_value(float(self.bot.outline_join_distance))
+        self._outline_step_threshold.set_value(
+            float(self.bot.outline_step_threshold)
+        )
+        source_index = self._sketch_source.findData(self.bot.sketch_edge_source)
+        self._sketch_source.blockSignals(True)
+        self._sketch_source.setCurrentIndex(
+            source_index if source_index >= 0 else 0
+        )
+        self._sketch_source.blockSignals(False)
+        self._sketch_hue_merge.blockSignals(True)
+        self._sketch_hue_merge.setChecked(bool(self.bot.sketch_hue_merge))
+        self._sketch_hue_merge.blockSignals(False)
+        self._sketch_hue_threshold.set_value(float(self.bot.sketch_hue_threshold))
+        self._sketch_smoothing.set_value(float(self.bot.sketch_smoothing))
+        self._sketch_join_distance.set_value(float(self.bot.sketch_join_distance))
+        self._sketch_min_stroke.set_value(float(self.bot.sketch_min_stroke))
+        self._sketch_epsilon.set_value(float(self.bot.sketch_epsilon))
+        self._sketch_gradient_keep.set_value(
+            round(float(self.bot.sketch_gradient_keep) * 100)
+        )
+        self._canny_low.set_value(float(self.bot.canny_low))
+        self._canny_high.set_value(float(self.bot.canny_high))
+        self._canny_auto_toggle.blockSignals(True)
+        self._canny_auto_toggle.setChecked(bool(self.bot.canny_auto))
+        self._canny_auto_toggle.blockSignals(False)
+        self._canny_color_edges_toggle.blockSignals(True)
+        self._canny_color_edges_toggle.setChecked(bool(self.bot.canny_color_edges))
+        self._canny_color_edges_toggle.blockSignals(False)
+        self._sync_sketch_visibility()
+        self._detect_sketch_preset()
+        self._chk_double_edges.blockSignals(True)
+        self._chk_double_edges.setChecked(bool(self.bot.outline_double_edges))
+        self._chk_double_edges.blockSignals(False)
+        mode_index = self._mode_combo.findData(self._mode)
+        if mode_index >= 0:
+            self._mode_combo.blockSignals(True)
+            self._mode_combo.setCurrentIndex(mode_index)
+            self._mode_combo.blockSignals(False)
+        self._update_mode_controls()
+        if not self._initializing:
+            self._schedule_preview()
+
+    def _update_mode_controls(self) -> None:
+        """Show only the controls that apply to the chosen mode."""
+        runs = self._mode in (Bot.LAYERED, Bot.SLOTTED)
+        outline = self._mode == Bot.OUTLINE
+        sketch = self._mode == Bot.SKETCH
+        self._runs_controls.setVisible(runs)
+        self._outline_controls.setVisible(outline)
+        self._sketch_controls.setVisible(sketch)
+        self._continuous_controls.setVisible(outline or sketch)
+        self._update_guide()
+        if getattr(self, "_mode_rail", None) is not None:
+            self._mode_rail.set_mode(self._mode)
+        self._refresh_look_control()
+
+    def _sync_sketch_visibility(self) -> None:
+        """Canny thresholds apply only to the Canny source; the colour-difference
+        slider is enabled only while colour merging is on."""
+        canny = self._sketch_source.currentData() == Bot.EDGE_CANNY
+        manual = canny and not self._canny_auto_toggle.isChecked()
+        for widget in (
+            self._canny_auto_toggle,
+            self._canny_color_edges_toggle,
+            self._canny_low,
+            self._canny_high,
+        ):
+            widget.setVisible(canny)
+        self._canny_low.setEnabled(manual)
+        self._canny_high.setEnabled(manual)
+        self._sketch_hue_threshold.setEnabled(self._sketch_hue_merge.isChecked())
+
+    # -- Sketch presets -------------------------------------------------
+    def _read_sketch_settings(self) -> dict:
+        return {
+            field: getattr(self.bot, field) for field in SKETCH_PRESET_FIELDS
+        }
+
+    def _set_sketch_preset_ui(self, key: str) -> None:
+        preset = preset_by_key(key)
+        control = getattr(self, "_sketch_preset_control", None)
+        if control is not None:
+            control.set_value(key)
+        # Keep the Look control in step (Custom appears only while it is live).
+        self._refresh_look_control()
+
+    def _detect_sketch_preset(self) -> None:
+        """Show the preset the live knobs currently match, else Custom."""
+        self._set_sketch_preset_ui(
+            match_preset(self._read_sketch_settings()) or "custom"
+        )
+
+    def _apply_sketch_preset_values(self, key: str) -> bool:
+        """Push a preset's values onto the bot. False for the Custom entry."""
+        preset = preset_by_key(key)
+        if not preset["settings"]:
+            return False
+        for name, value in preset["settings"].items():
+            setattr(self.bot, name, value)
+        return True
+
+    def _on_sketch_preset_changed(self, key: str) -> None:
+        if self._initializing:
+            return
+        if not self._apply_sketch_preset_values(key):
+            # "Custom" just documents the current manual state.
+            self._set_sketch_preset_ui("custom")
+            return
+        self._applying_sketch_preset = True
+        try:
+            self._refresh_drawing_widgets()
+        finally:
+            self._applying_sketch_preset = False
+        self._set_sketch_preset_ui(key)
+        self._store_drawing_settings()
+        self._save_config()
+        self._schedule_preview(immediate=True)
+
+    def _sync_env_ui(self) -> None:
+        recipe = get_recipe(self.profile.target)
+        self._chk_mspaint.setVisible(bool(recipe.supports_mspaint_mode))
+        self._chk_mspaint.blockSignals(True)
+        self._chk_mspaint.setChecked(bool(self.profile.mspaint_mode.get("enabled")))
+        self._chk_mspaint.blockSignals(False)
+        self._refresh_readiness()
+
+    def _refresh_detection_status(self) -> None:
+        canvas = self.profile.canvas_rect()
+        palette = self.profile.palette_rect()
+        parts = []
+        if canvas:
+            parts.append(f"canvas {canvas}")
+        if palette:
+            parts.append(f"palette {palette}")
+        self._detection_label.setText(
+            "Detected: " + "; ".join(parts)
+            if parts
+            else "Pyaint doesn't know where your canvas is yet."
+        )
+        self._refresh_readiness()
+
+    def _environment_ready(self) -> bool:
+        return (
+            getattr(self.bot, "_canvas", None) is not None
+            and getattr(self.bot, "_palette", None) is not None
+        )
+
+    def _refresh_readiness(self) -> None:
+        recipe = get_recipe(self.profile.target)
+        environment_ready = self._environment_ready()
+        image_ready = self._has_image()
+        self._setup_row.update_steps(recipe.name, environment_ready, image_ready)
+        # The row opens by itself while something is missing -- but only until
+        # the user has touched it. After that the user's state wins, so the
+        # panel never re-opens under the pointer mid-session.
+        incomplete = not (environment_ready and image_ready)
+        if not self._setup_touched:
+            self._set_setup_open(incomplete)
+        elif self._setup_row.is_open():
+            self._update_setup_reason()
+        if not self._busy:
+            # Keep Start clickable: clicking it explains what is missing rather
+            # than leaving a greyed-out button with no reason.
+            self._btn_start.setEnabled(True)
+            self._btn_start.setToolTip(
+                "Start drawing"
+                if (environment_ready and image_ready)
+                else "Not ready yet — click to see what is missing"
+            )
+
+    @staticmethod
+    def _detection_checklist(detection) -> str:
+        lines = []
+        if getattr(detection, "canvas", None):
+            lines.append(f"✓ Canvas {detection.canvas}")
+        else:
+            lines.append("✗ Canvas not found")
+        if (
+            getattr(detection, "palette", None)
+            and detection.palette_rows
+            and detection.palette_cols
+        ):
+            lines.append(
+                f"✓ Palette {detection.palette_rows}×{detection.palette_cols} {detection.palette}"
+                " — dots mark sampled centres"
+            )
+        else:
+            lines.append("✗ Palette not found")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Setting slots
+    # ------------------------------------------------------------------
+    def _on_setting_changed(self, index: int, value: float) -> None:
+        if self._initializing:
+            return
+        self.bot.settings[index] = value
+        self._store_drawing_settings()
+        self._save_config()
+        self._schedule_preview()
+
+    def _on_mode_changed(self, _index: int) -> None:
+        if self._initializing:
+            return
+        self._mode = self._mode_combo.currentData()
+        self._update_mode_controls()
+        self._save_config()
+        self._schedule_preview()
+
+    def _on_outline_settings_changed(self, _value: float = 0.0) -> None:
+        if self._initializing:
+            return
+        self.bot.stroke_speed = max(50.0, float(self._stroke_speed.value()))
+        self.bot.frame_interval = max(
+            0.001, float(self._event_interval.value()) / 1000.0
+        )
+        self.bot.travel_delay = max(0.0, float(self._travel_delay.value()))
+        self.bot.outline_smoothing = max(
+            0.0, float(self._outline_smoothing.value())
+        )
+        self.bot.outline_join_distance = max(
+            0.0, float(self._outline_join_distance.value())
+        )
+        self.bot.outline_step_threshold = max(
+            0.0, float(self._outline_step_threshold.value())
+        )
+        self._store_drawing_settings()
+        self._save_config()
+        self._schedule_preview()
+
+    def _on_sketch_settings_changed(self, _value=0.0) -> None:
+        if self._initializing:
+            return
+        self.bot.sketch_edge_source = (
+            self._sketch_source.currentData() or Bot.EDGE_EDGEDRAWING
+        )
+        self.bot.sketch_hue_merge = bool(self._sketch_hue_merge.isChecked())
+        self.bot.sketch_hue_threshold = max(
+            0.0, float(self._sketch_hue_threshold.value())
+        )
+        self.bot.sketch_smoothing = max(0.0, float(self._sketch_smoothing.value()))
+        self.bot.sketch_join_distance = max(
+            0.0, float(self._sketch_join_distance.value())
+        )
+        self.bot.sketch_min_stroke = max(
+            0.0, float(self._sketch_min_stroke.value())
+        )
+        self.bot.sketch_epsilon = max(0.0, float(self._sketch_epsilon.value()))
+        self.bot.sketch_gradient_keep = (
+            float(self._sketch_gradient_keep.value()) / 100.0
+        )
+        self.bot.canny_auto = bool(self._canny_auto_toggle.isChecked())
+        self.bot.canny_color_edges = bool(
+            self._canny_color_edges_toggle.isChecked()
+        )
+        self.bot.canny_low = max(0.0, float(self._canny_low.value()))
+        self.bot.canny_high = max(0.0, float(self._canny_high.value()))
+        self._sync_sketch_visibility()
+        if not self._applying_sketch_preset:
+            # A manual tweak no longer matches the selected preset.
+            self._set_sketch_preset_ui("custom")
+        self._store_drawing_settings()
+        self._save_config()
+        self._schedule_preview()
+
+    def _on_sketch_source_changed(self, _index: int = 0) -> None:
+        self._sync_sketch_visibility()
+        self._on_sketch_settings_changed()
+
+    def _on_outline_double_edges_changed(self, checked: bool) -> None:
+        if self._initializing:
+            return
+        self.bot.outline_double_edges = bool(checked)
+        self._store_drawing_settings()
+        self._save_config()
+        self._schedule_preview()
+
+    def _on_metric_changed(self, _index: int) -> None:
+        if self._initializing:
+            return
+        self.bot.color_metric = self._metric_combo.currentData() or DEFAULT_METRIC
+        self._save_config()
+
+    def _on_mspaint_toggled(self, checked: bool) -> None:
+        if self._initializing:
+            return
+        self.profile.mspaint_mode["enabled"] = bool(checked)
+        self._save_config()
+
+    def _on_pause_key_changed(self, text: str) -> None:
+        if self._initializing:
+            return
+        self.bot.pause_key = text.strip() or "p"
+        self._save_config()
+
+    def _on_jump_threshold_changed(self, value: int) -> None:
+        if self._initializing:
+            return
+        self.bot.jump_threshold = int(value)
+        self._store_drawing_settings()
+        self._save_config()
+
+    def _on_theme_changed(self, _index: int) -> None:
+        if self._initializing:
+            return
+        self._theme_mode = self._theme_combo.currentData() or "auto"
+        self.tools["theme"] = self._theme_mode
+        self._apply_theme()
+        self._save_config()
+
+    def _on_system_scheme_changed(self, _scheme) -> None:
+        if self._theme_mode == "auto":
+            self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        """Re-resolve tokens, restyle the app, and recolour the icons."""
+        self.tokens = theme.resolve_tokens(self._theme_mode)
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply(app, self.tokens)
+        self._refresh_icons()
+
+    def _refresh_icons(self) -> None:
+        fg = self.tokens["fg"]
+        accent_fg = self.tokens["accent_fg"]
+        self._btn_precompute.setIcon(icon("download", fg, 16))
+        self._btn_test.setIcon(icon("zap", fg, 16))
+        self._btn_simple.setIcon(icon("play", fg, 16))
+        self._btn_start.setIcon(icon("play", accent_fg, 16))
+        self._browse_action.setIcon(icon("folder", fg, 16))
+
+    # ------------------------------------------------------------------
+    # Threading / tasks
+    # ------------------------------------------------------------------
+    def _emit_progress(self, completed: int, total: int, eta: float) -> None:
+        # Called from the drawing worker thread; Qt queues this onto the loop.
+        self.signals.progress.emit(int(completed), int(total), float(eta))
+
+    def _on_progress(self, completed: int, total: int, eta: float) -> None:
+        self._overlay.update_progress(completed, total, eta)
+        # Pause/stop are toggled by the global hotkey listener, so mirror the
+        # bot's pause state onto the overlay here.
+        self._overlay.set_paused(self.bot.paused)
+        self._set_status(f"Drawing {completed}/{total} strokes")
+
+    def _start_task(
+        self,
+        name: str,
+        work,
+        minimize: bool = False,
+        overlay: bool = False,
+        interruptible: bool = True,
+    ) -> None:
+        if self._busy:
+            return
+        self._busy = True
+        self._set_running(True, interruptible=interruptible)
+        self._set_status(f"{name}…")
+        if overlay:
+            self._overlay.show_overlay(f"{name}…", self.bot.pause_key or "p")
+        if minimize:
+            self.showMinimized()
+
+        def runner():
+            try:
+                work()
+            except Exception as exc:  # noqa: BLE001 - surface any task failure
+                log.info(f"[{name}] error: {exc}")
+                traceback.print_exc()
+                self._last_error = (name, str(exc))
+                self.signals.status.emit(f"{name} failed: {exc}")
+            finally:
+                self.signals.finished.emit(name)
+
+        threading.Thread(target=runner, daemon=True).start()
+
+    def _on_task_finished(self, _name: str) -> None:
+        self._busy = False
+        self._set_running(False)
+        self._overlay.hide_overlay()
+        if self.isMinimized():
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+        # A failure must not vanish with the overlay: surface it as a banner.
+        error = self._last_error
+        self._last_error = None
+        if error:
+            name, message = error
+            self._notice.show_notice(f"{name} failed: {message}", "error")
+
+    def _ready_countdown(self, name=None, seconds: int = 3) -> None:
+        """Explain the pre-draw pause instead of sleeping silently."""
+        if name is None:
+            name = get_recipe(self.profile.target).name
+        for remaining in range(int(seconds), 0, -1):
+            self.signals.message.emit(
+                f"Switch to {name} — drawing starts in {remaining}…"
+            )
+            time.sleep(1)
+
+    def _set_running(self, running: bool, interruptible: bool = True) -> None:
+        for button in (
+            self._btn_precompute,
+            self._btn_test,
+            self._btn_simple,
+            self._btn_start,
+            self._auto_btn,
+        ):
+            button.setEnabled(not running)
+        if not running:
+            self._overlay.set_paused(False)
+            self._refresh_readiness()
+
+    def _set_status(self, text: str) -> None:
+        # The status bar was removed (unreadable while the window is minimized
+        # during a draw). Progress is shown on the floating overlay instead;
+        # this keeps the textual trace in the log for debugging.
+        log.info(text)
+
+    # ------------------------------------------------------------------
+    # Image loading
+    # ------------------------------------------------------------------
+    def _load_default_image(self) -> None:
+        # Restore the image selected last session (a durable copy next to
+        # ``config.json``), else fall back to the bundled sample so a first run
+        # still has something to draw. The sample is never *remembered*: it
+        # stays a fallback rather than becoming the user's "last image", so a
+        # new bundle reaches existing installs and ``last_image.png`` is only
+        # ever a real pick.
+        path = self._last_image_path
+        if path and os.path.exists(path):
+            self._set_image_path(path)
+            return
+        if DEFAULT_SAMPLE and os.path.exists(DEFAULT_SAMPLE):
+            self._set_image_path(DEFAULT_SAMPLE, remember=False)
+            return
+        self._imname = ""
+        self._source_view.set_placeholder(
+            "Drag an image here, or use the field above."
+        )
+        self._preview.set_placeholder("The planned strokes appear here.")
+        self._preview_meta.setText("No image")
+        self._update_compare_available()
+        self._image_stack.setCurrentWidget(self._preview_page)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        # A notice raised while the window was still hidden has no layout to
+        # anchor to yet; place everything now that the desk has a real size.
+        self._position_overlays()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._position_overlays()
+
+    def _on_url_changed(self, text: str) -> None:
+        text = text.strip()
+        self._load_btn.setEnabled(bool(text))
+        # ``Load`` fetches a URL/path; ``Search`` looks online. The Source
+        # picker is only relevant to a search, so hide it while loading.
+        loading = bool(text) and (
+            text.lower().startswith(("http://", "https://"))
+            or os.path.exists(text)
+            or _looks_like_path(text)
+        )
+        self._load_btn.setText("Load" if (loading or not text) else "Search")
+        show_source = not loading
+        for widget in (getattr(self, "_source_label", None),
+                       getattr(self, "_provider_combo", None)):
+            if widget is not None:
+                widget.setVisible(show_source)
+
+    def _on_load_clicked(self) -> None:
+        text = self._url_edit.text().strip()
+        if not text:
+            self._set_status(
+                "Enter a URL, file path, or search words — or click the folder to browse."
+            )
+            return
+        if text.lower().startswith(("http://", "https://")):
+            self._start_task(
+                "Download image",
+                lambda: self._download_and_show(text),
+                interruptible=False,
+            )
+        elif os.path.exists(text):
+            self._load_local_path(text)
+        elif _looks_like_path(text):
+            self._set_status(f"File not found: {text}")
+        elif (
+            text == self._search_query
+            and self._image_stack.currentWidget() is self._gallery
+            and self._gallery.count()
+        ):
+            # Enter twice on the same query commits the first result.
+            first = self._gallery.first_candidate()
+            if first is not None:
+                self._on_candidate_selected(first)
+        else:
+            self._start_search(text)
+
+    # ------------------------------------------------------------------
+    # Image search gallery
+    # ------------------------------------------------------------------
+    def _start_search(self, query: str) -> None:
+        self._search_query = query
+        self._search_generation += 1
+        self._search_continue = None
+        self._search_loading = True
+        self._pending_source = None
+        self._gallery.clear()
+        provider_name = image_search.provider_name(self._provider)
+        self._image_message.setText(f'Searching {provider_name} for "{query}"…')
+        self._image_stack.setCurrentWidget(self._image_message)
+        self._back_btn.setVisible(False)
+        self._image_info.setText(f'Searching {provider_name} for "{query}"…')
+        self._request_search_page(None)
+
+    def _on_provider_changed(self, _index: int) -> None:
+        self._provider = (
+            self._provider_combo.currentData() or image_search.DEFAULT_PROVIDER
+        )
+        self._save_config()
+        # Re-run the last search so switching sources is immediately visible.
+        if self._search_query and self._image_stack.currentWidget() in (
+            self._gallery,
+            self._image_message,
+        ):
+            self._start_search(self._search_query)
+
+    def _request_search_page(self, cont) -> None:
+        from pyaint.ui.search_tasks import SearchPageTask
+
+        task = SearchPageTask(
+            self._search_query, cont, self._search_generation, provider=self._provider
+        )
+        task.signals.ready.connect(self._on_search_page)
+        task.signals.failed.connect(self._on_search_failed)
+        QThreadPool.globalInstance().start(task)
+
+    def _on_search_page(self, generation: int, page) -> None:
+        if generation != self._search_generation:
+            return
+        self._search_loading = False
+        self._search_continue = page.next_continue
+        if page.candidates:
+            self._gallery.add_candidates(page.candidates)
+            self._image_stack.setCurrentWidget(self._gallery)
+            self._back_btn.setVisible(False)
+            self._image_info.setText(
+                f"{self._gallery.count()} results — press Enter to use the first, "
+                "or click one."
+            )
+            self._start_thumbnails(page.candidates)
+        elif self._gallery.count() == 0:
+            provider_name = image_search.provider_name(self._provider)
+            self._image_message.setText(
+                f'No images found for "{self._search_query}" on {provider_name}.\n'
+                "Try different words, or switch the search source above."
+            )
+            self._image_stack.setCurrentWidget(self._image_message)
+            self._image_info.setText(
+                f'No images found for "{self._search_query}" on {provider_name}.'
+            )
+
+    def _on_search_failed(self, generation: int, message: str) -> None:
+        if generation != self._search_generation:
+            return
+        self._search_loading = False
+        self._image_message.setText(f"Image search failed: {message}")
+        self._image_stack.setCurrentWidget(self._image_message)
+        self._image_info.setText(f"Image search failed: {message}")
+
+    def _load_more_results(self) -> None:
+        if self._search_loading or not self._search_continue:
+            return
+        self._search_loading = True
+        self._request_search_page(self._search_continue)
+
+    def _start_thumbnails(self, candidates) -> None:
+        from pyaint.ui.search_tasks import ThumbnailTask
+
+        for candidate in candidates:
+            task = ThumbnailTask(candidate.thumb_url, self._search_generation)
+            task.signals.ready.connect(self._on_thumbnail_ready)
+            task.signals.failed.connect(self._on_thumbnail_failed)
+            QThreadPool.globalInstance().start(task)
+
+    def _on_thumbnail_ready(self, generation: int, url: str, image) -> None:
+        if generation != self._search_generation:
+            return
+        self._gallery.set_thumbnail(url, QPixmap.fromImage(image))
+
+    def _on_thumbnail_failed(self, generation: int, url: str) -> None:
+        # A thumbnail that won't decode just leaves an empty tile.
+        return
+
+    def _on_candidate_selected(self, candidate) -> None:
+        self._start_task(
+            "Download image",
+            lambda: self._commit_candidate(candidate),
+            interruptible=False,
+        )
+
+    def _commit_candidate(self, candidate) -> None:
+        """Worker: download the chosen result and hand it to the preview."""
+        data = image_search.fetch_bytes(candidate.url)
+        fd, path = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+            image.convert("RGBA").save(path, format="PNG")
+        self._pending_source = (candidate.title, candidate.source_url)
+        self.signals.image_ready.emit(path)
+
+    def _show_results(self) -> None:
+        if self._gallery.count():
+            self._image_stack.setCurrentWidget(self._gallery)
+            self._back_btn.setVisible(False)
+
+    def _download_and_show(self, url: str) -> None:
+        path = self._fetch_remote_image(url)
+        self._last_url = url
+        self.tools["last_image_url"] = url
+        self._save_config()
+        self.signals.image_ready.emit(path)
+
+    def _fetch_remote_image(self, url: str, timeout: int = 15, retries: int = 3) -> str:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+            },
+        )
+        for attempt in range(retries):
+            try:
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    content_type = response.headers.get("content-type", "").lower()
+                    if not content_type.startswith("image/"):
+                        raise ValueError(
+                            f"URL is not an image (content-type: {content_type})"
+                        )
+                    fd, temp_path = tempfile.mkstemp(suffix=".png")
+                    with os.fdopen(fd, "wb") as handle:
+                        handle.write(response.read())
+                    return temp_path
+            except urllib_error.HTTPError as exc:
+                if exc.code == 429 and attempt < retries - 1:
+                    time.sleep(min(2**attempt, 10))
+                    continue
+                raise ValueError(f"HTTP {exc.code}: {exc.reason}") from exc
+            except urllib_error.URLError as exc:
+                if attempt == retries - 1:
+                    raise ValueError(f"Network error: {exc.reason}") from exc
+        raise ValueError("Failed to fetch image")
+
+    def _open_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open image",
+            paths.PROJECT_ROOT,
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All files (*)",
+        )
+        if path:
+            self._load_local_path(path)
+
+    def _load_local_path(self, path: str) -> None:
+        """Load a local image and mirror it into the URL/path field.
+
+        Also forgets any remembered URL so a later restart doesn't resurrect a
+        remote source that is no longer the loaded image.
+        """
+        self._last_url = ""
+        self.tools["last_image_url"] = ""
+        if self._url_edit.text().strip() != path:
+            self._url_edit.setText(path)
+        self._set_image_path(path)
+
+    def _set_image_path(self, path: str, remember: bool = True) -> None:
+        try:
+            image = Image.open(path)
+        except Exception as exc:
+            self._set_status(f"Could not open image: {exc}")
+            return
+        self._imname = path
+        if remember:
+            self._remember_last_image(path)
+        self._source_pixmap = pil_to_qpixmap(image)
+        self._source_meta = f"{image.width} \u00d7 {image.height} px"
+        # Keep the source pane current so Compare and Source stay in sync.
+        self._source_view.set_pixmap(self._source_pixmap)
+        self._update_compare_available()
+        if self._preview_view in ("preview", "split"):
+            self._schedule_preview(immediate=True)
+        else:
+            self._preview_meta.setText(self._source_meta)
+        self._image_stack.setCurrentWidget(self._preview_page)
+        note = self._pending_source
+        self._pending_source = None
+        info = f"{os.path.basename(path)} — {image.width}×{image.height}px"
+        if note:
+            info += f" · {note[0]}"
+        self._image_info.setText(info)
+        self._back_btn.setVisible(self._gallery.count() > 0)
+        canvas = getattr(self.bot, "_canvas", None)
+        if canvas is not None:
+            has_cache, _ = self.bot.get_cached_status(
+                path, flags=self.draw_options, mode=self._mode
+            )
+            self._set_status(
+                "Cached result available"
+                if has_cache
+                else "No cache — will process live"
+            )
+        else:
+            self._set_status("Image loaded. Detect or teach the canvas next.")
+        self._refresh_readiness()
+
+    def _remember_last_image(self, path: str) -> None:
+        """Keep a durable copy of the loaded image and remember it in config.
+
+        A local path can move and a gallery/remote download lives in a temp
+        file, so the source is copied next to ``config.json`` and reloaded on
+        the next launch.
+        """
+        try:
+            if os.path.abspath(path) != os.path.abspath(self._last_image_file):
+                os.makedirs(os.path.dirname(self._last_image_file), exist_ok=True)
+                shutil.copyfile(path, self._last_image_file)
+            self._last_image_path = self._last_image_file
+        except Exception as exc:  # noqa: BLE001 - never block a load on this
+            log.info(f"[Config] could not persist last image: {exc}")
+            self._last_image_path = path
+        self.tools["last_image_path"] = self._last_image_path
+        self._save_config()
+
+    # Drag & drop
+    def dragEnterEvent(self, event):  # noqa: N802
+        if accepts_image_drop(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):  # noqa: N802
+        self._handle_image_drop(event.mimeData())
+
+    def _handle_image_drop(self, mime) -> None:
+        """Load an image dropped from anywhere: a file, a browser, or another app."""
+        path = local_path_from_mime(mime)
+        if path:
+            self._load_local_path(path)
+            return
+        remote = remote_source_from_mime(mime)
+        if remote:
+            self._load_dropped_url(remote)
+            return
+        raw = raw_image_from_mime(mime)
+        if raw is not None:
+            self._load_dropped_bytes(raw)
+            return
+        self._set_status("That drop did not contain an image.")
+
+    def _load_dropped_url(self, url: str) -> None:
+        """Load an http(s) or ``data:`` image URL dropped onto the window."""
+        if url.startswith("data:image/"):
+            try:
+                data = _decode_data_uri(url)
+            except Exception as exc:  # noqa: BLE001 - surface it instead of crashing
+                self._set_status(f"Could not read dropped image: {exc}")
+                return
+            self._load_dropped_bytes(data)
+            return
+        url = _unwrap_image_redirect(url)
+        self._url_edit.setText(url)
+        self._start_task(
+            "Download image",
+            lambda: self._download_and_show(url),
+            interruptible=False,
+        )
+
+    def _load_dropped_bytes(self, data: bytes) -> None:
+        """Persist raw dropped image bytes and load them like a local file."""
+        fd, path = tempfile.mkstemp(suffix=".png")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+        except Exception as exc:  # noqa: BLE001 - surface it instead of crashing
+            self._set_status(f"Could not save dropped image: {exc}")
+            return
+        self._load_local_path(path)
+
+    # ------------------------------------------------------------------
+    # Auto-detection
+    # ------------------------------------------------------------------
+    def auto_detect(self) -> None:
+        if self._detecting:
+            return
+        self._detection_overlay.hide_detection()
+        recipe = get_recipe(self.profile.target)
+        if not recipe.detection:
+            self._notice.show_notice(
+                f'No auto-detection is configured for "{recipe.name}".',
+                "info",
+                "Set up",
+                self.open_setup,
+            )
+            return
+        self._detecting = True
+        self._pending_recipe = recipe
+        self._detection_result = None
+        self._detection_image = None
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        for button in (
+            self._auto_btn,
+            self._btn_start,
+            self._btn_test,
+            self._btn_simple,
+            self._btn_precompute,
+        ):
+            button.setEnabled(False)
+        self._countdown_banner.start(seconds=4)
+
+    def _begin_capture(self) -> None:
+        self._countdown_banner.stop()
+        self.showMinimized()
+        # Let the minimize take effect before grabbing the screen.
+        QTimer.singleShot(400, self._finish_auto_detect)
+
+    def _cancel_auto_detect(self) -> None:
+        self._countdown_banner.stop()
+        self._detecting = False
+        self._set_running(False)
+        self._set_status("Find the canvas cancelled.")
+
+    def _finish_auto_detect(self) -> None:
+        try:
+            recipe = self._pending_recipe
+            image = self.bot.capture_screen()
+            detection = detect_target(recipe, image)
+            log.info(
+                f"[AutoDetect] {recipe.id}: canvas={detection.canvas} palette={detection.palette}"
+            )
+            self._present_detection(image, detection)
+            self._set_status("Review the detected regions, then use or discard them.")
+        except Exception as exc:  # noqa: BLE001
+            traceback.print_exc()
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            QMessageBox.critical(self, self.title, f"Find the canvas failed: {exc}")
+        finally:
+            self._detecting = False
+            self._set_running(False)
+
+    def _present_detection(self, image, detection) -> None:
+        """Review the detection on-screen, over the still-minimized target app."""
+        self._detection_image = image
+        self._detection_result = detection if detection else None
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            self.showNormal()
+            self._notice.show_notice(
+                "Could not open the detection review overlay.", "error"
+            )
+            return
+        summary = self._detection_checklist(detection)
+        if not detection:
+            summary += (
+                "\n\nMake sure the canvas is blank and the target app is maximized "
+                "on the primary monitor."
+            )
+        self._detection_overlay.show_detection(detection, image.size, summary, screen)
+
+    def _apply_detection(self) -> None:
+        self._detection_overlay.hide_detection()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        if not self._detection_result:
+            self._set_status("Nothing to apply.")
+            return
+        applied = self.bot.apply_detection(
+            self._detection_result, image=self._detection_image
+        )
+        # Show the same annotated regions in Setup that the review overlay
+        # showed, instead of leaving the preview panes empty.
+        self._store_detection_previews()
+        self._sync_env_ui()
+        self._refresh_detection_status()
+        self._store_drawing_settings()
+        self._save_config()
+        self._refresh_readiness()
+        self._schedule_preview(immediate=True)
+        palette = getattr(self.bot, "_palette", None)
+        canvas_found = "canvas" in applied
+        palette_found = "palette" in applied
+        canvas_expected = bool(getattr(self._detection_result, "canvas_expected", False))
+        palette_expected = bool(
+            getattr(self._detection_result, "palette_expected", False)
+        )
+
+        if palette_found and palette is not None and len(palette.colors) <= 1:
+            self._notice.show_notice(
+                "The palette sampled as a single colour — the target app may have "
+                "been covered. Run Find the canvas with the app in front, or pick the regions.",
+                "error",
+                "Find the canvas",
+                self.auto_detect,
+            )
+        elif palette_expected and not palette_found:
+            # Auto-detect is non-destructive: a manually taught palette is
+            # kept rather than wiped. Say so plainly so the result is not
+            # mistaken for a silent success or a lost setup.
+            if palette is not None:
+                message = (
+                    "Canvas detected, but the palette couldn't be found — keeping "
+                    "the palette you picked. Run Find the canvas with the app in front, or "
+                    "pick the regions again to update it."
+                    if canvas_found
+                    else "Find the canvas couldn't find the palette — keeping the "
+                    "palette you picked. Run Find the canvas with the target app in front, or "
+                    "pick the regions again to update it."
+                )
+                self._notice.show_notice(
+                    message, "warning", "Find the canvas", self.auto_detect
+                )
+            else:
+                message = (
+                    "Canvas detected, but the palette couldn't be found. Re-run "
+                    "Find the canvas with the target app in front, or pick the regions."
+                    if canvas_found
+                    else "Find the canvas didn't find a canvas or palette. Re-run with "
+                    "the target app maximized and in front, or pick the regions."
+                )
+                self._notice.show_notice(
+                    message, "error", "Find the canvas", self.auto_detect
+                )
+        elif canvas_expected and not canvas_found:
+            if self.profile.canvas_rect() is not None:
+                self._notice.show_notice(
+                    "Palette detected, but the canvas couldn't be found — keeping "
+                    "the canvas you picked. Run Find the canvas with a blank canvas in front, "
+                    "or pick the regions again to update it.",
+                    "warning",
+                    "Find the canvas",
+                    self.auto_detect,
+                )
+            else:
+                self._notice.show_notice(
+                    "Palette detected, but the canvas couldn't be found. Re-run "
+                    "Find the canvas with a blank canvas in front, or pick the regions.",
+                    "error",
+                    "Find the canvas",
+                    self.auto_detect,
+                )
+        elif palette_found and canvas_found:
+            self._notice.show_notice("Canvas and palette detected.", "success")
+        elif palette_found:
+            self._notice.show_notice("Palette detected.", "success")
+        elif canvas_found:
+            self._notice.show_notice("Canvas detected.", "success")
+        else:
+            self._notice.show_notice(
+                "Find the canvas didn't find a canvas or palette.",
+                "error",
+                "Find the canvas",
+                self.auto_detect,
+            )
+        self._set_status(f"Find the canvas applied ({', '.join(applied) or 'nothing'}).")
+
+    def _retry_detection(self) -> None:
+        self._detection_overlay.hide_detection()
+        if self._detecting:
+            return
+        self._detecting = True
+        QTimer.singleShot(300, self._finish_auto_detect)
+
+    def _teach_detection(self) -> None:
+        self._detection_overlay.hide_detection()
+        # Open Setup from the next event-loop turn. Opening a modal dialog from
+        # inside the overlay button's own event can leave the dialog unable to
+        # take focus (the app was only just activated by that same click).
+        QTimer.singleShot(0, self._open_setup_from_detection)
+
+    def _open_setup_from_detection(self) -> None:
+        # The window was minimized for the detection capture; make sure it is
+        # genuinely restored and active before opening a modal dialog, or the
+        # dialog can end up owned by a minimized window and become a hidden
+        # modal that blocks all input.
+        self.setWindowState(
+            (self.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive
+        )
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        # Seed the panes with the detected regions so manual teaching starts
+        # from the preview the user just reviewed.
+        self._store_detection_previews()
+        self.open_setup()
+
+    def _store_detection_previews(self) -> None:
+        """Persist the auto-detect screenshot as canvas/palette previews.
+
+        Uses the same renderer as manual teaching, so Setup shows the picture
+        the user approved instead of an empty pane.
+        """
+        image = self._detection_image
+        detection = self._detection_result
+        if image is None or detection is None:
+            return
+        target = self.profile.target
+        if detection.canvas:
+            x, y, w, h = detection.canvas
+            store_box_preview(
+                self.profile["Canvas"], "Canvas", (x, y, x + w, y + h), image, target
+            )
+        if detection.palette and detection.palette_rows and detection.palette_cols:
+            x, y, w, h = detection.palette
+            store_box_preview(
+                self.profile["Palette"],
+                "Palette",
+                (x, y, x + w, y + h),
+                image,
+                target,
+                detection.palette_rows,
+                detection.palette_cols,
+            )
+
+    def _dismiss_detection(self) -> None:
+        self._detection_overlay.hide_detection()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self._set_status("Find the canvas dismissed — no changes made.")
+
+    # ------------------------------------------------------------------
+    # Drawing actions
+    # ------------------------------------------------------------------
+    def _has_image(self) -> bool:
+        return bool(self._imname) and os.path.exists(self._imname)
+
+    def _require_image(self) -> bool:
+        if not self._has_image():
+            self._notice.show_notice(
+                "Load an image first.", "warning", "Choose image", self._open_file
+            )
+            return False
+        return True
+
+    def _resolve_cmap(self):
+        has_cache, cache_file = self.bot.get_cached_status(
+            self._imname, flags=self.draw_options, mode=self._mode
+        )
+        if has_cache:
+            data = self.bot.load_cached(cache_file)
+            if data:
+                return data["cmap"]
+        return self.bot.process(self._imname, flags=self.draw_options, mode=self._mode)
+
+    def _on_precompute(self) -> None:
+        if not self._require_image():
+            return
+        self._start_task("Saving the plan", self._precompute_work, interruptible=False)
+
+    def _precompute_work(self) -> None:
+        cache_file = self.bot.precompute(
+            self._imname, flags=self.draw_options, mode=self._mode
+        )
+        data = self.bot.load_cached(cache_file)
+        if data:
+            eta = self.bot.estimate_drawing_time(data["cmap"])
+            self.signals.status.emit(f"Cached — estimated drawing time {eta}.")
+        else:
+            self.signals.status.emit("Cached the stroke map.")
+
+    def _on_test_draw(self) -> None:
+        if not self._require_image():
+            return
+        self._start_task("Test draw", self._test_draw_work, minimize=True, overlay=True)
+
+    def _test_draw_work(self) -> None:
+        cmap = self._resolve_cmap()
+        total = sum(len(lines) for lines in cmap.values())
+        self.bot.terminate = False
+        self.bot.paused = False
+        self.bot.drawing = False
+        self.bot.draw_state = {
+            "color_idx": 0,
+            "line_idx": 0,
+            "segment_idx": 0,
+            "current_color": None,
+            "was_paused": False,
+        }
+        self.signals.status.emit(f"Test drawing {min(20, total)} lines.")
+        self._ready_countdown(seconds=2)
+        result = self.bot.test_draw(cmap, max_lines=min(20, total))
+        self.signals.status.emit(
+            "Test draw completed." if result == "success" else f"Test draw: {result}."
+        )
+
+    def _on_simple_test(self) -> None:
+        if getattr(self.bot, "_canvas", None) is None:
+            self._notice.show_notice(
+                "Canvas not set yet.", "warning", "Find the canvas", self._on_fix
+            )
+            return
+        self._start_task(
+            "Brush test", self.bot.simple_test_draw, minimize=True, interruptible=False
+        )
+
+    # ------------------------------------------------------------------
+    # Pre-flight
+    # ------------------------------------------------------------------
+    def _preflight_issues(self):
+        """Return ``(reason, action_text, action)`` for everything missing."""
+        issues = []
+        if not self._has_image():
+            issues.append(("no image loaded", "Choose image", self._open_file))
+        if getattr(self.bot, "_canvas", None) is None:
+            issues.append(("canvas not set", "Set up", self._on_fix))
+        palette = getattr(self.bot, "_palette", None)
+        if palette is None:
+            issues.append(("palette not set", "Set up", self._on_fix))
+        elif len(palette.colors) <= 1:
+            issues.append(
+                ("palette has only one colour", "Find the canvas", self.auto_detect)
+            )
+        return issues
+
+    def _on_fix(self) -> None:
+        recipe = get_recipe(self.profile.target)
+        if recipe.detection:
+            self.auto_detect()
+        else:
+            self.open_setup()
+
+    def _on_start(self) -> None:
+        issues = self._preflight_issues()
+        if issues:
+            summary = ", ".join(reason for reason, _, _ in issues)
+            _, action_text, action = issues[0]
+            self._notice.show_notice(
+                f"Not ready to draw — {summary}.", "warning", action_text, action
+            )
+            return
+        self._notice.clear()
+        self._start_task("Drawing", self._draw_work, minimize=True, overlay=True)
+
+    def _draw_work(self) -> None:
+        start = time.time()
+        cmap = self._resolve_cmap()
+        eta = self.bot.estimate_drawing_time(cmap)
+        self._ready_countdown()
+        self.signals.status.emit(f"Drawing — estimated {eta}.")
+        self.bot.terminate = False
+        self.bot.paused = False
+        self.bot.drawing = False
+        self.bot.draw_state = {
+            "color_idx": 0,
+            "line_idx": 0,
+            "segment_idx": 0,
+            "current_color": None,
+            "was_paused": False,
+        }
+        result = self.bot.draw(cmap)
+        elapsed = time.time() - start
+        actual = self.bot._format_time(elapsed)
+        if result == "success":
+            self.signals.status.emit(f"Finished — {actual} (estimated {eta}).")
+        elif result == "terminated":
+            self.signals.status.emit(f"Stopped — {actual}.")
+        else:
+            self.signals.status.emit(f"Drawing result: {result}.")
+        self.bot.terminate = False
+
+    # ------------------------------------------------------------------
+    # Region redraw
+    # ------------------------------------------------------------------
+    def pick_region(self):
+        from pyaint.ui.capture import pick_points
+
+        if getattr(self.bot, "_canvas", None) is None:
+            self._notice.show_notice(
+                "Canvas not set yet.", "warning", "Find the canvas", self._on_fix
+            )
+            return
+        try:
+            result = pick_points(
+                self, 2, "Click the UPPER-LEFT then LOWER-RIGHT corner of the region."
+            )
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, self.title, f"Region pick failed: {exc}")
+            return
+        if not result or len(result.points) < 2:
+            self._set_status("Region selection cancelled.")
+            return
+        (x1, y1), (x2, y2) = result.points
+        box = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+        self._redraw_region = box
+        self._region_label.setText(
+            f"Region: ({box[0]}, {box[1]}) → ({box[2]}, {box[3]})"
+        )
+        self._set_status("Region selected. Click 'Draw region'.")
+
+    def _on_draw_region(self) -> None:
+        if self._redraw_region is None:
+            self._notice.show_notice(
+                "Pick a region first.", "warning", "Pick region", self.pick_region
+            )
+            return
+        self._start_task(
+            "Region redraw", self._redraw_work, minimize=True, overlay=True
+        )
+
+    def _redraw_work(self) -> None:
+        region = self._redraw_region
+        image_region = self._canvas_to_image_region(region)
+        target = (region[0], region[1], region[2] - region[0], region[3] - region[1])
+        cmap = self.bot.process_region(
+            self._imname,
+            image_region,
+            flags=self.draw_options,
+            mode=self._mode,
+            canvas_target=target,
+        )
+        if not cmap:
+            self.signals.status.emit("No drawable content in the selected region.")
+            return
+        self._ready_countdown()
+        self.signals.status.emit("Redrawing region…")
+        self.bot.terminate = False
+        self.bot.paused = False
+        self.bot.drawing = False
+        self.bot.draw_state = {
+            "color_idx": 0,
+            "line_idx": 0,
+            "segment_idx": 0,
+            "current_color": None,
+            "was_paused": False,
+        }
+        result = self.bot.draw(cmap)
+        self.signals.status.emit(f"Region redraw: {result}.")
+        self.bot.terminate = False
+
+    def _canvas_to_image_region(self, canvas_region):
+        canvas = self.bot._canvas
+        cx, cy, cw, ch = canvas
+        x1, y1, x2, y2 = canvas_region
+        try:
+            image = Image.open(self._imname)
+            from pyaint import utils
+
+            fit_w, fit_h = utils.adjusted_img_size(image, (cw, ch))
+            offset_x = cx + (cw - fit_w) // 2
+            offset_y = cy + (ch - fit_h) // 2
+            sx = image.width / fit_w
+            sy = image.height / fit_h
+            ix1 = max(0, int((x1 - offset_x) * sx))
+            iy1 = max(0, int((y1 - offset_y) * sy))
+            ix2 = min(image.width, int((x2 - offset_x) * sx))
+            iy2 = min(image.height, int((y2 - offset_y) * sy))
+            if ix2 <= ix1 or iy2 <= iy1:
+                raise ValueError("region falls outside the drawn image")
+            return (ix1, iy1, ix2, iy2)
+        except Exception as exc:  # noqa: BLE001
+            log.info(f"[Redraw] falling back to raw region: {exc}")
+            return canvas_region
+
+    # ------------------------------------------------------------------
+    # Setup
+    # ------------------------------------------------------------------
+    def open_setup(self) -> None:
+        from pyaint.ui.setup_dialog import SetupDialog
+
+        # Never open the modal Setup dialog from a minimized/background window:
+        # it can become a hidden modal that blocks all input.
+        self.setWindowState(
+            (self.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive
+        )
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        recipe = get_recipe(self.profile.target)
+        dialog = SetupDialog(self, self.bot, self.profile, required_tools=recipe.tools)
+        if dialog.exec():
+            self.bot.profile = self.profile
+            self._sync_env_ui()
+            self._refresh_detection_status()
+            self._store_drawing_settings()
+            self._save_config()
+            self._set_status("Setup saved.")
+
+    # ------------------------------------------------------------------
+    # File management
+    # ------------------------------------------------------------------
+    def _on_reset_config(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            self.title,
+            "Reset everything to defaults?\n\nThis deletes config.json and all "
+            "taught canvas/palette/tool positions, clears the cached stroke "
+            "maps, and resets every preference. This cannot be undone.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        # Wipe the persisted files first...
+        try:
+            if os.path.exists(self._config_path):
+                os.remove(self._config_path)
+            for name in ("cache", "previews"):
+                folder = os.path.join(paths.PROJECT_ROOT, name)
+                if os.path.exists(folder):
+                    shutil.rmtree(folder)
+            if os.path.exists(self._last_image_file):
+                os.remove(self._last_image_file)
+        except Exception as exc:  # noqa: BLE001
+            self._set_status(f"Could not reset config: {exc}")
+            return
+        # ...then rebuild the live state from the now-absent config so the
+        # reset takes effect immediately instead of requiring a restart.
+        self._initializing = True
+        try:
+            self._environments = {}
+            self._drawing_by_target = {}
+            self.tools = {}
+            self._last_url = ""
+            self._last_image_path = ""
+            self._url_edit.clear()
+            self._imname = ""
+            self.load_config()
+            self._load_default_image()
+        except Exception as exc:  # noqa: BLE001
+            log.info(f"[Reset] reload failed: {exc}")
+        finally:
+            self._initializing = False
+        self._save_config()
+        self._refresh_readiness()
+        self._refresh_detection_status()
+        self._notice.show_notice(
+            "Everything was reset to defaults.", "success"
+        )
+        self._set_status("Settings reset to defaults.")
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+    def closeEvent(self, event):  # noqa: N802
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        self._overlay.hide_overlay()
+        self._detection_overlay.hide_detection()
+        self._countdown_banner.stop()
+        # Flush any pending settings. Most edits save eagerly, but a few (e.g.
+        # the loaded image path) can be pending, and a crash-free close is the
+        # last chance to persist them.
+        self._save_config()
+        try:
+            cache_dir = os.path.join(paths.PROJECT_ROOT, "cache")
+            if os.path.exists(cache_dir):
+                shutil.rmtree(cache_dir)
+        except Exception as exc:  # noqa: BLE001
+            log.info(f"Could not clean cache: {exc}")
+        event.accept()
+
+
+def run(bot: Bot) -> int:
+    """Create the application and show the main window (blocking)."""
+    from pyaint import dpi
+
+    # The package __init__ already claimed per-monitor awareness before
+    # pyautogui was imported; this is the belt-and-braces check in case the
+    # module was imported through an unusual path. Report it either way so a
+    # stretched window after a display change is diagnosable from the log.
+    awareness = dpi.enable_per_monitor_dpi()
+    log.info(f"[DPI] Process awareness: {awareness}.")
+    if not awareness.startswith("per-monitor"):
+        log.warning(
+            "[DPI] Pyaint is not per-monitor aware; Windows will bitmap-stretch "
+            "it after a display-scaling change. Restart Pyaint so it can claim "
+            "per-monitor awareness before pyautogui is imported."
+        )
+
+    app = QApplication.instance() or QApplication([])
+    app.setApplicationName("Pyaint")
+    from pyaint.ui import theme
+
+    theme.apply(app, theme.resolve_tokens("auto"))
+    window = MainWindow(bot)
+    window.show()
+    return app.exec()

@@ -30,6 +30,7 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+!pyaint.spec
 
 # Installer logs
 pip-log.txt
@@ -129,6 +130,13 @@ dmypy.json
 # Project specific
 /pyaint-env
 /cache
+/previews
+/last_image.png
+/INSTRUCTIONS.md
+
+# Python bytecode caches (any level, incl. pyaint/ and pyaint/ui/)
+__pycache__/
+*.py[cod]
 
 # IDEs
 .vscode/
@@ -145,11 +153,6 @@ Thumbs.db
 config.json
 /__pycache__
 /ui/__pycache__
-color_calibration.json
+/tests/__pycache__
 .roo/memory.md
-assets/Canvas_preview.png
-assets/Color Grid_preview.png
-assets/color_preview_spot_preview.png
-assets/Custom Colors_preview.png
-assets/Palette_preview.png
 .github/instructions/memory.instruction.md

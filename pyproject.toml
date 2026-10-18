@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyaint"
+# CalVer: YYYY.MINOR.PATCH. The single source of truth is pyaint.__version__;
+# see CONTRIBUTING.md#releasing before bumping it.
+dynamic = ["version"]
+description = "Transform images into automated brush strokes"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Trev241" }]
+keywords = [
+    "automation",
+    "pyautogui",
+    "image",
+    "drawing",
+    "skribbl",
+    "ms-paint",
+    "gimp",
+    "rpa",
+    "tkinter",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Artistic Software",
+    "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+    "Pillow",
+    "pyscreeze",
+    "PyAutoGUI",
+    "pynput",
+    "numpy",
+    "opencv-contrib-python",
+    "PySide6>=6.5",
+]
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.0"]
+dev = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/Trev241/pyaint"
+Repository = "https://github.com/Trev241/pyaint"
+Issues = "https://github.com/Trev241/pyaint/issues"
+Changelog = "https://github.com/Trev241/pyaint/blob/main/CHANGELOG.md"
+
+[project.scripts]
+pyaint = "pyaint.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["pyaint*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "pyaint.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"
+# Default to the fast, headless suite. The ``ui`` group builds real Qt widgets
+# (offscreen) and is the slow one, so it runs on demand with ``pytest -m ui``
+# and in CI -- not on every edit.
+addopts = "-m 'not ui'"
+markers = [
+    "ui: builds real Qt widgets (offscreen); excluded from the default run",
+]
