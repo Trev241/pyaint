@@ -12,6 +12,6 @@ screen-input driver, target recipes/locators and the PySide6 UI
 # scale after the user changes monitors or Windows scaling. See pyaint/dpi.py.
 from . import dpi as _dpi
 
-__version__ = "2026.1.0"
+__version__ = "2026.1.1"
 
 _dpi.enable_per_monitor_dpi()

@@ -11,6 +11,8 @@ and this project uses calendar versioning with a
 
 ## [Unreleased]
 
+## [2026.1.1] - 2026-10-18
+
 ### Changed
 - Docs: remove stale references.
 - README now points to the
